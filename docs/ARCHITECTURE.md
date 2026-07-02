@@ -1,0 +1,182 @@
+# Field Force Optimizer V11 — ARCHITECTURE.md
+
+Status: **draft v1, ready for implementation of mechanisms; see BUSINESS_RULES.md §15 for value
+decisions still pending**
+
+## 1. Product framing
+
+Not a Planner. A Decision Support System for Field Force management: recommends, evaluates,
+explains — final decisions always made by the manager. Planning is one of five engines, not the
+whole product.
+
+## 2. Guiding quality attributes (in priority order)
+
+1. Explainability / auditability — no black-box logic, every recommendation traceable
+2. Config-driven extensibility — a new business rule should be a new config row, not new code
+3. Long-term maintainability — favour readable, testable logic over clever/opaque algorithms
+4. Simplicity of daily use — one weekly ritual, few screens touched regularly
+5. Minimal external dependency — no APIs, no data sources beyond the four manual weekly imports
+
+## 3. Platform decision
+
+**Office Scripts (TypeScript) as the primary implementation language, VBA as a narrow, explicitly
+bounded escape hatch, Excel Power Query / Power Pivot (Data Model) as the historical/analytical
+layer.** No database, no cloud service beyond the existing Microsoft 365 tenant (OneDrive/
+SharePoint), no installed application, no external APIs.
+
+Rationale (full reasoning in conversation record; summary here):
+- Office Scripts chosen over VBA as default because business logic here (scoring, cadence
+  evaluation, compliance comparison) benefits materially from real testability — pure TypeScript
+  functions can be unit-tested outside Excel, which VBA cannot do practically. This directly
+  serves quality attribute #3.
+- VBA reserved for exactly two purposes: (a) a custom modal dialog for manual overrides, if native
+  table editing proves uncomfortable in practice, and (b) annual archive-file rollover + Power
+  Pivot Data Model refresh, because Office Scripts has no API for the Data Model.
+- Power BI and Power Automate deliberately out of scope for V11 (confirmed) — may be reconsidered
+  later for Reporting Engine, not required now.
+- Reassessed after every major scope addition (geo-aware weekly composition, Advisor trend
+  analysis) — conclusion unchanged each time: nothing added crosses the threshold where Excel
+  stops being the right tool. The one scaling risk identified (per-technician portfolio growth)
+  is already bounded by the candidate-pool-buffer mechanism (§6), not by portfolio size.
+
+## 4. Macro pipeline
+
+```
+IMPORT ENGINE → POS_MASTER → PLANNING ENGINE → COMPLIANCE ENGINE → REPORTING
+                     ↕                ↕
+                ADVISOR ENGINE ←──────┘   (reads POS_MASTER + COMPLIANCE_LOG + SCORE_LOG,
+                                            writes ADVISOR_LOG only — never writes the plan)
+```
+
+POS_MASTER is the single persistent source of truth. Imports only update it. Both Planning Engine
+and Advisor Engine read it; only Planning Engine (via the Plan lifecycle, §7) produces a plan.
+
+## 5. Engine responsibilities
+
+**Import Engine** — upserts RAW_DATA/PPT/ACTIVITY_PLAN/POS_STATUS/SalesApp into POS_MASTER and
+VISIT_HISTORY. Never overwrites manual fields. Idempotent on SalesApp visit UID (safe to
+re-import overlapping weeks). Import sources are disposable staging sheets, never read by any
+other engine.
+
+**Planning Engine** (internal stages, all portfolio-scoped — one technician's POS at a time, no
+cross-technician competition):
+```
+Campaign Engine   → campaign state per POS (current/target LOS/LOT, combine-opportunity flag)
+Business Engine    → Business Score + structured breakdown (SCORE_LOG), pure scoring, no filtering
+Candidate Engine    → eligible pool (Filters + Cadence gates), no scoring
+Decision Engine      → HARD cadence reservations first, then scored selection within
+                       capacity(technician, week), applying Campaign Economics timing
+Route/Geo Engine       → candidate-pool buffering + geo clustering shape the week's composition
+                         (not just a final tie-break — see BUSINESS_RULES.md §7); sequences days
+```
+Runs on a rolling horizon (`PLANNING_HORIZON_WEEKS`, default proposed = `CAMPAIGN_LENGTH`): only
+the nearest week becomes binding at Publish; the rest is a provisional, fully-recomputed forecast.
+
+**Advisor Engine** — diagnostic only, never plans. Evaluates `ADVISOR_RULES` against current
+POS_MASTER state and COMPLIANCE_LOG trends (`TREND_WINDOW_WEEKS`). Runs automatically at every
+Refresh, independent of whether Generate Plan is run.
+
+**Compliance Engine** — compares the immutable `plannedVisit` snapshot (taken at Publish) against
+`actualVisit` (from SalesApp import) for the closed week. Produces states, writes POS_MASTER
+current-compliance fields and COMPLIANCE_LOG (append-only).
+
+**Reporting Engine** — read-only aggregation over POS_MASTER / COMPLIANCE_LOG / SCORE_LOG /
+ADVISOR_LOG into Dashboard and periodic reports. Computes nothing new.
+
+## 6. Worked example — why GECO/CORN can safely be HARD guarantees
+
+Technician "Rek Lubomír": 531 POS in portfolio, 288 CORE-ish (category prefix `1`), 11 GECO,
+capacity ~40/week. A HARD reservation for 11 GECO POS in the week their deadline falls due is
+negligible against 40 slots. The same is not true for CORE (288 POS) — hardcoding a deadline for
+all of them would exceed capacity many times over, which is why CORE is proposed as
+SOFT_HIGH_WEIGHT rather than HARD (see BUSINESS_RULES.md §3).
+
+## 7. Plan lifecycle (state machine)
+
+```
+Draft (freely regenerated) → Review (manual edits, still freely regenerated)
+  → Published (plannedVisit snapshot frozen; this is the lock point, not Generate Plan, not a
+     day-of-week cutoff) → Active (week in progress; manual amendments allowed, recorded as
+     timestamped deltas, not silent rewrites) → Closed (compliance evaluated, permanent record)
+```
+
+## 8. POS_MASTER schema
+
+```
+Identity:            posId, terminalId
+Imported (RAW_DATA):  market, category, terminalType, classification, area, posArea, address,
+                       gpsX, gpsY, assignedTechnician, ppt
+Status:               status (Active|Closed), closedSinceWeek/Year
+Campaign state:        currentLosActivity, currentLotActivity, targetLosActivity,
+                       targetLotActivity, campaignGapStatus
+Visit facts:           lastRealVisitDate/Week, lastPlannedVisitDate, weeksSinceLastVisit,
+                       visitCountThisCampaign
+Scoring:               businessScore, scoreBreakdown (→ SCORE_LOG)
+Decision metadata:      plannerStatus, assignedWeek/Day, gpsGroup
+Manual layer:           managerOverride (force include/exclude/priority/technician), plannerNotes
+```
+
+## 9. Configuration taxonomy (six categories — every future rule fits one of these)
+
+```
+1. FILTERS         TERMINAL_RULES, CATEGORY_RULES (with explicit default row), MARKET_RULES
+2. CADENCE RULES    CADENCE_RULES (unifies CORE/GECO/CORN/Mandatory)
+3. PARETO/CLASS      PARETO_GROUPS (defines KA/IDT-above-threshold/Pareto tiers)
+4. SCORE PROFILES     SCORE_PROFILES + SEASONAL_STRATEGY (objective switching over time)
+5. ADVISOR RULES       ADVISOR_RULES (thresholds, severity, message templates)
+6. EXCEPTIONS            POS_MASTER manual fields — always highest priority
+```
+
+## 10. Sheet inventory (target: keep the weekly ritual to 3-4 screens)
+
+```
+Touched weekly:   IMPORT (staging), POS_MASTER, MANAGER_PLAN + Advisor panel, DASHBOARD
+Touched rarely:   CONFIG (multiple tables per sheet, grouped by taxonomy above),
+                  CAPACITY_OVERRIDE
+System-managed:   VISIT_HISTORY, SCORE_LOG, COMPLIANCE_LOG, ADVISOR_LOG, TECHNICIAN_PLAN (per
+                  technician, generated), annual archive files (VISIT_HISTORY_<year>.xlsx, etc.)
+```
+
+## 11. Historical/analytical scaling strategy
+
+"Hot" workbook stays bounded (POS_MASTER ~12-20k rows even after years). Append-only logs
+(VISIT_HISTORY, SCORE_LOG, COMPLIANCE_LOG) are rolled into annual archive files by the VBA
+year-end routine; Power Query combines current + archived files; Power Pivot Data Model powers
+Dashboard/Advisor trend queries across years without any single file growing unbounded. This is
+what makes the Office Script execution-time limit acceptable long-term — engines only ever operate
+on the current-year "hot" window, not full history.
+
+## 12. Migration plan from V10.5.5
+
+1. **Phase 0** — full script review (blocked, script not yet supplied in full — only an ~80-line
+   fragment seen so far). Map every existing function to its new engine home; anything not
+   understood is raised as a question before being touched, per the governing principle in
+   BUSINESS_RULES.md §0.
+2. **Phase 1** — build POS_MASTER + Import Engine standalone, reading the same sources V10.5.5
+   already uses, without touching OUTPUT_PLAN generation. Zero risk to production.
+3. **Phase 2** — port scoring into Business Engine with configurable weights; run in shadow mode
+   against V10.5.5's existing REASON-tag output for comparison.
+4. **Phase 3** — swap in Decision/Route Engine for real, run MANAGER_PLAN/TECHNICIAN_PLAN
+   side-by-side with legacy OUTPUT_PLAN for one full campaign cycle before sign-off.
+5. **Phase 4** — retire legacy generation path.
+
+## 13. Risks carried into implementation
+
+- Full V10.5.5 script still outstanding — Phase 0 cannot start without it.
+- Several BUSINESS_RULES.md items marked ★ OPEN affect Business Engine scoring output directly
+  (GECO/CORE/KA/IDT/Pareto scope and thresholds) — mechanisms can be built now, but should not go
+  live with guessed values.
+- Manual macro-security policy (VBA) confirmed enabled — no further action needed.
+- POS number reuse after closure — not yet confirmed; if numbers are ever recycled, POS_MASTER
+  history would silently merge two physical locations. Needs a yes/no answer before Import Engine
+  upsert logic is finalized.
+- SalesApp export mixes Technik and OZ roles (56 distinct executors seen vs. 27 technicians) —
+  Import Engine's visit-history mapping needs an explicit role filter, not yet defined.
+- SalesApp → LOS/LOT activity mapping not yet confirmed (purpose columns seen so far describe
+  visit stage, not clearly which campaign/product was serviced).
+
+## 14. Next step
+
+Implementation begins engine-by-engine per the migration plan (§12), starting with Phase 0 once
+the full V10.5.5 script is provided. Config table structures (§9) can be scaffolded in parallel
+since they do not depend on the open script review.
