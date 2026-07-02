@@ -780,13 +780,44 @@ def redesign_activity_plan(wb, tech_column_letter):
                 FormulaRule(formula=[f'AND({in_range_formula},$A{r}="LOT")'], fill=lot_fill),
             )
 
+    # "You are here" - a vertical band on whichever timeline column is the
+    # current week, so orientation in a several-months-wide timeline doesn't
+    # require counting columns. Safe to compare directly against
+    # ISOWEEKNUM(TODAY()): PlanningEngine.ts generates real calendar dates
+    # via isoMonday(CONTROL.YEAR, week) using this exact same week number
+    # (see ReportingEngine.ts's PLANNING READINESS section for the same
+    # reasoning applied elsewhere) - it is a real ISO week number, not an
+    # unrelated campaign-relative counter, under the existing documented
+    # single-year-per-run simplification (docs/BACKLOG.md).
+    # Header-row only (not every data cell) so it never competes with the
+    # LOS/LOT fill on the same cell - a header highlight is enough to orient
+    # "we are here" in a several-months-wide timeline without hiding which
+    # campaign type is active during the current week.
+    today_fill = PatternFill("solid", fgColor="FFF2A6")
+    for i, week in enumerate(range(week_start, week_end + 1)):
+        col_letter = get_column_letter(timeline_first_col + i)
+        ws.conditional_formatting.add(
+            f"{col_letter}1",
+            FormulaRule(formula=[f"{col_letter}1=ISOWEEKNUM(TODAY())"], fill=today_fill),
+        )
+
     ws.cell(n_rows + 3, 12, "LOS").fill = los_fill
     ws.cell(n_rows + 3, 13, "= aktivní LOS kampaň v daném týdnu")
     ws.cell(n_rows + 4, 12, "LOT").fill = lot_fill
     ws.cell(n_rows + 4, 13, "= aktivní LOT kampaň v daném týdnu")
-    ws.cell(n_rows + 5, 12,
+    ws.cell(n_rows + 5, 12, "").fill = today_fill
+    ws.cell(n_rows + 5, 13, "= aktuální týden (dnes)")
+    ws.cell(n_rows + 6, 12,
             "Souběh dvou kampaní ve stejném týdnu = obě barvy vidíš ve stejném sloupci u různých řádků "
             "(porovnej řádky svisle).").font = NOTE_FONT
+
+    # AutoFilter + banded rows on the editable data table (A:G, including
+    # the live estimate column) - a campaign list spanning many months is
+    # only actually usable if it can be filtered/sorted like the working
+    # screen it is, not just displayed.
+    ws.auto_filter.ref = f"A1:G{n_rows}"
+    apply_banded_rows(ws, 2, n_rows, 7)
+
     ws.freeze_panes = "C2"
 
 
@@ -1148,14 +1179,22 @@ def apply_all(wb, control_rows):
             continue
         if sheet_name == "DASHBOARD":
             continue  # build_dashboard_template already fully styled it
+        if sheet_name == "ACTIVITY_PLAN":
+            # freeze_below=False: redesign_activity_plan() already set
+            # freeze_panes="C2" (keep TYPE+ACTIVITY visible while scrolling
+            # through a several-months-wide timeline) - this generic pass's
+            # default freeze_below=True would silently reset it to "A2"
+            # (row-only freeze), which was a real bug: found while testing
+            # multi-month timeline orientation, it meant the campaign
+            # name/type scrolled off-screen exactly when the timeline was
+            # most useful.
+            style_header_row(ws, freeze_below=False)
+            color_editable_columns(ws, sheet_name)
+            add_dropdowns(ws, sheet_name)
+            continue
         style_header_row(ws)
         color_editable_columns(ws, sheet_name)
         add_dropdowns(ws, sheet_name)
-
-    if "ACTIVITY_PLAN" in wb.sheetnames:
-        # re-apply header styling (no freeze - handled by redesign's own
-        # freeze_panes) since the generic pass above re-touched row 1.
-        style_header_row(wb["ACTIVITY_PLAN"], freeze_below=False)
 
     for sheet_name in list(wb.sheetnames):
         protect_config_sheet(wb[sheet_name], sheet_name)
