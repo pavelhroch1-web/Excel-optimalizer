@@ -14,8 +14,8 @@ Scope: business logic only. No implementation detail here — see `ARCHITECTURE.
 - Config over code. Any rule below implemented as a config table row must stay a config row —
   changing it must never require touching engine code.
 - Preserve V10.5.5 behaviour unless a documented business reason justifies a change.
-  **Full V10.5.5 script has not yet been supplied — this remains a blocking gap for final
-  code-level migration review (see ARCHITECTURE.md §8).**
+  **Full V10.5.5 script reviewed (Phase 0 complete) — findings folded into the rule cards below.
+  One likely defect and one fragility found; both flagged for confirmation, not silently fixed.**
 
 ## 1. Rule card format
 
@@ -313,6 +313,43 @@ maximization). Inside a window (e.g. pre-Christmas), the configured profile appl
 breadth over raw value). No code path differs — only the active weight set differs.
 STATUS: CONFIRMED
 
+## 15a. Phase 0 findings from V10.5.5 (folded in, treated as config to tune during implementation)
+
+- CORE mechanism confirmed as SOFT_HIGH_WEIGHT in production (score += 100,000,000 for CORE,
+  += 10,000,000 for KATEGORIZACE=A, + PTT, + gap adjustment) — matches the recommended V11 default.
+- GECO and CORN do not exist anywhere in V10.5.5 — they are new rules for V11, not preserved
+  behaviour. No migration risk; still need scope/guarantee-type values (config, not blocking).
+- Mandatory 9PODNIK today = one guaranteed slot per 4-week campaign run, deduplicated by
+  street+city (best PTT wins per physical location) — a one-time pick, not a recurring interval.
+  V11 decision: keep this exact semantic as one CADENCE_RULES entry type, or fold into the general
+  recurring-interval model? Config choice, not a blocker.
+- Minimum visit period today: CORE = 2 weeks (`PREMIUM_GAP`) with an explicit override when the
+  campaign material changed in the meantime ("NEW CAMPAIGN OVERRIDE"); non-CORE = 8 weeks
+  (`STANDARD_GAP`), no override; neglect bonus (not enforcement) after 26 weeks. V11's
+  minimum/recommended/critical period concept should generalize this, preserving the
+  campaign-change override behaviour.
+- "Premium"/Pareto top tier today = top 20% **within each technician's own portfolio**
+  (relative ranking), not a global PPT threshold or network-wide percentile. This conflicts with
+  the GLOBAL/PER_REGION/PER_MARKET scope options discussed for PARETO_GROUPS — a PER_TECHNICIAN
+  scope was not previously considered and needs an explicit decision, since it changes plan
+  behaviour materially (fairness across portfolios vs. absolute network-wide strength).
+- Campaign Economics today = simple reorder (deprioritize top-tier POS when a campaign changes
+  within `SYNC_WINDOW_WEEKS`), not full multi-week LOS+LOT combine planning. Treated as the
+  starting point to extend, not a finished feature.
+- GPS "nearby extra" (`NEARBY_EXTRA=5` within `MAX_DISTANCE_KM`) already implements the
+  over-capacity nearby-visit rule from the original requirement ("~40+ visits near a shopping
+  centre even for B/C category"). Confirmed working concept to preserve.
+- **Likely defect**: `addNearby()` can push the selected set beyond weekly capacity by up to
+  `NEARBY_EXTRA`, but `used` tracking marks all selected POS (including the overflow) as consumed
+  even when `geoDays()` cannot physically place them into a day slot — silent loss of up to 5
+  POS/technician/week within a campaign run (never visited, never logged). Flagged for
+  confirmation before fixing in V11 (not fixed yet, per "ask before changing" rule).
+- **Fragility**: `KATEGORIZACE` column is located positionally (`katCols[1]`, second header
+  containing "KATEG") rather than by exact name — works today because of current column order in
+  RAW_DATA, but silently breaks if column order changes. V11 should use exact-name lookup.
+- PPT/PTT confirmed as a single field, embedded directly in RAW_DATA (`col("PTT")` fuzzy-matches
+  the `PTT` header) — no separate PPT import exists in the current script.
+
 ## 15. Summary of ★ OPEN items blocking full sign-off
 
 1. GECO scope + guarantee type
@@ -329,4 +366,5 @@ STATUS: CONFIRMED
 12. Full V10.5.5 script still not supplied (blocks final code-level migration review)
 
 None of these block starting implementation of the *mechanisms* (they are all config-table shaped
-decisions) — they block only entering final values for those specific config rows before go-live.
+decisions). Per agreement, these are now treated as config values to be tuned during
+implementation, not gates on starting engine-by-engine build-out.

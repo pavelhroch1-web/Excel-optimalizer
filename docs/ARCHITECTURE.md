@@ -148,10 +148,40 @@ on the current-year "hot" window, not full history.
 
 ## 12. Migration plan from V10.5.5
 
-1. **Phase 0** — full script review (blocked, script not yet supplied in full — only an ~80-line
-   fragment seen so far). Map every existing function to its new engine home; anything not
-   understood is raised as a question before being touched, per the governing principle in
-   BUSINESS_RULES.md §0.
+### Phase 0 — Code review complete. V10.5.5 → V11 map.
+
+Full script reviewed. Every function classified below. Nothing in "ZAHAZUJE SE" is deleted because
+it's disliked — each entry states the reason it's superseded, per the "ask why before removing"
+principle.
+
+| V10.5.5 element | Classification | Notes |
+|---|---|---|
+| `norm()` | **ZŮSTÁVÁ** | Diacritics-safe string matching, used everywhere, no reason to change |
+| `setting()` | **ZŮSTÁVÁ** (as CONFIG reader) | Generalize to read all six config categories, not just CONTROL |
+| `isoMonday()`, `easter()`, `isHoliday()`, `workDays()` | **ZŮSTÁVÁ** | Exactly the capacity date-engine agreed for V11; move under Planning Engine capacity calc |
+| `exactCol()` / `col()` | **ZŮSTÁVÁ** | Dynamic column mapping is a real strength, keep both (exact for stable fields, fuzzy for tolerant ones) |
+| `distance()` | **ZŮSTÁVÁ** | Reasonable lat/long-to-km approximation for this latitude band; no need for haversine at this scale |
+| `categoryRule()` | **REFAKTORUJE SE** | Logic (table lookup + `1*` → CORE default) moves into Filters/Cadence layer; default becomes an explicit CATEGORY_RULES row instead of hardcoded fallback |
+| Score formula (CORE/A/PTT/gap constants) | **REFAKTORUJE SE** | Same relative ordering (CORE > A > PTT > gap), reimplemented as configurable SCORE_PROFILES weights instead of magic constants |
+| Gap logic (`PREMIUM_GAP`/`STANDARD_GAP`/`NEGLECTED_AFTER`) | **REFAKTORUJE SE** | Becomes the minimum/recommended/critical period concept in Cadence Rules; campaign-change override behaviour explicitly preserved |
+| `mandatoryPodnik()` | **REFAKTORUJE SE** | Becomes one CADENCE_RULES entry (HARD, explicit-list scope); street+city dedup-by-best-PTT preserved as documented behaviour, not silently dropped |
+| PREMIUM top-20% (`groups[tech]` relative ranking) | **REFAKTORUJE SE — scope decision pending** | Mechanism kept, but PER_TECHNICIAN vs GLOBAL/PER_REGION scope is an open decision (BUSINESS_RULES.md §4) before finalizing PARETO_GROUPS |
+| `campaignChangeSoon()` | **REFAKTORUJE SE** | Kept as the seed of Campaign Economics, extended from single-week reorder to full rolling-horizon combine logic |
+| `addNearby()` (GPS EXTRA) | **REFAKTORUJE SE** | Core idea (over-capacity nearby bonus) preserved; capacity-overflow defect (BUSINESS_RULES.md §15a) fixed so selection never exceeds physical day slots |
+| `geoDays()` | **REFAKTORUJE SE** | Becomes the geo-clustering step of Route/Geo Engine; extended to buffer-pool-then-cluster (candidate pool 1.3×) rather than single-pass anchor+nearest |
+| `selectWeekPOS()` | **REFAKTORUJE SE** | Splits across Candidate Engine (eligibility) + Decision Engine (selection under capacity) instead of one function doing both |
+| `katCols[1]` positional KATEGORIZACE lookup | **ZAHAZUJE SE** | Fragility, not a business rule — replaced with `exactCol("KATEGORIZACE")` |
+| Single `main()` doing everything | **ZAHAZUJE SE** | Replaced by the five-engine pipeline (§4/§5); no behaviour lost, only structure |
+| GECO / CORN handling | **NOVĚ VZNIKÁ** | Did not exist in V10.5.5 at all |
+| Advisor Engine (all alert types) | **NOVĚ VZNIKÁ** | No equivalent in V10.5.5 |
+| Compliance Engine (plan vs. SalesApp actuals) | **NOVĚ VZNIKÁ** | V10.5.5 writes VISIT_HISTORY but never compares it back against what was planned |
+| POS_MASTER as persistent master record | **NOVĚ VZNIKÁ** | V10.5.5 recomputes everything from RAW_DATA each run; no persistent derived state |
+| SEASONAL_STRATEGY / SCORE_PROFILES | **NOVĚ VZNIKÁ** | Score today is one fixed formula, not swappable |
+| CAPACITY_OVERRIDE (dynamic capacity) | **NOVĚ VZNIKÁ** | V10.5.5 capacity is purely `workDays() × TARGET_DAY`, no manual override table |
+| Plan lifecycle (Draft/Published/Active/Closed) | **NOVĚ VZNIKÁ** | V10.5.5 has no concept of a plan state — it just overwrites OUTPUT_PLAN each run |
+| Manual override layer in POS_MASTER | **NOVĚ VZNIKÁ** | No manual-edit concept exists today |
+
+1. **Phase 0** — complete (table above).
 2. **Phase 1** — build POS_MASTER + Import Engine standalone, reading the same sources V10.5.5
    already uses, without touching OUTPUT_PLAN generation. Zero risk to production.
 3. **Phase 2** — port scoring into Business Engine with configurable weights; run in shadow mode
@@ -162,10 +192,16 @@ on the current-year "hot" window, not full history.
 
 ## 13. Risks carried into implementation
 
-- Full V10.5.5 script still outstanding — Phase 0 cannot start without it.
 - Several BUSINESS_RULES.md items marked ★ OPEN affect Business Engine scoring output directly
-  (GECO/CORE/KA/IDT/Pareto scope and thresholds) — mechanisms can be built now, but should not go
-  live with guessed values.
+  (GECO/CORE/KA/IDT/Pareto scope and thresholds) — by agreement these are treated as config values
+  tuned during implementation, not blockers, but must be set deliberately before go-live, not left
+  at placeholder defaults.
+- GPS-extra capacity-overflow defect (BUSINESS_RULES.md §15a) — confirmed likely unintended,
+  needs explicit sign-off before the fix changes production-visible behaviour (fewer silently
+  "lost" POS, but potentially different weekly visit counts than V10.5.5 produced historically).
+- PER_TECHNICIAN vs GLOBAL Pareto scope (BUSINESS_RULES.md §15a) is a real behavioural fork, not a
+  cosmetic config value — needs a deliberate decision, not a default guess, before Business Engine
+  scoring is finalized.
 - Manual macro-security policy (VBA) confirmed enabled — no further action needed.
 - POS number reuse after closure — not yet confirmed; if numbers are ever recycled, POS_MASTER
   history would silently merge two physical locations. Needs a yes/no answer before Import Engine
