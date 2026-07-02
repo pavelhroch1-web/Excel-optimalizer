@@ -87,24 +87,34 @@ they aren't lost.
   per-CADENCE_RULES-row parameter if different POS groups need different bonus radii. Not
   needed until there's a concrete case for it.
 
-## Approved, deferred until core is stable: Weekly Distribution Helper
-Product owner approved the architecture direction (docs/ARCHITECTURE.md section 16b territory,
-but narrower and concrete) but explicitly deprioritized it until FieldForceOptimizer's core
-workflow is considered done. Scope, exactly as specified, so it isn't rediscovered/re-litigated
-later:
-- A separate, standalone utility - NOT part of the planning architecture, not a companion app,
-  not a dashboard. Runs once, on demand, after Publish.
-- Reads TECHNICIAN_PLAN from the already-published workbook (a local file, e.g. on OneDrive/a
-  shared folder - no API, no live connection to Excel while it runs).
-- Generates one PDF per technician (named after the technician), saved to a folder the user picks.
-- Triggered from an "Export pro techniky" button in Excel (mechanism TBD at implementation time -
-  likely a narrow VBA/Office Scripts hook to launch the external tool, or simply "run this script"
-  as a manual step, matching the project's existing no-Power-Automate constraint).
-- Explicitly MUST NOT: read SALESAPP_IMPORT or any import-stage sheet, generate or influence any
-  plan, write anything back to the workbook, or contain any business logic (cadence, scoring,
-  compliance classification, etc.). Pure read of MANAGER_PLAN_PUBLISHED (via TECHNICIAN_PLAN's
-  already-published values)/formatting/PDF-per-technician split, nothing else.
-- Technically low-risk when the time comes: `tools/scaffold_workbook.py`/`tools/ux_style.py`
-  already open and read this exact workbook via openpyxl with no Excel installation required -
-  the distribution helper would reuse that same pattern, just writing PDFs instead of styling
-  cells.
+## Approved, deferred until core is stable: Distribution Client (formerly "Weekly Distribution Helper")
+Product owner approved this architecture direction twice, refining scope the second time - this
+entry supersedes the original PDF-only version. Explicitly deprioritized until
+FieldForceOptimizer's own core workflow is considered done. Recorded in full so the design isn't
+rediscovered/re-litigated later.
+
+**Core principle (non-negotiable, restated by product owner): FieldForceOptimizer remains the
+single source of truth for all planning business logic. This tool is a client over its published
+results - nothing more.** It must never contain cadence/scoring/compliance/capacity logic, never
+recompute anything, never write back to the workbook.
+
+**V1 scope, exactly as specified:**
+- User picks an Excel workbook (local file or on OneDrive - a file path, not a live connection).
+- Tool reads the already-published `TECHNICIAN_PLAN` from that workbook.
+- One click generates a separate **Excel file per technician** (not PDF - product owner's refined
+  choice), each containing only that technician's rows.
+- Filename convention: `<Prijmeni>_<Rok>_W<Tyden>.xlsx` (e.g. `Novák_2026_W32.xlsx`).
+- User picks the destination folder; tool writes all files there in one pass.
+- Explicitly MUST NOT: read `SALESAPP_IMPORT` or any import-stage sheet, generate or influence any
+  plan, recompute anything, or write anything back to the source workbook. Pure read of
+  `TECHNICIAN_PLAN`'s already-published values, split-by-technician, save-as-new-file. Nothing else.
+
+**Later, optional, only after V1 is proven useful** (product owner's own framing - "může přidat",
+not "bude mít"): search/filter within the tool, print support, additional export formats, a
+history view of past exports. All still pure presentation over already-published data - none of
+these change the "no business logic, ever" boundary above.
+
+**Technically low-risk when the time comes:** `tools/scaffold_workbook.py`/`tools/ux_style.py`
+already open and read/write this exact workbook via openpyxl with no Excel installation required -
+splitting `TECHNICIAN_PLAN`'s rows by technician into separate `.xlsx` files via the same library
+is a small, well-understood step, not a new capability this project would need to invent.
