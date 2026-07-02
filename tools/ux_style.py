@@ -19,7 +19,7 @@ get color-only "please don't hand-edit this" cues, never real protection -
 this trade-off is documented in the legend so it isn't a silent gap.
 """
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.formatting.rule import FormulaRule
+from openpyxl.formatting.rule import FormulaRule, DataBarRule
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter, column_index_from_string
 from openpyxl.comments import Comment
@@ -1057,6 +1057,15 @@ def _build_dashboard_charts(ws):
         series.graphicalProperties.solidFill = color
     ws.add_chart(workload_chart, "M17")
 
+    # Progress bar on Utilization % (K19:K32) - safe here (unlike the
+    # flowing detail sections, where the same column means different things
+    # in different sections) since this fixed block has exactly one meaning
+    # per column.
+    ws.conditional_formatting.add(
+        "K19:K32",
+        DataBarRule(start_type="num", start_value=0, end_type="num", end_value=150, color="375623"),
+    )
+
     # ---- REGIONAL OVERVIEW: label H35, header H36:I36, data H37:I48 ----
     ws["H35"] = "🗺 REGIONÁLNÍ PŘEHLED (completion %)"
     ws["H35"].font = SECTION_FONT
@@ -1077,6 +1086,12 @@ def _build_dashboard_charts(ws):
     regional_chart.set_categories(r_cats)
     regional_chart.series[0].graphicalProperties.solidFill = "2E75B6"
     ws.add_chart(regional_chart, "M35")
+
+    # Progress bar on Completion % (I37:I48) - same reasoning as above.
+    ws.conditional_formatting.add(
+        "I37:I48",
+        DataBarRule(start_type="num", start_value=0, end_type="num", end_value=100, color="2E75B6"),
+    )
 
 
 def find_tech_column_letter(pos_master_header_row):
