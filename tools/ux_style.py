@@ -181,8 +181,8 @@ LOG_SHEETS = {"COMPLIANCE_LOG", "ADVISOR_LOG", "VISIT_HISTORY_ACTUAL", "VISIT_HI
 # POS_MASTER by posId), it just wasn't visible/discoverable before.
 IMPORT_HUB_GUIDANCE = {
     "RAW_DATA": (
-        "Sem vlož export POS dat. Můžeš vkládat i více exportů za sebou (přidávej "
-        "pod poslední řádek, nepřepisuj) - Import Engine sloučí vše podle POS_ID."
+        "Sem vlož export POS dat (PPT zadání). Můžeš vkládat i více exportů za sebou "
+        "(přidávej pod poslední řádek, nepřepisuj) - Import Engine sloučí vše podle POS_ID."
     ),
     "POS_STATUS_IMPORT": (
         "Sem vlož export stavu POS (aktivní/uzavřené). Stejná struktura pokaždé - "
@@ -193,10 +193,26 @@ IMPORT_HUB_GUIDANCE = {
         "přidávej pod poslední řádek. Compliance Engine automaticky odstraní duplicity "
         "podle UID návštěvy a zachová historii - bezpečné i pro překrývající se exporty."
     ),
+    # Core working screens don't get their own title-banner rows the way
+    # HOME/DASHBOARD/IMPORT_HUB do - a banner row would push every real data
+    # row down by one and break every engine's "row 1 is the header"
+    # assumption for these two specifically (POS_MASTER/ACTIVITY_PLAN are
+    # both read positionally by ImportEngine.ts). A header-cell comment gets
+    # the same "what is this screen for" clarity without that risk - see the
+    # docstring on _nav_button for the same reasoning applied to buttons.
+    "POS_MASTER": (
+        "POS_MASTER = centrální evidence všech POS. Identifikace vždy podle POS_ID. "
+        "Provozovny se stejnou adresou (CORN/9PODNIK) se plánují jako jeden fyzický POS. "
+        "Editovat lze jen žlutě podbarvené sloupce (ruční poznámky/výjimky) - zbytek počítají enginy."
+    ),
+    "ACTIVITY_PLAN": (
+        "ACTIVITY_PLAN = plánování kampaní (LOS/LOT). Přidej nebo uprav kampaň a hned "
+        "vidíš odhad dopadu (počet návštěv, časová osa) vpravo - žádné přepočítávání ručně."
+    ),
 }
 
 
-def add_import_hub_guidance(wb):
+def add_sheet_purpose_notes(wb):
     for sheet_name, text in IMPORT_HUB_GUIDANCE.items():
         if sheet_name not in wb.sheetnames:
             continue
@@ -937,7 +953,7 @@ def apply_all(wb, control_rows):
     for sheet_name in list(wb.sheetnames):
         protect_config_sheet(wb[sheet_name], sheet_name)
 
-    add_import_hub_guidance(wb)
+    add_sheet_purpose_notes(wb)
     build_import_hub(wb)
 
     build_home(wb, {
