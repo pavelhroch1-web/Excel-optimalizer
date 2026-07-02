@@ -260,6 +260,77 @@ export function geoDays(
   return result;
 }
 
+// ============================================================================
+// COMPLIANCE (Planning Engine and Compliance Engine share this module so the
+// week arithmetic is defined exactly once and tested exactly once)
+// ============================================================================
+
+// Standard ISO-8601 week numbering (Monday-start weeks, week containing the
+// year's first Thursday is week 1). This is the inverse of PlanningEngine's
+// isoMonday()/workDays() (which go week -> date); this goes date -> week.
+export function isoWeekNumber(date: Date): { week: number; year: number } {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = (d.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+  d.setUTCDate(d.getUTCDate() - dayNum + 3); // shift to nearest Thursday
+  const isoYear = d.getUTCFullYear();
+  const firstThursday = new Date(Date.UTC(isoYear, 0, 4));
+  const firstDayNum = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNum + 3);
+  const week = 1 + Math.round((d.getTime() - firstThursday.getTime()) / (7 * 24 * 3600 * 1000));
+  return { week, year: isoYear };
+}
+
+// Simplified week-distance: treats every year as 52 weeks. Good enough for
+// comparing weeks within the same campaign/quarter; a visit planned in week
+// 52 of one year vs. week 1 of the next would be off by up to 1 week in
+// edge cases. Flagged here rather than hidden - not worth a full calendar
+// model for what is currently only used to classify "how late" a visit was.
+export function weeksBetween(week1: number, year1: number, week2: number, year2: number): number {
+  return week2 - week1 + (year2 - year1) * 52;
+}
+
+export type ComplianceStatus =
+  | "Splneno_vcas"
+  | "Splneno_pozde"
+  | "Nesplneno"
+  | "Pending";
+
+// "Pending" (not one of the four states in BUSINESS_RULES.md section 12) is
+// added here deliberately: a planned visit whose deadline hasn't arrived yet
+// is not the same as "Nesplneno" (failed). Without a live clock inside the
+// workbook, `latestKnownWeek/Year` (the newest week present in the SalesApp
+// import) is used as the reference "now" - a data-driven proxy, not a guess,
+// but worth flagging: this means Nesplneno is only ever assigned in
+// hindsight, once a later SalesApp import has been processed.
+export function determineComplianceStatus(
+  plannedWeek: number,
+  plannedYear: number,
+  actualWeeks: { week: number; year: number }[],
+  lateCutoffWeeks: number,
+  latestKnownWeek: number,
+  latestKnownYear: number
+): ComplianceStatus {
+  if (actualWeeks.length === 0) {
+    const elapsed = weeksBetween(plannedWeek, plannedYear, latestKnownWeek, latestKnownYear);
+    if (elapsed > lateCutoffWeeks) {
+      return "Nesplneno";
+    }
+    return "Pending";
+  }
+  const earliest = actualWeeks.reduce((min, w) =>
+    weeksBetween(plannedWeek, plannedYear, w.week, w.year) <
+    weeksBetween(plannedWeek, plannedYear, min.week, min.year)
+      ? w
+      : min
+  );
+  const delta = weeksBetween(plannedWeek, plannedYear, earliest.week, earliest.year);
+  if (delta <= 0) {
+    return "Splneno_vcas";
+  }
+  return "Splneno_pozde"; // late is still late even beyond lateCutoffWeeks -
+  // it happened, so it is not "Nesplneno" (which means it never happened)
+}
+
 export function resolveCapacity(
   overrideMap: { [key: string]: number },
   tech: string,

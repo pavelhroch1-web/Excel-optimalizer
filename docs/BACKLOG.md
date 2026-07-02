@@ -4,9 +4,14 @@ Non-blocking items found during implementation. Not stopping work for these; tra
 they aren't lost.
 
 ## Deferred engines (per agreed bottom-up build order)
-- SalesApp import + real VISIT_HISTORY (blocked on resolving the SalesApp -> LOS/LOT activity
-  mapping question, BUSINESS_RULES.md)
-- Compliance Engine (plan vs. actual, depends on the above)
+- SalesApp import + basic real VISIT_HISTORY_ACTUAL/Compliance Engine — DONE (ComplianceEngine.ts).
+  Per-POS LOS/LOT campaign attribution specifically remains blocked - see BUSINESS_RULES.md
+  "Campaign/product attribution per visit" - waiting on product-owner confirmation of the
+  ACTIVITY_PLAN-join design before implementing.
+- Technician-level compliance KPI reporting uses MANAGER_PLAN's own technician assignment
+  (sidesteps SalesApp "Executor" name-format mismatch entirely). Extra-visit rows keep the raw
+  SalesApp Executor string unresolved - fine for audit, not usable for a technician-identity KPI
+  if that's ever needed.
 - Advisor Engine (all alert types) — table structure exists (ADVISOR_RULES), no logic yet
 - Route/Geo Engine refinement: current PlanningEngine.ts does anchor+nearest day clustering
   (V10.5.5-equivalent), not yet the buffer-pool-then-cluster "compose the whole week as a

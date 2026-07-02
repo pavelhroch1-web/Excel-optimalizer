@@ -297,6 +297,27 @@ ACTION: ★ OPEN — proposed: still logged as Navíc_evidováno on the visiting
 cross-reference note; does not affect the assigned technician's compliance either way
 STATUS: ★ OPEN
 
+**RULE: Pending state (implementation addition, not a business-logic change)**
+A planned visit whose deadline hasn't arrived yet is not "Nesplneno" (failed) - it just hasn't
+happened yet. `determineComplianceStatus()` (office-scripts/shared/core.ts) returns `Pending` in
+that case, only resolving to `Nesplneno` once `COMPLIANCE_LATE_CUTOFF_WEEKS` has actually elapsed
+relative to the newest week present in the SalesApp data (a data-driven proxy for "now", since the
+workbook has no live clock). This is bookkeeping needed to implement the four named states
+correctly, not a fifth business outcome exposed to the manager.
+STATUS: CONFIRMED (implementation necessity)
+
+**RULE: Campaign/product attribution per visit — BLOCKED on input data**
+The SalesApp export was checked column-by-column (37 columns) for a structured field naming which
+LOS/LOT campaign a visit serviced. None exists — campaign names appear only in inconsistent free-
+text notes (`OZ - Ostatní (do textu)`, `Technik/OZ - Poznámka`), which cannot be parsed reliably
+without guessing. Proposed (not implemented) robust alternative: derive the serviced campaign from
+`ACTIVITY_PLAN`'s week-based schedule, crossed with the `Nabeh kampane` (Ano/Ne) signal — i.e. "a
+Nabeh-kampane=Ano visit in week W serviced whatever LOS/LOT was active per ACTIVITY_PLAN in week
+W." This is a business interpretation of ambiguous data, not a technical detail — needs explicit
+product-owner sign-off before implementing.
+STATUS: ★ OPEN — blocks per-POS LOS/LOT compliance breakdown specifically; does NOT block basic
+plan-vs-actual compliance (Splneno/pozde/Nesplneno/Navic), which only needs POS+week matching.
+
 **RULE: Compliance aggregation**
 ACTION: rolled up by week, month, per technician, and network-wide; feeds Advisor Engine trend
 detection over a configurable `TREND_WINDOW_WEEKS` (default proposed: 4)

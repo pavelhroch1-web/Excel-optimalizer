@@ -221,7 +221,13 @@ principle.
   Cadence (CORE + config-driven Mandatory), Pareto (PER_TECHNICIAN), campaign hold-back, GPS
   bonus (corrected spec), capacity (dynamic + override), MANAGER_PLAN output. Simplifications and
   deferred pieces tracked in `docs/BACKLOG.md`, not hidden.
-- Advisor / Compliance / Route refinement / Plan lifecycle — not started, see BACKLOG.md.
+- Compliance Engine v1 (`office-scripts/ComplianceEngine.ts`) — done, tested (unit tests in
+  tests/core.test.ts for the pure ISO-week/status logic, plus a simulation against the real
+  SalesApp export). Imports SalesApp, appends VISIT_HISTORY_ACTUAL (dedup by UID), matches against
+  MANAGER_PLAN by POS+week, writes COMPLIANCE_LOG, updates POS_MASTER's real last-visit fields.
+  Per-visit LOS/LOT campaign attribution deliberately NOT implemented - blocked on missing
+  structured data in the SalesApp export, see BUSINESS_RULES.md.
+- Advisor / Route refinement / Plan lifecycle — not started, see BACKLOG.md.
 
 ## 14. Next step
 

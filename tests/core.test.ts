@@ -15,6 +15,9 @@ import {
   addGpsBonus,
   geoDays,
   resolveCapacity,
+  isoWeekNumber,
+  weeksBetween,
+  determineComplianceStatus,
 } from "../office-scripts/shared/core";
 
 let passed = 0;
@@ -327,6 +330,66 @@ test("override of 0 is respected (not treated as missing)", () => {
 });
 
 // ==========================================================================
+
+// ==========================================================================
+console.log("isoWeekNumber() / weeksBetween()");
+// ==========================================================================
+
+test("isoWeekNumber matches the known campaign week (2026-07-27 = week 31, per real CONTROL/OUTPUT_PLAN data)", () => {
+  const { week, year } = isoWeekNumber(new Date(2026, 6, 27)); // 27 July 2026, Monday
+  assert.strictEqual(week, 31);
+  assert.strictEqual(year, 2026);
+});
+test("isoWeekNumber matches the real SalesApp data range (2026-06-01 = week 23)", () => {
+  const { week } = isoWeekNumber(new Date(2026, 5, 1));
+  assert.strictEqual(week, 23);
+});
+test("weeksBetween is 0 for the same week", () => {
+  assert.strictEqual(weeksBetween(31, 2026, 31, 2026), 0);
+});
+test("weeksBetween is positive when the second week is later", () => {
+  assert.strictEqual(weeksBetween(31, 2026, 33, 2026), 2);
+});
+test("weeksBetween accounts for year boundary (52-week approximation, documented simplification)", () => {
+  assert.strictEqual(weeksBetween(51, 2026, 2, 2027), 3);
+});
+
+// ==========================================================================
+console.log("determineComplianceStatus()");
+// ==========================================================================
+
+test("visit realized in the planned week = Splneno_vcas", () => {
+  const status = determineComplianceStatus(31, 2026, [{ week: 31, year: 2026 }], 1, 33, 2026);
+  assert.strictEqual(status, "Splneno_vcas");
+});
+test("visit realized one week late = Splneno_pozde", () => {
+  const status = determineComplianceStatus(31, 2026, [{ week: 32, year: 2026 }], 1, 33, 2026);
+  assert.strictEqual(status, "Splneno_pozde");
+});
+test("visit realized very late (beyond cutoff) is still Splneno_pozde, not Nesplneno - it did happen", () => {
+  const status = determineComplianceStatus(31, 2026, [{ week: 40, year: 2026 }], 1, 41, 2026);
+  assert.strictEqual(status, "Splneno_pozde");
+});
+test("no visit yet, deadline not reached = Pending", () => {
+  const status = determineComplianceStatus(31, 2026, [], 1, 31, 2026);
+  assert.strictEqual(status, "Pending");
+});
+test("no visit, exactly at the cutoff boundary = still Pending (not yet failed)", () => {
+  const status = determineComplianceStatus(31, 2026, [], 1, 32, 2026);
+  assert.strictEqual(status, "Pending");
+});
+test("no visit, one week past the cutoff = Nesplneno", () => {
+  const status = determineComplianceStatus(31, 2026, [], 1, 33, 2026);
+  assert.strictEqual(status, "Nesplneno");
+});
+test("multiple actual visits - earliest one determines the status", () => {
+  const status = determineComplianceStatus(
+    31, 2026,
+    [{ week: 33, year: 2026 }, { week: 31, year: 2026 }],
+    1, 33, 2026
+  );
+  assert.strictEqual(status, "Splneno_vcas");
+});
 
 console.log("\n" + passed + " passed, " + failed + " failed");
 if (failed > 0) {

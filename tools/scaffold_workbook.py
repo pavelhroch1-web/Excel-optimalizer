@@ -52,6 +52,7 @@ def main(ref_path, out_path):
     control_ws.append(["GPS_EXTRA_ENABLED", 1, "1=on. Allows a small overflow beyond capacity for POS very close to an already-selected visit."])
     control_ws.append(["GPS_EXTRA_RADIUS_METERS", 300, "Radius for the GPS bonus overflow rule."])
     control_ws.append(["GPS_EXTRA_MAX_VISITS", 5, "Max extra visits per technician/week from the GPS bonus rule."])
+    control_ws.append(["COMPLIANCE_LATE_CUTOFF_WEEKS", 1, "Weeks past the planned week before a still-unrealized visit becomes Nesplneno instead of Pending. Proposed default per docs/BUSINESS_RULES.md section 12, not yet formally reconfirmed."])
 
     # CATEGORY_RULES: copy reference rows + add explicit confirmed default row
     cat_ws = src_wb["CATEGORY_RULES"]
@@ -177,6 +178,35 @@ def main(ref_path, out_path):
         ["WEEK", "DATE", "DAY", "TECHNICIAN", "POS", "KATEGORIE", "NAZEV_PROVOZOVNY",
          "ULICE", "CISLO", "MESTO", "OBLAST", "POS_AREA", "PPT", "LOS_ACTIVITY",
          "LOT_ACTIVITY", "REASON", "GPS_GROUP"],
+        [],
+    )
+
+    # SALESAPP_IMPORT (staging - paste the weekly SalesApp export here; header
+    # row matches the real export format so column-name lookup in
+    # ComplianceEngine.ts works regardless of export column order/extras)
+    write_table(
+        dst_wb, "SALESAPP_IMPORT",
+        ["UID", "Date", "State", "Started at", "Finished at", "Real duration (h)",
+         "Chain UID", "Chain", "Store UID", "Store", "Store address",
+         "Agency region", "Executor UID", "Executor"],
+        [],
+    )
+
+    # VISIT_HISTORY_ACTUAL (real, append-only visit log from SalesApp -
+    # distinct from the legacy VISIT_HISTORY sheet carried over from V10.5.5,
+    # which recorded the script's own planned output, not reality; see
+    # docs/BUSINESS_RULES.md 15c and ARCHITECTURE.md Compliance Engine entry)
+    write_table(
+        dst_wb, "VISIT_HISTORY_ACTUAL",
+        ["posId", "date", "week", "year", "executor", "state", "salesAppUid"],
+        [],
+    )
+
+    # COMPLIANCE_LOG (append-only, one row per planned-visit evaluation)
+    write_table(
+        dst_wb, "COMPLIANCE_LOG",
+        ["posId", "technician", "plannedWeek", "plannedYear", "status",
+         "matchedActualDate", "matchedActualWeek", "evaluatedAt"],
         [],
     )
 
