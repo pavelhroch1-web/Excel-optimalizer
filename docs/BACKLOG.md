@@ -3,6 +3,23 @@
 Non-blocking items found during implementation. Not stopping work for these; tracked here so
 they aren't lost.
 
+## UX layer follow-ups (found while building tools/ux_style.py)
+- **MANAGER_PLAN has no archival/trim strategy and grows unbounded.**
+  PlanningEngine.ts keeps every Published/Active/Closed week forever (by
+  design - locked weeks must never be silently dropped), but nothing ever
+  removes old Closed weeks either. At ~1200 rows/week this reaches tens of
+  thousands of rows within a year. Directly affects TECHNICIAN_PLAN's live
+  formula view (tools/ux_style.py build_technician_plan), which uses a
+  static 3000-row cap - fine today, will eventually need either a much
+  higher cap or (better) an actual archival strategy for MANAGER_PLAN
+  itself, consistent with the same open question already flagged for
+  VISIT_HISTORY/SCORE_LOG in docs/ARCHITECTURE.md section 11.
+- TECHNICIAN_PLAN shows the full Draft+Published picture (everything
+  currently in MANAGER_PLAN). Once the archival strategy above exists, it
+  should probably also gain a "only show this week + N upcoming" filter so
+  it doesn't slowly fill with irrelevant historical rows - not needed yet
+  since MANAGER_PLAN itself doesn't grow that large in normal short-term use.
+
 ## Advisor Engine follow-ups (not blocking, tracked for later)
 - Campaign-completion risk alerts: waiting on an active HARD cadence rule with a recurring
   deadline (GECO/CORN currently inactive by config).

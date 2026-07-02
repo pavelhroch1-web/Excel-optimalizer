@@ -61,7 +61,24 @@ function main(workbook: ExcelScript.Workbook) {
   const advisorLog = readTable("ADVISOR_LOG");
 
   const dashWs = workbook.getWorksheet("DASHBOARD");
-  dashWs.getRange("A1:F500").clear();
+  // Rows 1-3 are the static title banner + KPI tile labels that
+  // tools/ux_style.py's build_dashboard_template wrote once - never
+  // touched here. Row 3's tile VALUES (B3:E3) are overwritten directly
+  // below regardless, so there is no need to clear them first, and clearing
+  // A1:F3 would also wipe the "DASHBOARD" title text and tile labels (a
+  // content clear removes values even with ClearApplyTo.contents - only
+  // formatting is preserved, not text). Detail sections start at row 5.
+  dashWs.getRange("A5:F500").clear(ExcelScript.ClearApplyTo.contents);
+
+  // KPI tile values (B3/C3/D3/E3 - fixed positions pre-styled by
+  // tools/ux_style.py's build_dashboard_template) - filled in as the
+  // existing detail sections below compute the same underlying numbers, so
+  // there is exactly one source of truth per number, just also mirrored to
+  // a prominent tile.
+  let kpiActivePos = 0;
+  let kpiSplnenoVcas = 0;
+  let kpiNesplneno = 0;
+  let kpiOpenAlerts = 0;
 
   let output: (string | number)[][] = [];
   function section(title: string) {
@@ -101,6 +118,7 @@ function main(workbook: ExcelScript.Workbook) {
         closed++;
       }
     }
+    kpiActivePos = active;
     row("Active POS", active);
     row("Closed POS", closed);
     for (const market of Object.keys(byMarket).sort()) {
@@ -141,6 +159,8 @@ function main(workbook: ExcelScript.Workbook) {
     for (const status of ["Splneno_vcas", "Splneno_pozde", "Nesplneno", "Pending", "Navic_evidovano"]) {
       row(status, counts[status] || 0);
     }
+    kpiSplnenoVcas = counts["Splneno_vcas"] || 0;
+    kpiNesplneno = counts["Nesplneno"] || 0;
   } else {
     row("(COMPLIANCE_LOG is empty - run Compliance Engine after a SalesApp import)");
   }
@@ -203,6 +223,7 @@ function main(workbook: ExcelScript.Workbook) {
     }
     for (const key of Object.keys(counts).sort()) {
       row(key, counts[key]);
+      kpiOpenAlerts += counts[key];
     }
   } else {
     // Note this message is ambiguous by design: an empty ADVISOR_LOG means
@@ -217,9 +238,15 @@ function main(workbook: ExcelScript.Workbook) {
   // WRITE DASHBOARD
   // ==========================================================================
 
+  // KPI tiles: fixed cells B3/C3/D3/E3 (row index 2, col index 1/2/3/4),
+  // matching tools/ux_style.py's build_dashboard_template layout exactly.
+  dashWs.getRangeByIndexes(2, 1, 1, 4).setValues([[kpiActivePos, kpiSplnenoVcas, kpiNesplneno, kpiOpenAlerts]]);
+
+  // Detail sections start at row 5 (index 4), leaving rows 1-4 for the
+  // title banner and KPI tiles that ux_style.py pre-styled.
   if (output.length > 0) {
-    dashWs.getRangeByIndexes(0, 0, output.length, 6).setValues(output);
+    dashWs.getRangeByIndexes(4, 0, output.length, 6).setValues(output);
   }
 
-  console.log("Reporting Engine: dashboard refreshed, " + output.length + " rows written.");
+  console.log("Reporting Engine: dashboard refreshed, " + output.length + " detail rows + 4 KPI tiles written.");
 }

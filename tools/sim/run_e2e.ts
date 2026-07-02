@@ -36,7 +36,11 @@ function runEngine(scriptPath: string, workbook: MockWorkbook, log: string[]): v
     compilerOptions: { target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.None },
   });
   const wrapped = transpiled.outputText + "\nmain(workbook);\n";
-  const fn = new Function("workbook", "console", wrapped);
+  // Minimal ExcelScript global: the type itself compiles away, but
+  // ExcelScript.ClearApplyTo.contents is a real runtime enum reference in
+  // Office Scripts (host-provided global), so the mock needs to supply it.
+  const excelScriptGlobal = { ClearApplyTo: { contents: "contents", all: "all", formats: "formats" } };
+  const fn = new Function("workbook", "console", "ExcelScript", wrapped);
   const capturedLogs: string[] = [];
   const fakeConsole = {
     log: (...args: any[]) => {
@@ -44,7 +48,7 @@ function runEngine(scriptPath: string, workbook: MockWorkbook, log: string[]): v
       capturedLogs.push(line);
     },
   };
-  fn(workbook, fakeConsole);
+  fn(workbook, fakeConsole, excelScriptGlobal);
   for (const line of capturedLogs) {
     log.push(`[${path.basename(scriptPath)}] ${line}`);
   }

@@ -290,7 +290,10 @@ function main(workbook: ExcelScript.Workbook) {
   ];
 
   // 39 columns -> column AM. Recompute if masterHeaderRow.length changes.
-  masterWs.getRange("A1:AM100000").clear();
+  // contents only - a full clear() also wipes cell formatting (header
+  // style, column colors, banded rows) applied by tools/ux_style.py, which
+  // would otherwise be erased on every single run.
+  masterWs.getRange("A1:AM100000").clear(ExcelScript.ClearApplyTo.contents);
   masterWs.getRangeByIndexes(0, 0, 1, masterHeaderRow.length).setValues([masterHeaderRow]);
   if (outRows.length > 0) {
     masterWs

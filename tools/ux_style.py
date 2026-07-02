@@ -47,17 +47,18 @@ THIN_BORDER = Border(*(Side(style="thin", color="BFBFBF"),) * 4)
 
 # Sheet grouping -> tab color + intended sheet order (top to bottom in Excel)
 SHEET_GROUPS = [
-    ("START_HERE", "404040"),
+    ("HOME", "404040"),
     ("DASHBOARD", "375623"),
+    ("TECHNICIAN_PLAN", "375623"),
     ("POS_MASTER", "7030A0"),
-    ("MANAGER_PLAN", "375623"),
-    ("MANAGER_PLAN_PUBLISHED", "375623"),
-    ("PLAN_LIFECYCLE", "375623"),
+    ("ACTIVITY_PLAN", "BF8F00"),
     ("RAW_DATA", "2E75B6"),
     ("POS_STATUS_IMPORT", "2E75B6"),
     ("SALESAPP_IMPORT", "2E75B6"),
+    ("MANAGER_PLAN", "375623"),
+    ("MANAGER_PLAN_PUBLISHED", "375623"),
+    ("PLAN_LIFECYCLE", "375623"),
     ("CONTROL", "BF8F00"),
-    ("ACTIVITY_PLAN", "BF8F00"),
     ("MARKET_RULES", "BF8F00"),
     ("TERMINAL_RULES", "BF8F00"),
     ("CATEGORY_RULES", "BF8F00"),
@@ -71,6 +72,25 @@ SHEET_GROUPS = [
     ("VISIT_HISTORY_ACTUAL", "595959"),
     ("VISIT_HISTORY", "595959"),
 ]
+
+# The 5 sheets a normal user (regional manager) works with day to day.
+# Everything else that stays visible (import staging) is a necessary but
+# occasional "mailbox", not part of the daily working set - communicated on
+# HOME, not hidden, because the user must paste into it weekly.
+CORE_DAILY_SHEETS = ["HOME", "DASHBOARD", "TECHNICIAN_PLAN", "POS_MASTER", "ACTIVITY_PLAN"]
+IMPORT_UTILITY_SHEETS = ["RAW_DATA", "POS_STATUS_IMPORT", "SALESAPP_IMPORT"]
+
+# Everything not in CORE_DAILY_SHEETS/IMPORT_UTILITY_SHEETS is implementation
+# detail (raw engine data, config, logs) - hidden from the normal user, but
+# still fully readable/writable by Office Scripts (hidden sheets are not
+# restricted via the API, only invisible in the tab bar).
+HIDDEN_SHEETS = {
+    "MANAGER_PLAN", "MANAGER_PLAN_PUBLISHED", "PLAN_LIFECYCLE",
+    "CONTROL", "MARKET_RULES", "TERMINAL_RULES", "CATEGORY_RULES",
+    "CADENCE_RULES", "PARETO_GROUPS", "SCORE_PROFILES", "ADVISOR_RULES",
+    "CAPACITY_OVERRIDE", "COMPLIANCE_LOG", "ADVISOR_LOG",
+    "VISIT_HISTORY_ACTUAL", "VISIT_HISTORY",
+}
 
 # Sheets an engine writes to programmatically - never real-protected, see
 # module docstring. Everything else (pure config, user-pasted imports) is
@@ -249,61 +269,142 @@ def build_legend(ws, start_row):
     return r
 
 
-def build_start_here(wb, real_control_values):
-    if "START_HERE" in wb.sheetnames:
-        del wb["START_HERE"]
-    ws = wb.create_sheet("START_HERE", 0)
+def _nav_button(ws, cell_ref, label, target_sheet, color=NAVY, width=None):
+    ws[cell_ref] = f'=HYPERLINK("#{target_sheet}!A1","{label}")'
+    ws[cell_ref].font = Font(bold=True, size=12, color=WHITE)
+    ws[cell_ref].fill = PatternFill("solid", fgColor=color)
+    ws[cell_ref].alignment = Alignment(horizontal="center", vertical="center")
+    ws[cell_ref].border = THIN_BORDER
+
+
+def build_home(wb, real_control_values):
+    """A real app home screen, not a README sheet: status strip, big
+    numbered workflow cards with one-click navigation, a quick-nav button
+    row, and the color legend inline (not appended at the bottom in small
+    print) - built for someone opening this workbook for the first time to
+    understand what to do within 30 seconds."""
+    for old_name in ("START_HERE", "HOME"):
+        if old_name in wb.sheetnames:
+            del wb[old_name]
+    ws = wb.create_sheet("HOME", 0)
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 3
-    ws.column_dimensions["B"].width = 90
+    for col in "BCDEFGH":
+        ws.column_dimensions[col].width = 15
 
-    r = 1
-    ws.cell(r, 2, "Field Force Optimizer V11").font = Font(bold=True, size=20, color=NAVY)
+    # ---- Banner ----
+    ws.merge_cells("A1:H2")
+    ws["A1"] = "FIELD FORCE OPTIMIZER"
+    ws["A1"].font = Font(bold=True, size=26, color=WHITE)
+    ws["A1"].fill = PatternFill("solid", fgColor=NAVY)
+    ws["A1"].alignment = Alignment(horizontal="left", vertical="center", indent=2)
+    ws.row_dimensions[1].height = 30
+    ws.row_dimensions[2].height = 22
+    ws.merge_cells("A3:H3")
+    ws["A3"] = "Plánování a řízení terénních techniků"
+    ws["A3"].font = Font(italic=True, size=11, color=WHITE)
+    ws["A3"].fill = PatternFill("solid", fgColor=NAVY)
+    ws["A3"].alignment = Alignment(horizontal="left", vertical="center", indent=2)
+    ws.row_dimensions[3].height = 20
+
+    # ---- Status strip (live formulas, campaign week from CONTROL, POS
+    # count from POS_MASTER - stays accurate without any manual update) ----
+    r = 5
+    ws.cell(r, 1, "TENTO TÝDEN").font = SECTION_FONT
     r += 1
-    ws.cell(r, 2, "Plánovací a vyhodnocovací systém pro terénní techniky - postaveno nad Excel + Office Scripts.").font = NOTE_FONT
+    strip = [
+        ("B", "Aktuální kampaň týden", '=IFERROR(VLOOKUP("CAMPAIGN_START_WEEK",CONTROL!A:B,2,FALSE),"-")'),
+        ("D", "POS v systému", '=COUNTA(POS_MASTER!A:A)-1'),
+        ("F", "Naplánováno návštěv", '=COUNTA(MANAGER_PLAN!A:A)-1'),
+    ]
+    for col, label, formula in strip:
+        ws[f"{col}{r}"] = label
+        ws[f"{col}{r}"].font = Font(size=9, color="595959")
+        ws[f"{col}{r+1}"] = formula
+        ws[f"{col}{r+1}"].font = Font(bold=True, size=20, color=NAVY)
+    r += 3
+
+    # ---- Workflow cards ----
+    ws.cell(r, 1, "CO DĚLAT TENTO TÝDEN").font = TITLE_FONT
+    r += 1
+    # target=None -> this step is a script action (Automate pane), not a
+    # sheet to navigate to; shown as a plain label instead of a self-linking
+    # (and therefore confusing) button.
+    steps = [
+        ("1", "Vlož nový export POS a SalesApp", "RAW_DATA", "2E75B6"),
+        ("2", "Spusť Import → Planning Engine", None, "2E75B6"),
+        ("3", "Zkontroluj a uprav rozpis technikům", "TECHNICIAN_PLAN", "375623"),
+        ("4", "Uprav konkrétní POS ručně, pokud je třeba", "POS_MASTER", "7030A0"),
+        ("5", "Publikuj týden (PublishEngine)", None, "BF8F00"),
+        ("6", "Sleduj plnění a upozornění", "DASHBOARD", "375623"),
+    ]
+    for num, text, target, color in steps:
+        ws.cell(r, 1, num).font = Font(bold=True, size=16, color=WHITE)
+        ws.cell(r, 1).fill = PatternFill("solid", fgColor=color)
+        ws.cell(r, 1).alignment = Alignment(horizontal="center", vertical="center")
+        ws.merge_cells(f"B{r}:F{r}")
+        ws.cell(r, 2, text).font = Font(size=12)
+        ws.cell(r, 2).alignment = Alignment(vertical="center")
+        if target:
+            _nav_button(ws, f"G{r}", "Otevřít →", target, color=color)
+        else:
+            ws.cell(r, 7, "⚙ Automatizace")
+            ws.cell(r, 7).font = Font(italic=True, size=10, color="808080")
+            ws.cell(r, 7).alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[r].height = 26
+        r += 1
+    r += 1
+
+    # ---- Quick navigation ----
+    ws.cell(r, 1, "RYCHLÁ NAVIGACE").font = TITLE_FONT
+    r += 1
+    quick_links = [
+        ("DASHBOARD", "DASHBOARD", "375623"),
+        ("TECHNICIAN_PLAN", "TECHNICIAN_PLAN", "375623"),
+        ("POS_MASTER", "POS_MASTER", "7030A0"),
+        ("ACTIVITY_PLAN", "ACTIVITY_PLAN", "BF8F00"),
+    ]
+    col_idx = 1
+    for label, target, color in quick_links:
+        col_letter = get_column_letter(col_idx)
+        _nav_button(ws, f"{col_letter}{r}", label, target, color=color)
+        col_idx += 2
+    ws.row_dimensions[r].height = 24
     r += 2
 
-    def section(title):
-        nonlocal r
-        ws.cell(r, 2, title).font = TITLE_FONT
+    # ---- Legend, inline, not an appendix ----
+    ws.cell(r, 1, "JAK ČÍST BARVY").font = TITLE_FONT
+    r += 1
+    legend_items = [
+        (EDITABLE_FILL, "Editovatelné - sem zapisuješ"),
+        (SYSTEM_FILL, "Systémové - počítá engine"),
+        (IMPORT_FILL, "Sem vlož export"),
+        (OUTPUT_FILL, "Výsledek plánování"),
+    ]
+    col_idx = 1
+    for color, text in legend_items:
+        col_letter = get_column_letter(col_idx)
+        ws[f"{col_letter}{r}"] = ""
+        ws[f"{col_letter}{r}"].fill = PatternFill("solid", fgColor=color)
+        ws.merge_cells(f"{get_column_letter(col_idx+1)}{r}:{get_column_letter(col_idx+1)}{r}")
+        ws.cell(r, col_idx + 1, text).font = Font(size=9)
+        ws.cell(r, col_idx + 1).alignment = Alignment(vertical="center", wrap_text=True)
+        col_idx += 2
+    ws.row_dimensions[r].height = 28
+    r += 2
+
+    # ---- First-time setup, kept short - detail lives in office-scripts/README.md ----
+    ws.cell(r, 1, "PRVNÍ SPUŠTĚNÍ").font = TITLE_FONT
+    r += 1
+    for text in [
+        "1) Otevři tento sešit v Excelu na webu (OneDrive/SharePoint) - Office Scripts to vyžadují.",
+        "2) Záložka Automatizace → New Script → vlož obsah office-scripts/ImportEngine.ts → Spustit.",
+        "3) Opakuj pro PlanningEngine.ts, PublishEngine.ts, ComplianceEngine.ts, AdvisorEngine.ts, ReportingEngine.ts.",
+    ]:
+        ws.merge_cells(f"B{r}:H{r}")
+        ws.cell(r, 2, text).font = Font(size=10)
         r += 1
 
-    def bullet(text):
-        nonlocal r
-        ws.cell(r, 2, "•  " + text).alignment = Alignment(wrap_text=True, vertical="top")
-        ws.row_dimensions[r].height = 16
-        r += 1
-
-    section("1. První spuštění")
-    bullet("Otevři tento sešit v Excelu ONLINE (Office Scripts vyžaduje OneDrive/SharePoint).")
-    bullet("Automatizace → New Script → vlož obsah office-scripts/ImportEngine.ts → spusť.")
-    bullet("Zkontroluj list POS_MASTER - měl by se naplnit z RAW_DATA.")
-    r += 1
-
-    section("2. Týdenní workflow")
-    bullet("1) Vlož nový export do RAW_DATA (a POS_STATUS_IMPORT / SALESAPP_IMPORT, pokud je máš).")
-    bullet("2) Spusť ImportEngine.ts.")
-    bullet("3) Spusť PlanningEngine.ts - vygeneruje návrh (Draft) v MANAGER_PLAN.")
-    bullet("4) Zkontroluj/uprav plán ručně (POS_MASTER - sloupce managerOverride*).")
-    bullet("5) Až budeš spokojen: spusť PublishEngine.ts - zamkne nejbližší týden a odešli ho technikům.")
-    bullet("6) Když přijde nový SalesApp export: vlož ho do SALESAPP_IMPORT a spusť ComplianceEngine.ts.")
-    bullet("7) Spusť AdvisorEngine.ts pro upozornění a ReportingEngine.ts pro aktualizaci DASHBOARDu.")
-    r += 1
-
-    section("3. Kde co najdeš")
-    bullet("DASHBOARD - přehled sítě, plnění, KPI techniků, aktuální upozornění.")
-    bullet("POS_MASTER - hlavní pracovní karta každého POS (tady děláš ruční zásahy).")
-    bullet("MANAGER_PLAN - aktuální návrh plánu (Draft + zamčené Published týdny).")
-    bullet("Žluté listy (CONTROL, ACTIVITY_PLAN, ...RULES...) - konfigurace, kterou upravuješ ty.")
-    bullet("Šedé listy (COMPLIANCE_LOG, ADVISOR_LOG, ...) - historie, kterou spravuje systém.")
-    r += 1
-
-    section("4. Aktuální nastavení kampaně (informativní)")
-    for k, v in real_control_values.items():
-        bullet(f"{k} = {v}")
-    r += 1
-
-    build_legend(ws, r)
     return ws
 
 
@@ -399,6 +500,110 @@ def redesign_activity_plan(wb, tech_column_letter):
     ws.freeze_panes = "C2"
 
 
+def build_technician_plan(wb, n_rows=3000):
+    """Simplified, technician-facing view of MANAGER_PLAN: only the columns
+    a technician (or the manager reviewing their schedule) actually needs,
+    with the display header names/spacing the product owner asked for
+    explicitly - not MANAGER_PLAN's camelCase-ish internal names. Pure
+    live-formula view (no engine change): stays in sync automatically
+    whenever Planning Engine regenerates MANAGER_PLAN, including Draft
+    weeks, so the manager sees the full upcoming picture, not just what's
+    already Published.
+
+    MANAGER_PLAN's first 12 columns (A:L) are already exactly WEEK, DATE,
+    DAY, TECHNICIAN, POS, KATEGORIE, NAZEV_PROVOZOVNY, ULICE, CISLO, MESTO,
+    OBLAST, POS_AREA in that order - a direct 1:1 column-letter mapping, so
+    each formula only needs to change its display header, not reorder data.
+
+    n_rows=3000 note: PlanningEngine.ts keeps every Published/Active/Closed
+    week in MANAGER_PLAN forever (never trims old weeks), so this static
+    row cap (~2.5 weeks of typical volume at ~1200 rows/week) is a real
+    limitation once the workbook has been in weekly use for a while, not
+    just a formatting choice - flagged in docs/BACKLOG.md as a follow-up
+    (either raise the cap, or - better - give MANAGER_PLAN an actual
+    archival strategy, which was already a known future need for exactly
+    this reason)."""
+    if "TECHNICIAN_PLAN" in wb.sheetnames:
+        del wb["TECHNICIAN_PLAN"]
+    ws = wb.create_sheet("TECHNICIAN_PLAN")
+
+    headers = [
+        "WEEK", "DATE", "DAY", "TECHNICIAN", "POS", "KATEGORIE",
+        "NAZEV PROVOZOVNY", "ULICE", "ČÍSLO POPISNÉ/ORIENTAČNÍ", "MĚSTO",
+        "OBLAST", "POS AREA",
+    ]
+    for i, h in enumerate(headers):
+        ws.cell(1, i + 1, h)
+
+    for r in range(2, n_rows + 1):
+        for i in range(len(headers)):
+            col_letter = get_column_letter(i + 1)
+            ws.cell(r, i + 1, f'=IF(MANAGER_PLAN!{col_letter}{r}="","",MANAGER_PLAN!{col_letter}{r})')
+
+    for i, h in enumerate(headers):
+        ws.column_dimensions[get_column_letter(i + 1)].width = max(14, len(h) + 2)
+
+    ws.auto_filter.ref = f"A1:L{n_rows}"
+    apply_banded_rows(ws, 2, n_rows, len(headers))
+    return ws
+
+
+def apply_banded_rows(ws, first_data_row, last_row, n_cols, band_color="F2F2F2"):
+    """Alternating row shading via conditional formatting (not direct cell
+    fill) - survives engine clear(contents)/setValues() cycles because it's
+    attached to the range, not to individual cell styles that clear() could
+    interact with, and doesn't need the range to actually contain data to
+    render correctly for a growing/shrinking table."""
+    last_col_letter = get_column_letter(n_cols)
+    band_range = f"A{first_data_row}:{last_col_letter}{last_row}"
+    ws.conditional_formatting.add(
+        band_range,
+        FormulaRule(formula=[f"ISEVEN(ROW())"], fill=PatternFill("solid", fgColor=band_color)),
+    )
+
+
+def hide_technical_sheets(wb):
+    for name in HIDDEN_SHEETS:
+        if name in wb.sheetnames:
+            wb[name].sheet_state = "hidden"
+
+
+def build_dashboard_template(wb):
+    """Pre-styles a KPI-tile header band that ReportingEngine.ts writes
+    numbers into (fixed cell positions, see ReportingEngine.ts). The
+    detailed tables ReportingEngine already produces are kept below this
+    band, just pushed down to make room - same data, better hierarchy."""
+    ws = wb["DASHBOARD"]
+    ws.sheet_view.showGridLines = False
+    ws.column_dimensions["A"].width = 22
+    for col in "BCDEF":
+        ws.column_dimensions[col].width = 18
+
+    ws.merge_cells("A1:F1")
+    ws["A1"] = "DASHBOARD"
+    ws["A1"].font = Font(bold=True, size=18, color=WHITE)
+    ws["A1"].fill = PatternFill("solid", fgColor=NAVY)
+    ws["A1"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[1].height = 32
+
+    tile_specs = [
+        ("B3", "Aktivní POS", "375623"),
+        ("C3", "Splněno včas", "375623"),
+        ("D3", "Nesplněno", "C00000"),
+        ("E3", "Otevřené alerty", "BF8F00"),
+    ]
+    for cell_ref, label, color in tile_specs:
+        col = cell_ref[0]
+        ws[f"{col}2"] = label
+        ws[f"{col}2"].font = Font(bold=True, size=9, color="595959")
+        ws[f"{col}2"].alignment = Alignment(horizontal="center")
+        ws[cell_ref].font = Font(bold=True, size=22, color=color)
+        ws[cell_ref].alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[3].height = 34
+    ws.freeze_panes = "A5"
+    return ws
+
+
 def find_tech_column_letter(pos_master_header_row):
     for i, h in enumerate(pos_master_header_row):
         if h == "assignedTechnician":
@@ -414,10 +619,10 @@ def apply_all(wb, control_rows):
         if row and row[0]:
             control_values[str(row[0]).strip()] = row[1] if len(row) > 1 else ""
 
-    # ACTIVITY_PLAN's timeline redesign must run BEFORE the generic per-sheet
-    # styling pass below - that pass decoratively pre-styles empty future
-    # rows (up to row 500), which would inflate ws.max_row and make the
-    # timeline/estimate section think there are hundreds of campaign rows.
+    # Build TECHNICIAN_PLAN before the generic styling pass touches
+    # anything, and ACTIVITY_PLAN's timeline redesign likewise - that pass
+    # decoratively pre-styles empty future rows (up to row 500), which
+    # would inflate ws.max_row and confuse row-count-dependent logic.
     if "POS_MASTER" in wb.sheetnames:
         pm_header = [c.value for c in wb["POS_MASTER"][1]]
         tech_col = find_tech_column_letter(pm_header)
@@ -425,11 +630,22 @@ def apply_all(wb, control_rows):
         tech_col = "O"
     if "ACTIVITY_PLAN" in wb.sheetnames:
         redesign_activity_plan(wb, tech_col)
+    if "MANAGER_PLAN" in wb.sheetnames:
+        build_technician_plan(wb)
+    if "DASHBOARD" in wb.sheetnames:
+        build_dashboard_template(wb)
+    if "POS_MASTER" in wb.sheetnames:
+        apply_banded_rows(wb["POS_MASTER"], 2, 500, wb["POS_MASTER"].max_column or 39)
 
     for sheet_name in list(wb.sheetnames):
         ws = wb[sheet_name]
         if ws.max_row == 0 or ws.max_column == 0:
             continue
+        if sheet_name == "TECHNICIAN_PLAN":
+            style_header_row(ws)  # header only - fill/dropdowns don't apply, it's a formula view
+            continue
+        if sheet_name == "DASHBOARD":
+            continue  # build_dashboard_template already fully styled it
         style_header_row(ws)
         color_editable_columns(ws, sheet_name)
         add_dropdowns(ws, sheet_name)
@@ -442,10 +658,11 @@ def apply_all(wb, control_rows):
     for sheet_name in list(wb.sheetnames):
         protect_config_sheet(wb[sheet_name], sheet_name)
 
-    apply_sheet_order_and_colors(wb)
-    build_start_here(wb, {
+    build_home(wb, {
         k: v for k, v in control_values.items()
         if k in ("CAMPAIGN_START_WEEK", "CAMPAIGN_LENGTH", "VISITS_PER_WEEK",
                   "TARGET_VISITS_DAY", "YEAR")
     })
-    apply_sheet_order_and_colors(wb)  # re-apply so START_HERE lands first
+    apply_sheet_order_and_colors(wb)  # re-apply so HOME lands first
+    hide_technical_sheets(wb)
+    wb.active = 0  # HOME is what the user sees on open

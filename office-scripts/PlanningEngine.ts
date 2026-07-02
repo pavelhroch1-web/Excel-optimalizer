@@ -778,7 +778,8 @@ function main(workbook: ExcelScript.Workbook) {
   // make up the new MANAGER_PLAN content. Locked rows are never rewritten
   // with different values - they are copied through byte-for-byte.
   const combined = [...keptRows, ...output];
-  outWs.getRange("A2:Q200000").clear(); // 17 output columns = A..Q
+  // contents only - see ImportEngine.ts for why (preserves ux_style.py formatting)
+  outWs.getRange("A2:Q200000").clear(ExcelScript.ClearApplyTo.contents); // 17 output columns = A..Q
   if (combined.length > 0) {
     outWs.getRangeByIndexes(1, 0, combined.length, 17).setValues(combined);
   }

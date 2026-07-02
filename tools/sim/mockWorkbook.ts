@@ -47,9 +47,11 @@ class MockRange {
     this.setValues([[value]]);
   }
 
-  clear(): void {
-    // Truncates from startRow onward (matches every clear() call site in
-    // this codebase, which always clears "from row X to the end").
+  clear(_applyTo?: string): void {
+    // applyTo is accepted but ignored - this mock has no concept of cell
+    // formatting to preserve, so "contents" vs "all" behave identically
+    // here. Truncates from startRow onward (matches every clear() call
+    // site in this codebase, which always clears "from row X to the end").
     this.ws.data.length = Math.min(this.ws.data.length, this.startRow);
   }
 }

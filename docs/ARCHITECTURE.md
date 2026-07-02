@@ -325,6 +325,65 @@ against the styled workbook produces identical row counts to the
 unstyled version (11,605 POS, 4,847 visits, 1,215 published) - the UX
 pass changes no value an engine depends on.
 
+## 13d. Workbook UX redesign (Phase 8 - "this should feel like an app")
+
+Product owner feedback on Phase 7: technically solid but still read as "a
+pretty Excel with scripts," not an application. Rebuilt around one
+question - can a regional manager who has never seen this before
+understand what to do within 30 seconds?
+
+- **HOME** replaces START_HERE as sheet 1 and the workbook's default
+  active sheet: banner, a live "this week" status strip (campaign week,
+  POS count, planned-visit count - plain formulas against CONTROL/
+  POS_MASTER/MANAGER_PLAN), six numbered workflow cards with one-click
+  `HYPERLINK` navigation to the relevant sheet (or a plain "⚙ Automatizace"
+  label for the two steps that are a script action, not a sheet - a
+  self-linking button there would have been confusing, caught during
+  review), a quick-nav button row, and the color legend inline near the
+  top - not an appendix.
+- **Hid 16 of 24 sheets** (all pure config, logs, and the two internal plan
+  sheets) via `sheet_state = "hidden"`. Confirmed hidden sheets remain
+  fully readable/writable by Office Scripts (only invisible in the tab
+  bar), so no engine behaviour changes. Visible set is now HOME, DASHBOARD,
+  TECHNICIAN_PLAN, POS_MASTER, ACTIVITY_PLAN (the 5 daily-use sheets) plus
+  RAW_DATA/POS_STATUS_IMPORT/SALESAPP_IMPORT (necessary weekly paste
+  targets, can't be hidden and still be pasteable, communicated as
+  "utility" on HOME rather than part of the core 5).
+- **New TECHNICIAN_PLAN sheet** (explicit product-owner request): a live
+  formula view of MANAGER_PLAN's first 12 columns only (WEEK, DATE, DAY,
+  TECHNICIAN, POS, KATEGORIE, NAZEV PROVOZOVNY, ULICE, ČÍSLO POPISNÉ/
+  ORIENTAČNÍ, MĚSTO, OBLAST, POS AREA - the exact set/labels requested),
+  with AutoFilter dropdowns, banded rows, no PPT/REASON/GPS_GROUP detail
+  clutter. Pure presentation - no engine change; stays in sync automatically
+  whenever Planning Engine regenerates MANAGER_PLAN. Found and documented a
+  real limitation while building it: the view uses a static 3000-row
+  formula range, which is fine now but will need revisiting once MANAGER_PLAN's
+  unbounded growth (see BACKLOG.md) actually reaches that scale.
+- **DASHBOARD KPI tiles**: four large numbers (Active POS, Splněno včas,
+  Nesplněno, Otevřené alerty) at fixed, pre-styled positions (B3:E3),
+  ReportingEngine.ts writes into them directly alongside the existing
+  detail tables (now starting at row 5 instead of row 1). Required two
+  related engine fixes, both found while building this:
+  1. Changed every full-sheet `Range.clear()` (ImportEngine.ts,
+     PlanningEngine.ts, ReportingEngine.ts) to
+     `clear(ExcelScript.ClearApplyTo.contents)` - a bare `clear()` also
+     wipes cell formatting, which would have erased all of this styling on
+     the very first engine run after building it.
+  2. ReportingEngine.ts's clear range was narrowed to start at row 5
+     (previously row 1), since a *contents* clear still removes text
+     values, and row 1-3 hold the static title/tile-label text
+     `build_dashboard_template` writes once, not per-run engine output.
+- POS_MASTER got banded-row conditional formatting (alternating shading)
+  for readability over long lists, applied via conditional formatting
+  rather than direct cell fill so it survives `clear(contents)` +
+  `setValues()` cycles regardless of exact row count each run.
+
+Verified with `tools/sim/`: full pipeline against the redesigned workbook
+produces identical results to before (11,605 POS, 4,847 visits, 1,215
+published, 17 detail rows + 4 KPI tiles on DASHBOARD) - confirms the UX
+pass changes no value any engine depends on, including after the
+clear(contents) fix.
+
 ## 14. Next step
 
 Implementation begins engine-by-engine per the migration plan (§12), starting with Phase 0 once
