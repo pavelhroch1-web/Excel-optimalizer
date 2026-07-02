@@ -88,51 +88,47 @@ they aren't lost.
   needed until there's a concrete case for it.
 
 ## Approved, deferred until core is stable: Distribution Client desktop app
-Product owner approved this architecture direction three times, expanding scope each time from a
-narrow export utility into a small standalone desktop application. This entry (formerly "Weekly
-Distribution Helper") supersedes both earlier versions. Explicitly deprioritized until
-FieldForceOptimizer's own core workflow is finished, tested, and stable in real production use -
-only then does work on this begin. Recorded in full so the design isn't rediscovered/re-litigated
-later.
+Product owner approved this architecture direction four times, refining scope each time - most
+recently by explicitly dropping email/Teams sending. This entry (formerly "Weekly Distribution
+Helper") supersedes all earlier versions. Explicitly deprioritized until FieldForceOptimizer's own
+core workflow is finished, tested, and stable in real production use - only then does work on this
+begin. Recorded in full so the design isn't rediscovered/re-litigated later.
 
-**Core principle (non-negotiable, restated by product owner three times now): FieldForceOptimizer
+**Core principle (non-negotiable, restated by product owner four times now): FieldForceOptimizer
 remains the single source of truth for all planning business logic - all planning, compliance,
 recommendations, and publication stay in Excel. This app is a client over its already-published
 results - nothing more.** It must never plan, optimize, compute compliance, read
 `SALESAPP_IMPORT`/any import-stage sheet, or write anything back to the workbook.
 
+**Goal is UX, not distribution automation** (product owner's explicit correction) - the point of
+this app is that opening/browsing/exporting a technician's plan is faster and more pleasant than
+doing the same in Excel, nothing more. Sending files anywhere (email, Teams, or otherwise) is
+explicitly out of scope, not deferred - the earlier feasibility analysis of Outlook/Teams
+automation no longer applies and shouldn't be revisited unless the product owner reopens it.
+
 **V1 scope, a small desktop app, not just a script:**
 - Open a workbook - local file or on OneDrive (a file path on a synced folder, not a live
   connection/API - OneDrive-synced files are ordinary local files from the app's point of view).
-- Show a list of technicians and each one's weekly plan on screen (read-only view of the
-  already-published `TECHNICIAN_PLAN`).
+- Show a list of technicians.
+- Show the selected technician's weekly plan on screen (read-only view of the already-published
+  `TECHNICIAN_PLAN`).
 - One click: generate a separate **Excel file per technician**, named `<Prijmeni>_<Rok>_W<Tyden>.xlsx`
-  (e.g. `Novák_2026_W32.xlsx`), saved to a folder the user picks.
-- Optionally send the generated file by email or Teams - see feasibility note below before
-  committing to a specific mechanism.
+  (e.g. `Novák_2026_W32.xlsx`).
+- Save the generated file(s) to a folder the user picks.
 
-**Feasibility check (answered when the product owner asked "is this even realistic"):**
-- Opening a workbook (local or OneDrive-synced) and reading `TECHNICIAN_PLAN`, showing it on
-  screen, and splitting it into per-technician `.xlsx` files: straightforward, low risk. Same
-  openpyxl-style file access this project's own `tools/scaffold_workbook.py`/`tools/ux_style.py`
-  already do today, just packaged as an app instead of a build script.
-- Email: feasible via local automation of an already-installed desktop mail client (e.g. driving
-  Outlook via its local COM/scripting interface on Windows) - this is automating a local
-  application the user already has, not calling an external API, so it does not conflict with the
-  "no API to SalesApp / no online sync" constraint.
-- Teams: the one genuinely open question - there is no realistic way to send a Teams message
-  purely locally without some form of Microsoft Graph API call, which would be a new kind of
-  integration this project has deliberately avoided everywhere else. Options when this is actually
-  built: (a) treat Graph API as a narrow, explicitly-scoped exception for outbound sending only (no
-  data ever flows back in), (b) skip Teams and rely on "open the file, attach it yourself" as the
-  first-version fallback, or (c) skip Teams entirely and rely on email/manual distribution. Not
-  deciding this now - flagged so it's a conscious choice made at implementation time, not
-  discovered as a blocker mid-build.
+That's the complete V1 - open, browse, export. Nothing else.
+
+**Feasibility:** opening a workbook (local or OneDrive-synced), reading `TECHNICIAN_PLAN`, showing
+it on screen, and splitting it into per-technician `.xlsx` files is straightforward, low risk - the
+same openpyxl-style file access this project's own `tools/scaffold_workbook.py`/`tools/ux_style.py`
+already do today, just packaged as an app instead of a build script. No open technical questions
+remain now that sending is out of scope.
 
 **Later, optional, only after V1 is proven useful** (product owner's own framing - "může přidat",
 not "bude mít"): search/filter within the app, print support, additional export formats, a history
 view of past exports. All still pure presentation over already-published data - none of these
-change the "no business logic, ever" boundary above.
+change the "no business logic, ever" boundary above, and none of them include sending/distribution
+unless the product owner explicitly reopens that question later.
 
 **Tech stack note for when this starts:** since the app never shares logic with `core.ts` (it
 computes nothing), the implementation language is a free choice, not a shared-code constraint.
