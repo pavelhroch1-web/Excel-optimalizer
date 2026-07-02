@@ -359,6 +359,45 @@ test("weeksBetween accounts for year boundary (52-week approximation, documented
   assert.strictEqual(weeksBetween(51, 2026, 2, 2027), 3);
 });
 
+// Year-boundary regression suite (added when ComplianceEngine.ts moved from
+// a single flat "plannedYear" per run to a true per-row ISO week/year
+// derived from each planned row's own DATE - see ComplianceEngine.ts
+// "MATCH MANAGER_PLAN_PUBLISHED -> COMPLIANCE_LOG"). isoWeekNumber() itself
+// was not changed by that fix - these tests exist to pin its already-correct
+// ISO-8601 behavior at every boundary case the fix depends on, so a future
+// change to this function cannot silently reintroduce the bug it fixed.
+test("isoWeekNumber: ordinary mid-year date (regression baseline, unaffected by year boundary)", () => {
+  const { week, year } = isoWeekNumber(new Date(2026, 5, 15)); // 15 June 2026, Monday
+  assert.strictEqual(week, 25);
+  assert.strictEqual(year, 2026);
+});
+test("isoWeekNumber: ISO week 1 of a year starting on Thursday (2026-01-01 is a Thursday)", () => {
+  const { week, year } = isoWeekNumber(new Date(2026, 0, 1));
+  assert.strictEqual(week, 1);
+  assert.strictEqual(year, 2026);
+});
+test("isoWeekNumber: ISO week 53 exists for 2026 (2026-12-28, the last Monday of the year)", () => {
+  const { week, year } = isoWeekNumber(new Date(2026, 11, 28));
+  assert.strictEqual(week, 53);
+  assert.strictEqual(year, 2026);
+});
+test("isoWeekNumber: Jan 1 2027 belongs to ISO week 53 of 2026, not week 1 of 2027 (the classic ISO edge case)", () => {
+  const { week, year } = isoWeekNumber(new Date(2027, 0, 1));
+  assert.strictEqual(week, 53);
+  assert.strictEqual(year, 2026);
+});
+test("isoWeekNumber: first Monday of 2027 is correctly ISO week 1 of 2027", () => {
+  const { week, year } = isoWeekNumber(new Date(2027, 0, 4));
+  assert.strictEqual(week, 1);
+  assert.strictEqual(year, 2027);
+});
+test("isoWeekNumber: December->January transition within the same ISO week (2026-12-31 and 2027-01-01 both week 53/2026)", () => {
+  const dec31 = isoWeekNumber(new Date(2026, 11, 31));
+  const jan1 = isoWeekNumber(new Date(2027, 0, 1));
+  assert.deepStrictEqual(dec31, { week: 53, year: 2026 });
+  assert.deepStrictEqual(jan1, { week: 53, year: 2026 });
+});
+
 // ==========================================================================
 console.log("determineComplianceStatus()");
 // ==========================================================================

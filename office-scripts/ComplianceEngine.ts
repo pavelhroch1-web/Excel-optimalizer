@@ -235,6 +235,16 @@ function main(workbook: ExcelScript.Workbook) {
     return fallback;
   }
   const LATE_CUTOFF = setting("COMPLIANCE_LATE_CUTOFF_WEEKS", 1);
+  // PlanningEngine.ts/PublishEngine.ts generate WEEK as a YEAR-anchored
+  // offset (isoMonday(CONTROL.YEAR, week)) that can exceed 52/53 once a
+  // campaign's week numbers roll into the next real year - PLAN_LIFECYCLE's
+  // own (year, week) key is written using this same flat CONTROL.YEAR
+  // convention (see PublishEngine.ts), not a true per-row ISO year. Needed
+  // here ONLY to reconstruct that exact same raw key for matching against
+  // PLAN_LIFECYCLE below - NOT used for compliance classification itself,
+  // which uses the true per-row ISO week/year derived from DATE instead
+  // (see "MATCH MANAGER_PLAN_PUBLISHED -> COMPLIANCE_LOG" below).
+  const CONTROL_YEAR = setting("YEAR", new Date().getFullYear());
 
   if (salesApp.length < 2) {
     console.log("Compliance Engine: SALESAPP_IMPORT is empty, nothing to do.");
@@ -367,50 +377,75 @@ function main(workbook: ExcelScript.Workbook) {
   const mpHeaders = (managerPlanPublished[0] as string[]).map((h) => String(h));
   const mpIdx = (name: string) => mpHeaders.indexOf(name);
   const cWeek = mpIdx("WEEK");
+  const cDate2 = mpIdx("DATE");
   const cPos2 = mpIdx("POS");
   const cTech2 = mpIdx("TECHNICIAN");
 
-  // One planned row per (posId, week) pair, even if the published snapshot
-  // has that POS only once per week (it should - Planning Engine doesn't
-  // double-book a POS in the same week - but de-duplicate defensively rather
-  // than assume).
-  let plannedSet: { [key: string]: { posId: string; week: number; tech: string } } = {};
+  // One planned row per (posId, isoWeek, isoYear), even if the published
+  // snapshot has that POS only once per week (it should - Planning Engine
+  // doesn't double-book a POS in the same week - but de-duplicate
+  // defensively rather than assume).
+  //
+  // week/year here are the TRUE ISO week/year derived from this row's own
+  // DATE column via isoWeekNumber() - NOT the raw WEEK column value, which
+  // is a YEAR-anchored offset from PlanningEngine.ts that can exceed 52/53
+  // once a campaign's weeks roll into the next real year (e.g. week 54 of a
+  // "2026" anchor is actually early January 2027). Using the true per-row
+  // ISO pair here is what makes this comparable, apples-to-apples, against
+  // actual visit weeks below (also derived via isoWeekNumber() from real
+  // SalesApp dates) - previously this used a single flat "plannedYear" for
+  // every row in the whole run (guessed from the newest SalesApp import),
+  // which silently misclassified compliance for any published week that
+  // actually falls in a different real year than that guess. rawWeek is
+  // kept separately (see PLAN_LIFECYCLE matching below) since that table's
+  // own key uses the raw, not the true-ISO, convention.
+  let plannedSet: {
+    [key: string]: { posId: string; week: number; year: number; rawWeek: number; tech: string };
+  } = {};
   for (let i = 1; i < managerPlanPublished.length; i++) {
     const row = managerPlanPublished[i];
     const posId = String(row[cPos2]);
-    const week = Number(row[cWeek]);
-    if (!posId || !week) {
+    const rawWeek = Number(row[cWeek]);
+    const dateVal = row[cDate2];
+    if (!posId || !rawWeek || !(dateVal instanceof Date)) {
       continue;
     }
-    plannedSet[posId + "|" + week] = { posId, week, tech: String(row[cTech2]) };
+    const { week, year } = isoWeekNumber(dateVal);
+    plannedSet[posId + "|" + week + "|" + year] = { posId, week, year, rawWeek, tech: String(row[cTech2]) };
   }
-  // Assumes MANAGER_PLAN_PUBLISHED's YEAR is the same as latestYear from
-  // SalesApp - true for the current single-year campaign scope of this
-  // project. Flagged as a known simplification if the project ever spans a
-  // year boundary.
-  const plannedYear = latestYear || new Date().getFullYear();
 
   let complianceRows: (string | number)[][] = [];
   const now = new Date().toISOString();
   const matchedPlannedKeys = new Set<string>();
+  // Keyed by PLAN_LIFECYCLE's own raw (CONTROL_YEAR, rawWeek) convention -
+  // deliberately NOT the true-ISO (planned.year, planned.week) pair above,
+  // since that is what PublishEngine.ts actually wrote as that row's
+  // PLAN_LIFECYCLE key. Used below to advance PLAN_LIFECYCLE only.
+  let pendingByRawWeek: { [key: string]: boolean } = {};
 
   for (const key of Object.keys(plannedSet)) {
     const planned = plannedSet[key];
     matchedPlannedKeys.add(key);
     const actuals = (actualByPos[planned.posId] || []).map((a) => ({ week: a.week, year: a.year }));
-    const status = determineComplianceStatus(planned.week, plannedYear, actuals, LATE_CUTOFF, latestWeek, latestYear);
-    const matched = (actualByPos[planned.posId] || []).find((a) => a.week == planned.week && a.year == plannedYear);
+    const status = determineComplianceStatus(planned.week, planned.year, actuals, LATE_CUTOFF, latestWeek, latestYear);
+    const matched = (actualByPos[planned.posId] || []).find((a) => a.week == planned.week && a.year == planned.year);
     complianceRows.push([
-      planned.posId, planned.tech, planned.week, plannedYear, status,
+      planned.posId, planned.tech, planned.week, planned.year, status,
       matched ? matched.date : "", matched ? matched.week : "", now,
     ]);
+    const rawKey = CONTROL_YEAR + "|" + planned.rawWeek;
+    if (status == "Pending") {
+      pendingByRawWeek[rawKey] = true;
+    } else if (!(rawKey in pendingByRawWeek)) {
+      pendingByRawWeek[rawKey] = false;
+    }
   }
 
   // Extra visits: actual visits to a POS in a week where that POS was not
   // planned at all (per BUSINESS_RULES.md section 12: neutral, logged only).
   for (const posId of Object.keys(actualByPos)) {
     for (const a of actualByPos[posId]) {
-      const key = posId + "|" + a.week;
+      const key = posId + "|" + a.week + "|" + a.year;
       if (!plannedSet[key]) {
         complianceRows.push([posId, "", a.week, a.year, "Navic_evidovano", a.date, a.week, now]);
       }
@@ -437,34 +472,17 @@ function main(workbook: ExcelScript.Workbook) {
     const plIdx = (name: string) => plHeaders.indexOf(name);
     const today = new Date();
 
-    // hasPendingVisits per (week, year), from the planned rows just
-    // evaluated above (Navic_evidovano rows are extra visits, not part of
-    // any week's planned-completion set, so they are excluded here).
-    let pendingByWeek: { [key: string]: boolean } = {};
-    for (const r of complianceRows) {
-      const status = String(r[4]);
-      if (status == "Navic_evidovano") {
-        continue;
-      }
-      const key = String(r[3]) + "|" + String(r[2]); // plannedYear|plannedWeek
-      if (status == "Pending") {
-        pendingByWeek[key] = true;
-      } else if (!(key in pendingByWeek)) {
-        pendingByWeek[key] = false;
-      }
-    }
-
     for (let i = 1; i < planLifecycle.length; i++) {
       const row = planLifecycle[i];
       const year = Number(row[plIdx("year")]);
       const week = Number(row[plIdx("week")]);
       const current = String(row[plIdx("status")]) as PlanStatus;
       const key = year + "|" + week;
-      if (!(key in pendingByWeek)) {
+      if (!(key in pendingByRawWeek)) {
         continue; // no compliance data for this week yet - nothing to advance
       }
       const mondayHasPassed = isoMonday(year, week) <= today;
-      const next = advanceLifecycleStatus(current, mondayHasPassed, pendingByWeek[key]);
+      const next = advanceLifecycleStatus(current, mondayHasPassed, pendingByRawWeek[key]);
       if (next != current) {
         workbook.getWorksheet("PLAN_LIFECYCLE").getRangeByIndexes(i, 2, 1, 1).setValue(next);
         if (next == "Closed") {
