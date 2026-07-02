@@ -563,6 +563,14 @@ Product owner reframed the Import Hub from "import more files" to "the entry poi
 product": open the app, drop exports, everything else - merge, dedupe, history, all six engines,
 dashboard, next plan - happens without the user needing to know which sheet or script does what.
 
+**Update - the Power Automate proposal below is explicitly retracted, not just deprioritized.**
+Product owner later confirmed the real, permanent operating model: manual, offline, once a week,
+forever - no API, no live data, no Power BI, no database, no Power Automate, no online sync, ever.
+The system only ever runs against manually-imported data on a weekly cadence. The section below is
+kept as a historical record of a design that was explored and then explicitly ruled out by the
+product owner - not a deferred roadmap item to revisit "later." Any future automation work should
+start from this constraint, not from the flow design below.
+
 **What already works today, unchanged, verified while investigating this** (no code needed - this
 is existing approved behavior, just previously undocumented/undiscoverable):
 

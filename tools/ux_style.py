@@ -542,7 +542,7 @@ def _nav_button(ws, cell_ref, label, target_sheet, color=NAVY, width=None):
     cell.border = THIN_BORDER
 
 
-def build_home(wb, real_control_values):
+def build_home(wb, real_control_values, pos_master_tech_col="O"):
     """A real app hub, not a README sheet: a live pipeline status strip
     (each stage checks the actual workbook state - Import/Plan/Rozpis/
     Publikace/Vyhodnocení/Dashboard - and shows Hotovo/Chybí with a
@@ -715,6 +715,51 @@ def build_home(wb, real_control_values):
         FormulaRule(formula=[f"D{r + 7}>0"], fill=PatternFill("solid", fgColor="FCE4D6")),
     )
     r += 9
+
+    # ---- Pre-publish sanity check: the one thing a manager actually needs
+    # before hitting Publish for 10-20 technicians once a week - "did anyone
+    # get silently left out of this plan". Compares distinct technicians
+    # with at least one Active POS assigned (POS_MASTER) against distinct
+    # technicians actually present in this week's plan (MANAGER_PLAN). A
+    # mismatch is the single costliest realistic weekly mistake in this
+    # workflow (a technician shows up Monday with no route) and is
+    # otherwise invisible - nothing else on this workbook would surface it
+    # before publish. Pure comparison of two counts already computed above,
+    # no new business logic, no new engine field. ----
+    tech_pm_range = f"POS_MASTER!{pos_master_tech_col}2:{pos_master_tech_col}20000"
+    active_range = "POS_MASTER!Q2:Q20000"
+    active_tech_count_formula = (
+        f'=SUMPRODUCT(({tech_pm_range}<>"")*({active_range}="Active")'
+        f'/COUNTIFS({tech_pm_range},{tech_pm_range}&"",{active_range},"Active"))'
+    )
+    ws.cell(r, 1, "PŘED PUBLIKACÍ ZKONTROLUJ").font = TITLE_FONT
+    r += 1
+    ws.cell(r, 1, "Technik. s aktivními POS").font = Font(size=9, color="595959")
+    ws.cell(r, 3, "Technik. v plánu tento týden").font = Font(size=9, color="595959")
+    r += 1
+    ws.cell(r, 1, active_tech_count_formula).font = Font(bold=True, size=16, color=NAVY)
+    ws.cell(r, 3, f'=SUMPRODUCT(({mp_tech_range}<>"")/COUNTIF({mp_tech_range},{mp_tech_range}&""))').font = Font(bold=True, size=16, color=NAVY)
+    check_row = r
+    r += 1
+    ws.merge_cells(f"A{r}:G{r}")
+    check_cell = ws.cell(
+        r, 1,
+        f'=IF(A{check_row}=C{check_row},"✅ Počty souhlasí",'
+        f'"⚠ Nesoulad ("&A{check_row}&" vs "&C{check_row}&") - zkontroluj, jestli někdo nechybí v plánu")'
+    )
+    check_cell.font = Font(bold=True, size=11, color=NAVY)
+    check_cell.fill = PatternFill("solid", fgColor="FFF2CC")
+    check_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[r].height = 20
+    ws.conditional_formatting.add(
+        check_cell.coordinate,
+        FormulaRule(formula=[f'LEFT({check_cell.coordinate},1)="✅"'], fill=PatternFill("solid", fgColor="E2EFDA")),
+    )
+    ws.conditional_formatting.add(
+        check_cell.coordinate,
+        FormulaRule(formula=[f'LEFT({check_cell.coordinate},1)="⚠"'], fill=PatternFill("solid", fgColor="FCE4D6")),
+    )
+    r += 2
 
     # ---- Quick navigation ----
     ws.cell(r, 1, "RYCHLÁ NAVIGACE").font = TITLE_FONT
@@ -1304,7 +1349,7 @@ def apply_all(wb, control_rows):
         k: v for k, v in control_values.items()
         if k in ("CAMPAIGN_START_WEEK", "CAMPAIGN_LENGTH", "VISITS_PER_WEEK",
                   "TARGET_VISITS_DAY", "YEAR")
-    })
+    }, pos_master_tech_col=tech_col)
     apply_sheet_order_and_colors(wb)  # re-apply so HOME lands first
     hide_technical_sheets(wb)
     wb.active = 0  # HOME is what the user sees on open
