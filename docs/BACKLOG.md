@@ -87,12 +87,20 @@ they aren't lost.
   per-CADENCE_RULES-row parameter if different POS groups need different bonus radii. Not
   needed until there's a concrete case for it.
 
-## Approved, deferred until core is stable: Distribution Client desktop app
+## IMPLEMENTED: Distribution Client desktop app (V1) — `desktop_client/`
 Product owner approved this architecture direction four times, refining scope each time - most
-recently by explicitly dropping email/Teams sending. This entry (formerly "Weekly Distribution
-Helper") supersedes all earlier versions. Explicitly deprioritized until FieldForceOptimizer's own
-core workflow is finished, tested, and stable in real production use - only then does work on this
-begin. Recorded in full so the design isn't rediscovered/re-litigated later.
+recently by explicitly dropping email/Teams sending - then asked to implement V1 immediately,
+ahead of the originally-stated "wait until core is stable" sequencing. Built as specified below;
+this entry (formerly "Weekly Distribution Helper") is kept as the historical record of the approved
+design, now marked implemented rather than removed.
+
+**Implementation**: `desktop_client/plan_export.py` (pure file I/O/formatting logic, no GUI
+dependency, unit-tested in `desktop_client/test_plan_export.py` - 12 tests, all passing) +
+`desktop_client/distribution_client.py` (Tkinter GUI). See `desktop_client/README.md` for
+usage/requirements. Verified end-to-end (open workbook -> list technicians -> select -> view rows
+-> export) via a headless Xvfb run driving the real Tkinter widgets, not just the pure logic layer.
+Zero changes to `office-scripts/`, `tools/`, or the workbook itself - confirmed via the full
+existing test/sync suite (87/87 core.ts tests, sync-check unchanged) still passing untouched.
 
 **Core principle (non-negotiable, restated by product owner four times now): FieldForceOptimizer
 remains the single source of truth for all planning business logic - all planning, compliance,
