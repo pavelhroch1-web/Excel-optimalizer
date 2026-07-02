@@ -22,6 +22,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.formatting.rule import FormulaRule
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter, column_index_from_string
+from openpyxl.comments import Comment
 
 # ============================================================================
 # PALETTE
@@ -167,6 +168,38 @@ def style_header_row(ws, freeze_below=True, freeze_col=None):
 IMPORT_STAGING_SHEETS = {"RAW_DATA", "POS_STATUS_IMPORT", "SALESAPP_IMPORT"}
 OUTPUT_SHEETS = {"MANAGER_PLAN", "MANAGER_PLAN_PUBLISHED", "DASHBOARD", "PLAN_LIFECYCLE"}
 LOG_SHEETS = {"COMPLIANCE_LOG", "ADVISOR_LOG", "VISIT_HISTORY_ACTUAL", "VISIT_HISTORY"}
+
+# Import Hub guidance: a cell comment on the header cell of each staging
+# sheet, not a banner row - a banner row would shift every data row down by
+# one, breaking every engine's row-1-is-header assumption. A comment is pure
+# metadata (openpyxl's getValues()-equivalent used by Office Scripts never
+# sees it), so it is risk-free. Content documents a capability that already
+# works today (ComplianceEngine.ts dedupes SALESAPP_IMPORT rows by UID
+# against VISIT_HISTORY_ACTUAL on every run, and ImportEngine.ts upserts
+# POS_MASTER by posId), it just wasn't visible/discoverable before.
+IMPORT_HUB_GUIDANCE = {
+    "RAW_DATA": (
+        "Sem vlož export POS dat. Můžeš vkládat i více exportů za sebou (přidávej "
+        "pod poslední řádek, nepřepisuj) - Import Engine sloučí vše podle POS_ID."
+    ),
+    "POS_STATUS_IMPORT": (
+        "Sem vlož export stavu POS (aktivní/uzavřené). Stejná struktura pokaždé - "
+        "lze vkládat opakovaně, Import Engine vždy aktualizuje POS_MASTER podle POS_ID."
+    ),
+    "SALESAPP_IMPORT": (
+        "Sem vlož export ze SalesApp. Klidně více exportů najednou (např. 2-3 měsíce) - "
+        "přidávej pod poslední řádek. Compliance Engine automaticky odstraní duplicity "
+        "podle UID návštěvy a zachová historii - bezpečné i pro překrývající se exporty."
+    ),
+}
+
+
+def add_import_hub_guidance(wb):
+    for sheet_name, text in IMPORT_HUB_GUIDANCE.items():
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        ws["A1"].comment = Comment(text, "Field Force Optimizer")
 
 
 def color_editable_columns(ws, sheet_name, max_rows=500):
@@ -328,7 +361,7 @@ def build_home(wb, real_control_values):
     stages = [
         # (num, name, description, status formula, target sheet or None, color)
         (
-            "1", "IMPORT DAT", "Nahraj export POS a SalesApp",
+            "1", "IMPORT DAT", "Nahraj export(y) POS a SalesApp - lze i více najednou, viz poznámka na listu",
             '=IF(COUNTA(POS_MASTER!A:A)>1,"✅ Hotovo","❌ Chybí")',
             "RAW_DATA", "2E75B6",
         ),
@@ -796,6 +829,8 @@ def apply_all(wb, control_rows):
 
     for sheet_name in list(wb.sheetnames):
         protect_config_sheet(wb[sheet_name], sheet_name)
+
+    add_import_hub_guidance(wb)
 
     build_home(wb, {
         k: v for k, v in control_values.items()

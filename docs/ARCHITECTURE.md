@@ -556,3 +556,54 @@ increment, if/when requested, is a thin Node CLI wrapper (`tools/desktop/` or si
 a folder of exports, writes them into the same staging-sheet shape ImportEngine.ts expects, then
 runs `core.ts`'s functions directly (no transpile-and-mock-workbook step needed, since it would be
 real Node this time) against an `exceljs`-loaded copy of the release workbook.
+
+## 17. Import Hub as the system's front door (design + first increment)
+
+Product owner reframed the Import Hub from "import more files" to "the entry point of the whole
+product": open the app, drop exports, everything else - merge, dedupe, history, all six engines,
+dashboard, next plan - happens without the user needing to know which sheet or script does what.
+
+**What already works today, unchanged, verified while investigating this** (no code needed - this
+is existing approved behavior, just previously undocumented/undiscoverable):
+
+- `ImportEngine.ts` **upserts** `POS_MASTER` by `posId` - pasting POS data from more than one file,
+  one after another (appended, not overwritten) into `RAW_DATA`/`POS_STATUS_IMPORT`, already merges
+  correctly with no duplicate rows.
+- `ComplianceEngine.ts` reads the **entire** `SALESAPP_IMPORT` sheet on every run and dedupes
+  against `VISIT_HISTORY_ACTUAL` by SalesApp UID (`office-scripts/ComplianceEngine.ts` file header:
+  "safe to re-import overlapping weekly exports"). Pasting two or three months of exports at once,
+  or the same export twice, already produces exactly one history row per real visit - this is the
+  "merge multiple SalesApp exports + dedupe + build history" requirement, already built and tested,
+  just not visible as a stated capability before now.
+- `VISIT_HISTORY_ACTUAL` is append-only and never cleared by any engine - history cannot be lost by
+  re-running anything.
+- The address-based dedup rule (`MANDATORY_9PODNIK`, `dedupBy: "ADDRESS"`) runs downstream in
+  Planning regardless of how many source files fed `POS_MASTER` - untouched by any of the above.
+
+**First real increment, implemented this round:** guidance directly on the workbook rather than
+only in a doc nobody reads at 2am. `add_import_hub_guidance()` in `tools/ux_style.py` places a cell
+comment on `RAW_DATA`/`POS_STATUS_IMPORT`/`SALESAPP_IMPORT`'s header cell stating the append-don't-
+overwrite, multi-file-is-fine behavior above. A comment (not a banner row) was chosen deliberately:
+inserting a row would shift every pasted data row down by one and break every engine's "row 1 is
+the header" assumption - a comment is pure cell metadata, invisible to `getValues()`/`getUsedRange()`,
+zero risk. HOME's "IMPORT DAT" pipeline card text was updated to mention multi-file support.
+
+**What's still missing for the full "one click, walk away" experience** is orchestration, not
+merge/dedupe logic: today a user must run 5-6 Office Scripts in order
+(Import → Planning → Publish → Compliance → Advisor → Reporting). Office Scripts cannot call each
+other directly (confirmed constraint, same reason shared logic is duplicated via SYNC-BLOCK rather
+than imported) - the correct mechanism for chaining them without duplicating six engines' worth of
+code into one giant script is a **Power Automate flow**: trigger = file(s) dropped in the watched
+OneDrive/SharePoint folder (or a manual Flow button for "run now"), then five-to-six sequential
+"Run script" actions against the workbook, in the same order the manager runs them by hand today.
+
+**One workflow decision flagged rather than assumed:** should the automated chain include
+`PublishEngine.ts`, i.e. does dropping a file in a folder eventually *publish* a plan (make it
+binding, visible to technicians) with no human in the loop? Default choice made here: **no** - the
+proposed flow runs Import → Planning → Compliance → Advisor → Reporting automatically (data,
+history, dashboard all stay current with zero manual work), but stops short of Publish, which stays
+a deliberate manager click (HOME already treats it as a distinct "⚙ Automatizace" step, not a
+sheet). Publishing a plan is the one step that commits technicians to something, which reads as
+exactly the kind of "workflow behavior change" worth a manager's active decision rather than a
+silent default - trivial to flip (add one more "Run script" step) if the product owner wants full
+automation including Publish.
