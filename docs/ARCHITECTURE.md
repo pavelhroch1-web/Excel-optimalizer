@@ -480,3 +480,79 @@ mechanism can be swapped later without touching engine code - a desktop app woul
 different way of getting rows into those same staging tables (e.g. writing directly into the
 workbook via the Excel file format, or a local queue synced into it) with a real OS file dialog
 replacing the folder-drop step. Nothing in this design assumes Excel-only.
+
+### 15e. ReportingEngine.ts extended: Regional/Weekly Trend/Technician Workload
+
+Product owner explicitly asked for "vytížení techniků, úspěšnost kampaní, trendy po týdnech,
+regionální přehled" as dashboard content, while separately listing ReportingEngine.ts as one of the
+frozen "zdroj pravdy" engines. Read those two statements together as: the freeze protects
+*decisions* (what counts as compliant, how capacity is allocated, the dedup rule), not "no further
+code in this file" - the three new DASHBOARD sections below are pure aggregation of numbers already
+decided elsewhere, reusing already-approved formulas verbatim rather than inventing new ones:
+
+- **Regional overview** - `computeFailureRateByGroup()` (already used identically by
+  AdvisorEngine.ts's regional-underperformance alert), grouped by `POS_MASTER.market` instead of
+  technician.
+- **Weekly trend** - Splneno/Nesplneno counts grouped by `COMPLIANCE_LOG.plannedWeek/plannedYear`.
+  Labeled explicitly as "podle plánovaného týdne kampaně, ne kalendářního" - that counter is
+  PlanningEngine's campaign-relative week number with a known year-boundary simplification (see
+  BACKLOG.md), not a calendar ISO week, and mislabeling it would overclaim precision the data
+  doesn't have.
+- **Technician workload** - planned-visit count vs. `resolveCapacity()` (the exact function
+  PlanningEngine.ts uses to allocate) for the most recent *calendar* week actually present in
+  `MANAGER_PLAN.DATE` (derived via `isoWeekNumber()`, sidestepping the campaign-counter ambiguity
+  above entirely, since `DATE` is a real date regardless of how `WEEK` is labeled).
+
+Required adding a `dates.ts` sync block (isoMonday/easter/isHoliday/workDays, byte-identical copy)
+and extending the existing `core.ts (reporting)` block with `computeFailureRateByGroup`,
+`ComplianceOutcome`/`GroupFailureRate`, `isoWeekNumber`, `resolveCapacity` - all copied verbatim
+from `core.ts`, verified by `tools/check_sync.py` (13 blocks now, up from 12). No `core.ts` function
+signature or behavior changed; nothing here decides a new business rule. Verified end-to-end with a
+synthetic two-technician/two-market seed through `tools/sim/run_e2e.ts` (no production seed file
+available in this environment) - all three new sections produced correct, hand-checked numbers
+(regional completion rate, weekly completion rate, and workload % = planned/capacity all matched
+manual calculation). DASHBOARD's clear/write range widened from `A5:F500` to `A5:F2000` to leave
+headroom for the extra rows these sections can add.
+
+Also this round: HOME's KPI strip grew to 8 tiles (added "Aktivní kampaně" and "Otevřená
+upozornění", mirroring `DASHBOARD!E3` rather than recomputing).
+
+## 16. Two deployment variants (design, not yet implemented)
+
+Product owner asked for two target deployments sharing identical business logic - only how data
+gets in and how the workbook is hosted differs.
+
+### 16a. Variant A - Corporate (OneDrive/SharePoint/Power Automate/Office Scripts)
+
+This is what exists today, extended per §15d: the workbook lives on OneDrive/SharePoint, engines
+run as Office Scripts from Excel's Automate pane (or on a schedule via a Power Automate flow
+calling "Run script" - already a supported action, no new capability required), and import becomes
+"drop the export into a watched folder" instead of copy/paste. Zero new infrastructure beyond what
+the tenant already has; the constraint is entirely the Office Scripts sandbox (no filesystem, no
+OS dialogs, no long-running processes - each run is a short, stateless invocation against the
+workbook).
+
+### 16b. Variant B - Desktop (download ZIP, run locally)
+
+Target experience: unzip, run an executable, pick a folder of exports, click one button, done.
+This requires a real desktop process (not achievable in Office Scripts), reading/writing the
+*same* workbook file via a library that manipulates `.xlsx` directly (e.g. a Node/Electron or
+Python/PySide shell driving the same file format `tools/scaffold_workbook.py`/`tools/ux_style.py`
+already read and write with openpyxl) - so the desktop app's "engine" would run the **identical**
+business logic. The forward-compatible design choice already in place: `office-scripts/shared/*.ts`
+is pure, dependency-free TypeScript with no Office Scripts-specific API calls inside the actual
+decision logic (`core.ts`/`dates.ts`/`geo.ts`/`text.ts`/`columns.ts` - only the deployable
+`office-scripts/*.ts` wrapper files touch `ExcelScript.Workbook`). That means a desktop variant can
+reuse `core.ts` et al. verbatim (e.g. via a Node/Electron shell using the `xlsx` or `exceljs`
+package instead of the `ExcelScript` API for reading/writing cells) without reimplementing a single
+business rule - only the "wrapper" that reads/writes cells changes, exactly like today's
+Office-Scripts-vs-`tools/sim/mockWorkbook.ts` split already proves works (the same engine source
+already runs, unmodified, against two different "workbook" implementations - the mock harness is a
+working proof of concept for this exact swap).
+
+**Not implemented, deliberately** (per explicit prior instruction: "Neřeš zatím implementaci
+desktopové aplikace"): this section documents the shape, not the build. The concrete next
+increment, if/when requested, is a thin Node CLI wrapper (`tools/desktop/` or similar) that: reads
+a folder of exports, writes them into the same staging-sheet shape ImportEngine.ts expects, then
+runs `core.ts`'s functions directly (no transpile-and-mock-workbook step needed, since it would be
+real Node this time) against an `exceljs`-loaded copy of the release workbook.

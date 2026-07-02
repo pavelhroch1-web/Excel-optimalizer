@@ -23,12 +23,97 @@
 //     Splneno_pozde) / (Splneno_vcas + Splneno_pozde + Nesplneno) - Pending
 //     rows are excluded from the denominator since they are not yet due
 //     (counting them would understate completion for no reason).
+//   - Regional overview: same completion-rate calculation, grouped by
+//     POS_MASTER.market instead of technician (reuses computeFailureRateByGroup,
+//     already used identically by AdvisorEngine.ts for regional underperformance).
+//   - Weekly trend: Splneno/Nesplneno counts grouped by COMPLIANCE_LOG's
+//     plannedWeek/plannedYear (PlanningEngine's campaign-relative counter -
+//     see note below, NOT a calendar ISO week).
+//   - Technician workload: planned visit count vs. resolveCapacity() for the
+//     most recent calendar week present in MANAGER_PLAN - the exact same
+//     capacity formula PlanningEngine.ts uses to allocate, just read here for
+//     reporting instead of allocation. No new business rule.
 //   - Advisor summary: counts from the MOST RECENT AdvisorEngine.ts run only
 //     (ADVISOR_LOG is append-only for trend history - a dashboard should
 //     show current alerts, not every alert ever raised).
+//
+// ALL SECTIONS BELOW ARE PURE AGGREGATION of numbers already decided by
+// PlanningEngine/ComplianceEngine/AdvisorEngine - this file does not
+// classify a visit's compliance status, does not decide capacity, and does
+// not change the address-based dedup rule. If a number here looks wrong,
+// the bug is upstream, not here.
 // ============================================================================
 
 function main(workbook: ExcelScript.Workbook) {
+  // SYNC-BLOCK-START: dates.ts
+  function isoMonday(year: number, week: number): Date {
+    let d = new Date(year, 0, 4);
+    let day = d.getDay();
+    if (day == 0) {
+      day = 7;
+    }
+    d.setDate(d.getDate() - day + 1 + (week - 1) * 7);
+    return d;
+  }
+
+  function easter(y: number): Date {
+    const f = Math.floor;
+    let a = y % 19;
+    let b = f(y / 100);
+    let c = y % 100;
+    let d = f(b / 4);
+    let e = b % 4;
+    let g = f((8 * b + 13) / 25);
+    let h = (19 * a + b - d - g + 15) % 30;
+    let i = f(c / 4);
+    let k = c % 4;
+    let l = (32 + 2 * e + 2 * i - h - k) % 7;
+    let m = f((a + 11 * h + 22 * l) / 451);
+    let month = f((h + l - 7 * m + 114) / 31);
+    let day = ((h + l - 7 * m + 114) % 31) + 1;
+    return new Date(y, month - 1, day);
+  }
+
+  // Czech public holidays: 11 fixed dates + Good Friday + Easter Monday.
+  function isHoliday(date: Date, year: number): boolean {
+    const fixed = [
+      "1-1", "1-5", "8-5", "5-7", "6-7", "28-9",
+      "28-10", "17-11", "24-12", "25-12", "26-12",
+    ];
+    const key = date.getDate() + "-" + (date.getMonth() + 1);
+    if (fixed.includes(key)) {
+      return true;
+    }
+    const e = easter(year);
+    let friday = new Date(e);
+    friday.setDate(e.getDate() - 2);
+    let monday = new Date(e);
+    monday.setDate(e.getDate() + 1);
+    return (
+      date.toDateString() == friday.toDateString() ||
+      date.toDateString() == monday.toDateString()
+    );
+  }
+
+  // Returns the working (non-holiday) Mon-Fri days for a given ISO week.
+  // This is the automatic part of dynamic capacity - CAPACITY_OVERRIDE (a
+  // new V11 config table) can still override the resulting day/visit count
+  // manually; see docs/BUSINESS_RULES.md section 8.
+  function workDays(year: number, week: number): { day: string; date: Date }[] {
+    const names = ["MON", "TUE", "WED", "THU", "FRI"];
+    let start = isoMonday(year, week);
+    let result: { day: string; date: Date }[] = [];
+    for (let i = 0; i < 5; i++) {
+      let d = new Date(start);
+      d.setDate(start.getDate() + i);
+      if (!isHoliday(d, year)) {
+        result.push({ day: names[i], date: d });
+      }
+    }
+    return result;
+  }
+  // SYNC-BLOCK-END: dates.ts
+
   // SYNC-BLOCK-START: core.ts (reporting)
   interface TimestampedRow {
     key: string;
@@ -43,6 +128,67 @@ function main(workbook: ExcelScript.Workbook) {
       }
     }
     return Object.values(latest);
+  }
+
+  interface ComplianceOutcome {
+    group: string; // technician name or region name - caller decides the grouping
+    status: string;
+  }
+
+  interface GroupFailureRate {
+    group: string;
+    total: number;
+    failed: number;
+    rate: number; // failed / total, in [0, 1]
+  }
+
+  function computeFailureRateByGroup(
+    rows: ComplianceOutcome[],
+    failureStatuses: string[]
+  ): GroupFailureRate[] {
+    let byGroup: { [group: string]: { total: number; failed: number } } = {};
+    for (const row of rows) {
+      if (!row.group) {
+        continue;
+      }
+      if (!byGroup[row.group]) {
+        byGroup[row.group] = { total: 0, failed: 0 };
+      }
+      byGroup[row.group].total++;
+      if (failureStatuses.includes(row.status)) {
+        byGroup[row.group].failed++;
+      }
+    }
+    return Object.keys(byGroup).map((group) => ({
+      group,
+      total: byGroup[group].total,
+      failed: byGroup[group].failed,
+      rate: byGroup[group].failed / byGroup[group].total,
+    }));
+  }
+
+  function isoWeekNumber(date: Date): { week: number; year: number } {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = (d.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+    d.setUTCDate(d.getUTCDate() - dayNum + 3); // shift to nearest Thursday
+    const isoYear = d.getUTCFullYear();
+    const firstThursday = new Date(Date.UTC(isoYear, 0, 4));
+    const firstDayNum = (firstThursday.getUTCDay() + 6) % 7;
+    firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNum + 3);
+    const week = 1 + Math.round((d.getTime() - firstThursday.getTime()) / (7 * 24 * 3600 * 1000));
+    return { week, year: isoYear };
+  }
+
+  function resolveCapacity(
+    overrideMap: { [key: string]: number },
+    tech: string,
+    year: number,
+    week: number,
+    workDaysCount: number,
+    targetVisitsPerDay: number
+  ): number {
+    const key = tech + "|" + year + "|" + week;
+    return overrideMap[key] !== undefined ? overrideMap[key] : workDaysCount * targetVisitsPerDay;
   }
   // SYNC-BLOCK-END: core.ts (reporting)
 
@@ -68,7 +214,11 @@ function main(workbook: ExcelScript.Workbook) {
   // A1:F3 would also wipe the "DASHBOARD" title text and tile labels (a
   // content clear removes values even with ClearApplyTo.contents - only
   // formatting is preserved, not text). Detail sections start at row 5.
-  dashWs.getRange("A5:F500").clear(ExcelScript.ClearApplyTo.contents);
+  // Widened from A5:F500 to A5:F2000 when the Regional/Weekly Trend/Workload
+  // sections were added - more sections means more potential rows (one per
+  // market/week/technician each), same static-cap trade-off as before, just
+  // with headroom for the new sections too.
+  dashWs.getRange("A5:F2000").clear(ExcelScript.ClearApplyTo.contents);
 
   // KPI tile values (B3/C3/D3/E3 - fixed positions pre-styled by
   // tools/ux_style.py's build_dashboard_template) - filled in as the
@@ -134,11 +284,19 @@ function main(workbook: ExcelScript.Workbook) {
   // ==========================================================================
 
   section("COMPLIANCE SUMMARY (latest known status per planned visit)");
-  let latestCompliance: { key: string; timestamp: string; status: string; technician: string }[] = [];
+  let latestCompliance: {
+    key: string;
+    timestamp: string;
+    status: string;
+    technician: string;
+    posId: string;
+    plannedWeek: number;
+    plannedYear: number;
+  }[] = [];
   if (complianceLog.length >= 2) {
     const cHeaders = (complianceLog[0] as string[]).map((h) => String(h));
     const cidx = (name: string) => cHeaders.indexOf(name);
-    let raw: { key: string; timestamp: string; status: string; technician: string }[] = [];
+    let raw: typeof latestCompliance = [];
     for (let i = 1; i < complianceLog.length; i++) {
       const r = complianceLog[i];
       if (!r[cidx("posId")]) {
@@ -149,6 +307,9 @@ function main(workbook: ExcelScript.Workbook) {
         timestamp: String(r[cidx("evaluatedAt")]),
         status: String(r[cidx("status")]),
         technician: String(r[cidx("technician")]),
+        posId: String(r[cidx("posId")]),
+        plannedWeek: Number(r[cidx("plannedWeek")]),
+        plannedYear: Number(r[cidx("plannedYear")]),
       });
     }
     latestCompliance = latestByKey(raw);
@@ -191,6 +352,141 @@ function main(workbook: ExcelScript.Workbook) {
       const rate = denom > 0 ? Math.round(((t.vcas + t.pozde) / denom) * 1000) / 10 : 0;
       row(tech, t.vcas, t.pozde, t.nesplneno, rate);
     }
+  }
+  blank();
+
+  // ==========================================================================
+  // REGIONAL OVERVIEW (same completion-rate calculation as Technician KPI,
+  // grouped by POS_MASTER.market instead - reuses computeFailureRateByGroup,
+  // the identical function AdvisorEngine.ts uses for its own regional
+  // underperformance alert, just for reporting instead of alerting)
+  // ==========================================================================
+
+  section("REGIONAL OVERVIEW (completion rate by market)");
+  row("Market", "Total evaluated", "Nesplneno", "Completion %");
+  if (posMaster.length >= 2 && latestCompliance.length > 0) {
+    const mHeaders = (posMaster[0] as string[]).map((h) => String(h));
+    const midx = (name: string) => mHeaders.indexOf(name);
+    let marketByPos: { [posId: string]: string } = {};
+    for (let i = 1; i < posMaster.length; i++) {
+      const r = posMaster[i];
+      if (r[midx("posId")]) {
+        marketByPos[String(r[midx("posId")])] = String(r[midx("market")]);
+      }
+    }
+    const regionalOutcomes: { group: string; status: string }[] = latestCompliance
+      .filter((c) => c.status != "Pending")
+      .map((c) => ({ group: marketByPos[c.posId] || "", status: c.status }));
+    const regionalRates = computeFailureRateByGroup(regionalOutcomes, ["Nesplneno"]);
+    for (const r of regionalRates.sort((a, b) => a.group.localeCompare(b.group))) {
+      row(r.group, r.total, r.failed, Math.round((1 - r.rate) * 1000) / 10);
+    }
+  }
+  blank();
+
+  // ==========================================================================
+  // WEEKLY TREND (Splneno/Nesplneno counts by planned week - uses
+  // PlanningEngine's campaign-relative week counter, NOT a calendar ISO
+  // week, since that is the only per-week key COMPLIANCE_LOG has; see
+  // docs/BACKLOG.md for the known year-boundary simplification this
+  // inherits)
+  // ==========================================================================
+
+  section("WEEKLY TREND (podle plánovaného týdne kampaně, ne kalendářního)");
+  row("Week", "Splneno_vcas", "Splneno_pozde", "Nesplneno", "Completion %");
+  if (latestCompliance.length > 0) {
+    let byWeek: { [key: string]: { week: number; year: number; vcas: number; pozde: number; nesplneno: number } } = {};
+    for (const c of latestCompliance) {
+      if (c.status == "Pending") {
+        continue;
+      }
+      const key = c.plannedYear + "|" + c.plannedWeek;
+      if (!byWeek[key]) {
+        byWeek[key] = { week: c.plannedWeek, year: c.plannedYear, vcas: 0, pozde: 0, nesplneno: 0 };
+      }
+      if (c.status == "Splneno_vcas") byWeek[key].vcas++;
+      if (c.status == "Splneno_pozde") byWeek[key].pozde++;
+      if (c.status == "Nesplneno") byWeek[key].nesplneno++;
+    }
+    const weekKeys = Object.keys(byWeek).sort((a, b) => {
+      const wa = byWeek[a], wb = byWeek[b];
+      return wa.year != wb.year ? wa.year - wb.year : wa.week - wb.week;
+    });
+    for (const key of weekKeys) {
+      const w = byWeek[key];
+      const denom = w.vcas + w.pozde + w.nesplneno;
+      const rate = denom > 0 ? Math.round(((w.vcas + w.pozde) / denom) * 1000) / 10 : 0;
+      row(w.year + " / " + w.week, w.vcas, w.pozde, w.nesplneno, rate);
+    }
+  }
+  blank();
+
+  // ==========================================================================
+  // TECHNICIAN WORKLOAD (capacity utilization for the most recent calendar
+  // week present in MANAGER_PLAN - reads MANAGER_PLAN.DATE, a real calendar
+  // date, NOT the WEEK column, so this is unaffected by the campaign-relative
+  // counter's year-boundary simplification noted above. Uses resolveCapacity(),
+  // the exact same formula PlanningEngine.ts already uses to allocate -
+  // reporting on an approved formula, not deciding a new one.)
+  // ==========================================================================
+
+  section("TECHNICIAN WORKLOAD (nejnovější kalendářní týden v MANAGER_PLAN)");
+  row("Technician", "Planned visits", "Capacity", "Utilization %");
+  const managerPlan = readTable("MANAGER_PLAN");
+  const capacityOverrideRows = readTable("CAPACITY_OVERRIDE");
+  const controlRows = readTable("CONTROL");
+  if (managerPlan.length >= 2) {
+    let controlMap: { [key: string]: string } = {};
+    for (let i = 1; i < controlRows.length; i++) {
+      if (controlRows[i][0]) {
+        controlMap[String(controlRows[i][0])] = String(controlRows[i][1]);
+      }
+    }
+    const targetVisitsDay = controlMap["TARGET_VISITS_DAY"] ? Number(controlMap["TARGET_VISITS_DAY"]) : 8;
+
+    let capacityOverrideMap: { [key: string]: number } = {};
+    for (let i = 1; i < capacityOverrideRows.length; i++) {
+      const r = capacityOverrideRows[i];
+      if (r[0]) {
+        capacityOverrideMap[String(r[0]) + "|" + String(r[1]) + "|" + String(r[2])] = Number(r[3]);
+      }
+    }
+
+    // Column layout: B=DATE, D=TECHNICIAN (see scaffold_workbook.py).
+    let latestWeek = { week: 0, year: 0 };
+    let visitsByTechWeek: { [key: string]: { week: number; year: number; tech: string; count: number } } = {};
+    for (let i = 1; i < managerPlan.length; i++) {
+      const r = managerPlan[i];
+      const dateVal = r[1];
+      const tech = r[3] ? String(r[3]) : "";
+      if (!tech || !(dateVal instanceof Date)) {
+        continue;
+      }
+      const { week, year } = isoWeekNumber(dateVal);
+      if (year > latestWeek.year || (year == latestWeek.year && week > latestWeek.week)) {
+        latestWeek = { week, year };
+      }
+      const key = tech + "|" + year + "|" + week;
+      if (!visitsByTechWeek[key]) {
+        visitsByTechWeek[key] = { week, year, tech, count: 0 };
+      }
+      visitsByTechWeek[key].count++;
+    }
+
+    if (latestWeek.week > 0) {
+      const days = workDays(latestWeek.year, latestWeek.week).length;
+      for (const key of Object.keys(visitsByTechWeek).sort()) {
+        const v = visitsByTechWeek[key];
+        if (v.week != latestWeek.week || v.year != latestWeek.year) {
+          continue;
+        }
+        const capacity = resolveCapacity(capacityOverrideMap, v.tech, v.year, v.week, days, targetVisitsDay);
+        const utilization = capacity > 0 ? Math.round((v.count / capacity) * 1000) / 10 : 0;
+        row(v.tech, v.count, capacity, utilization);
+      }
+    }
+  } else {
+    row("(MANAGER_PLAN is empty - run Planning Engine first)");
   }
   blank();
 

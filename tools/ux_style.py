@@ -444,15 +444,21 @@ def build_home(wb, real_control_values):
         ("B", "POS pokryto plánem", f'=SUMPRODUCT(({mp_pos_range}<>"")/COUNTIF({mp_pos_range},{mp_pos_range}&""))'),
         ("D", "Techniků naplánováno", f'=SUMPRODUCT(({mp_tech_range}<>"")/COUNTIF({mp_tech_range},{mp_tech_range}&""))'),
         ("F", "Compliance (splněno / nesplněno)", '=DASHBOARD!C3&" / "&DASHBOARD!D3'),
+        ("B", "Aktivní kampaně", '=COUNTA(ACTIVITY_PLAN!A:A)-1'),
+        ("D", "Otevřená upozornění", "=DASHBOARD!E3"),
     ]
-    row_offsets = [0, 0, 0, 3, 3, 3]
+    row_offsets = [0, 0, 0, 3, 3, 3, 6, 6]
     for (col, label, formula), row_offset in zip(strip, row_offsets):
         ws[f"{col}{r + row_offset}"] = label
         ws[f"{col}{r + row_offset}"].font = Font(size=9, color="595959")
         value_font = Font(bold=True, size=20, color=NAVY) if row_offset == 0 else Font(bold=True, size=16, color=NAVY)
         ws[f"{col}{r + row_offset + 1}"] = formula
         ws[f"{col}{r + row_offset + 1}"].font = value_font
-    r += 6
+    ws.conditional_formatting.add(
+        f"D{r + 7}",
+        FormulaRule(formula=[f"D{r + 7}>0"], fill=PatternFill("solid", fgColor="FCE4D6")),
+    )
+    r += 9
 
     # ---- Quick navigation ----
     ws.cell(r, 1, "RYCHLÁ NAVIGACE").font = TITLE_FONT
