@@ -23,6 +23,7 @@ from openpyxl.formatting.rule import FormulaRule
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter, column_index_from_string
 from openpyxl.comments import Comment
+from openpyxl.chart import LineChart, BarChart, Reference
 
 # ============================================================================
 # PALETTE
@@ -867,12 +868,23 @@ def build_dashboard_template(wb):
     """Pre-styles a KPI-tile header band that ReportingEngine.ts writes
     numbers into (fixed cell positions, see ReportingEngine.ts). The
     detailed tables ReportingEngine already produces are kept below this
-    band, just pushed down to make room - same data, better hierarchy."""
+    band, just pushed down to make room - same data, better hierarchy.
+
+    Also builds the three native Excel charts (weekly trend, technician
+    workload, regional completion) bound to the FIXED chart-data ranges in
+    columns H:K that ReportingEngine.ts writes on every run (see that
+    file's "CHART DATA BLOCKS" comment for why fixed ranges, not the
+    flowing detail sections, are what a chart can safely reference). Charts
+    are openpyxl objects created once here; Office Scripts never touches
+    them, only the cell values they read from - so a chart keeps rendering
+    correctly across every future engine run with no further Python step."""
     ws = wb["DASHBOARD"]
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 22
     for col in "BCDEF":
         ws.column_dimensions[col].width = 18
+    for col in "HIJK":
+        ws.column_dimensions[col].width = 14
 
     ws.merge_cells("A1:F1")
     ws["A1"] = "DASHBOARD"
@@ -896,7 +908,99 @@ def build_dashboard_template(wb):
         ws[cell_ref].alignment = Alignment(horizontal="center", vertical="center")
         ws.row_dimensions[3].height = 34
     ws.freeze_panes = "A5"
+
+    # Severity badges for the flowing ADVISOR ALERTS rows (ReportingEngine.ts
+    # writes "TYPE (SEVERITY)" as column A of each alert row, e.g.
+    # "TECHNICIAN_OVERLOAD (CRITICAL)") - a colored left-edge cue so a
+    # CRITICAL alert is visually distinct from an informational one without
+    # reading the text. Row-range based (A5:A2000), not tied to any fixed
+    # row count, since the flowing section's length varies run to run - a
+    # text-match rule keeps working regardless of exactly which row it lands
+    # on, unlike the chart data blocks above which need fixed positions.
+    severity_colors = [("CRITICAL", "C00000"), ("WARNING", "BF8F00"), ("INFO", "2E75B6")]
+    for keyword, color in severity_colors:
+        ws.conditional_formatting.add(
+            "A5:A2000",
+            FormulaRule(
+                formula=[f'ISNUMBER(SEARCH("({keyword})",$A5))'],
+                fill=PatternFill("solid", fgColor=color),
+                font=Font(color=WHITE, bold=True),
+            ),
+        )
+
+    _build_dashboard_charts(ws)
     return ws
+
+
+def _build_dashboard_charts(ws):
+    # ---- WEEKLY TREND: label H1, header H2:K2, data H3:K14 (12 weeks) ----
+    ws["H1"] = "📈 VÝVOJ PLNĚNÍ PO TÝDNECH"
+    ws["H1"].font = SECTION_FONT
+    for col, label in zip("HIJK", ["Week", "Splněno včas", "Splněno pozdě", "Nesplněno"]):
+        ws[f"{col}2"] = label
+        ws[f"{col}2"].font = Font(bold=True, size=9, color="595959")
+
+    weekly_chart = LineChart()
+    weekly_chart.title = "Plnění plánovaných návštěv po týdnech"
+    weekly_chart.style = 2
+    weekly_chart.y_axis.title = "Počet návštěv"
+    weekly_chart.x_axis.title = "Týden"
+    weekly_chart.height = 8
+    weekly_chart.width = 22
+    cats = Reference(ws, min_col=8, min_row=3, max_row=14)
+    for col, name, color in [(9, "Splněno včas", "375623"), (10, "Splněno pozdě", "BF8F00"), (11, "Nesplněno", "C00000")]:
+        data = Reference(ws, min_col=col, min_row=2, max_row=14)
+        weekly_chart.add_data(data, titles_from_data=True)
+    weekly_chart.set_categories(cats)
+    for series, color in zip(weekly_chart.series, ["375623", "BF8F00", "C00000"]):
+        series.graphicalProperties.line.solidFill = color
+        series.graphicalProperties.line.width = 20000
+        series.smooth = False
+    ws.add_chart(weekly_chart, "M1")
+
+    # ---- TECHNICIAN WORKLOAD: label H17, header H18:K18, data H19:K32 ----
+    ws["H17"] = "👥 VYTÍŽENÍ TECHNIKŮ (nejnovější týden)"
+    ws["H17"].font = SECTION_FONT
+    for col, label in zip("HIJK", ["Technik", "Naplánováno", "Kapacita", "Vytížení %"]):
+        ws[f"{col}18"] = label
+        ws[f"{col}18"].font = Font(bold=True, size=9, color="595959")
+
+    workload_chart = BarChart()
+    workload_chart.type = "col"
+    workload_chart.title = "Naplánováno vs. kapacita (aktuální týden)"
+    workload_chart.style = 10
+    workload_chart.y_axis.title = "Počet návštěv"
+    workload_chart.height = 8
+    workload_chart.width = 22
+    w_cats = Reference(ws, min_col=8, min_row=19, max_row=32)
+    for col, color in [(9, "375623"), (10, "BFBFBF")]:
+        data = Reference(ws, min_col=col, min_row=18, max_row=32)
+        workload_chart.add_data(data, titles_from_data=True)
+    workload_chart.set_categories(w_cats)
+    for series, color in zip(workload_chart.series, ["375623", "BFBFBF"]):
+        series.graphicalProperties.solidFill = color
+    ws.add_chart(workload_chart, "M17")
+
+    # ---- REGIONAL OVERVIEW: label H35, header H36:I36, data H37:I48 ----
+    ws["H35"] = "🗺 REGIONÁLNÍ PŘEHLED (completion %)"
+    ws["H35"].font = SECTION_FONT
+    for col, label in zip("HI", ["Market", "Completion %"]):
+        ws[f"{col}36"] = label
+        ws[f"{col}36"].font = Font(bold=True, size=9, color="595959")
+
+    regional_chart = BarChart()
+    regional_chart.type = "bar"  # horizontal - reads better with region names
+    regional_chart.title = "Splnění plánu podle regionu"
+    regional_chart.style = 12
+    regional_chart.y_axis.title = "Completion %"
+    regional_chart.height = 8
+    regional_chart.width = 22
+    r_cats = Reference(ws, min_col=8, min_row=37, max_row=48)
+    r_data = Reference(ws, min_col=9, min_row=36, max_row=48)
+    regional_chart.add_data(r_data, titles_from_data=True)
+    regional_chart.set_categories(r_cats)
+    regional_chart.series[0].graphicalProperties.solidFill = "2E75B6"
+    ws.add_chart(regional_chart, "M35")
 
 
 def find_tech_column_letter(pos_master_header_row):

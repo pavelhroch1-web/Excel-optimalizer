@@ -720,3 +720,36 @@ same pattern established here: a pure, testable `core.ts` function with a swappa
 wired into the existing diagnostic-only `AdvisorEngine.ts`/`ADVISOR_LOG` pattern, informational
 only, config-driven thresholds - not hardcoded into the deterministic planning/compliance rules
 that remain frozen.
+
+## 20. Native charts on DASHBOARD
+
+Product owner asked for real graphs (weekly trend, technician workload, regional overview), not
+just tables - explicitly "grafy nechci jen proto, aby tam byly... každý graf musí pomáhat s
+plánováním." Implemented as three native Excel chart objects (`openpyxl.chart` - `LineChart` for
+weekly trend, two `BarChart`s for workload/regional), built once by `tools/ux_style.py`, that keep
+rendering correctly on every future `ReportingEngine.ts` run with zero further Python involvement.
+
+**The one real design problem this raised**: DASHBOARD's existing detail sections are a *flowing*
+list - each section's row count varies run to run (more weeks, more technicians, more markets over
+time). A native Excel chart binds to a fixed cell range; pointed at a flowing range, it would
+silently show blank rows or miss new data as the list grew or shrank. Solution: `ReportingEngine.ts`
+now also writes the same underlying numbers (weekly trend, per-technician workload, regional
+completion - computed once, no duplicate logic) into three FIXED-size blocks in columns H:K
+(12 weeks / 14 technicians / 12 markets, oldest-first, blank-padded when there's less data than the
+cap) - "CHART DATA BLOCKS" in that file. Only the data rows are cleared/rewritten each run; the
+label/header rows above each block are static text `tools/ux_style.py` wrote once, same pattern as
+the KPI tile labels. The charts reference only those fixed blocks, never the flowing sections.
+
+Also added: severity color-coding (red/orange/blue, matching CRITICAL/WARNING/INFO) on the flowing
+ADVISOR ALERTS rows via a text-match conditional-formatting rule (robust to the row's exact
+position, unlike the chart data).
+
+**Maps - explicitly deferred, not silently dropped**: product owner asked for regional maps "pokud
+to půjde rozumně realizovat." It doesn't, within this project's own constraints: a real geographic
+map needs either an external mapping/geocoding service (violates the standing "no external APIs"
+constraint) or Excel's built-in 3D Maps/Filled Map feature, which is a manual, non-scriptable Excel
+UI feature with no Office Scripts API to drive it - it can't be built or kept in sync by a script,
+only by a human clicking through Excel's ribbon each time, which fails the "no manual work" goal
+for everything else in this project. The `REGIONAL OVERVIEW` bar chart (regions on one axis,
+completion % on the other) is the honest substitute: same information, visually ranked, achievable
+and re-render-safe with no manual step.

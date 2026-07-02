@@ -234,6 +234,17 @@ function main(workbook: ExcelScript.Workbook) {
   let kpiNesplneno = 0;
   let kpiOpenAlerts = 0;
 
+  // Fixed-size chart-data collectors: native Excel charts (built once by
+  // tools/ux_style.py) bind to FIXED cell ranges, unlike the flowing detail
+  // sections below whose row count varies run to run - a chart pointed at a
+  // variable-length range would silently go stale or show blank rows. These
+  // arrays mirror a subset of the same numbers already computed for the
+  // flowing sections (single source of truth logic, just also captured here
+  // for a stable-shaped write later - see "CHART DATA BLOCKS" below).
+  let chartWeekly: { label: string; vcas: number; pozde: number; nesplneno: number }[] = [];
+  let chartWorkload: { tech: string; planned: number; capacity: number; utilization: number }[] = [];
+  let chartRegional: { market: string; completionPercent: number }[] = [];
+
   let output: (string | number)[][] = [];
   function section(title: string) {
     output.push([title, "", "", "", "", ""]);
@@ -383,7 +394,9 @@ function main(workbook: ExcelScript.Workbook) {
       .map((c) => ({ group: marketByPos[c.posId] || "", status: c.status }));
     const regionalRates = computeFailureRateByGroup(regionalOutcomes, ["Nesplneno"]);
     for (const r of regionalRates.sort((a, b) => a.group.localeCompare(b.group))) {
-      row(r.group, r.total, r.failed, Math.round((1 - r.rate) * 1000) / 10);
+      const completionPercent = Math.round((1 - r.rate) * 1000) / 10;
+      row(r.group, r.total, r.failed, completionPercent);
+      chartRegional.push({ market: r.group, completionPercent });
     }
   }
   blank();
@@ -421,6 +434,7 @@ function main(workbook: ExcelScript.Workbook) {
       const denom = w.vcas + w.pozde + w.nesplneno;
       const rate = denom > 0 ? Math.round(((w.vcas + w.pozde) / denom) * 1000) / 10 : 0;
       row(w.year + " / " + w.week, w.vcas, w.pozde, w.nesplneno, rate);
+      chartWeekly.push({ label: w.year + "/" + w.week, vcas: w.vcas, pozde: w.pozde, nesplneno: w.nesplneno });
     }
   }
   blank();
@@ -487,6 +501,7 @@ function main(workbook: ExcelScript.Workbook) {
         const capacity = resolveCapacity(capacityOverrideMap, v.tech, v.year, v.week, days, targetVisitsDay);
         const utilization = capacity > 0 ? Math.round((v.count / capacity) * 1000) / 10 : 0;
         row(v.tech, v.count, capacity, utilization);
+        chartWorkload.push({ tech: v.tech, planned: v.count, capacity, utilization });
       }
     }
   } else {
@@ -629,5 +644,45 @@ function main(workbook: ExcelScript.Workbook) {
     dashWs.getRangeByIndexes(4, 0, output.length, 6).setValues(output);
   }
 
-  console.log("Reporting Engine: dashboard refreshed, " + output.length + " detail rows + 4 KPI tiles written.");
+  // ==========================================================================
+  // CHART DATA BLOCKS (columns H:K) - FIXED-size ranges that the native
+  // Excel charts tools/ux_style.py built once are bound to. Only the DATA
+  // rows are cleared/rewritten here - the label/header rows above each
+  // block (H1:K2, H17:K18, H35:I36) are static text ux_style.py wrote once,
+  // same pattern as the DASHBOARD title/KPI-tile labels. A chart pointed at
+  // a flowing, variable-length range (like the detail sections above) would
+  // silently show blank or stale rows once the real row count changed -
+  // fixed ranges avoid that at the cost of a cap (12 weeks / 14 technicians
+  // / 12 markets), padded with blank rows when there is less data than that.
+  // ==========================================================================
+
+  const WEEKLY_CHART_ROWS = 12;
+  const WORKLOAD_CHART_ROWS = 14;
+  const REGIONAL_CHART_ROWS = 12;
+
+  dashWs.getRangeByIndexes(2, 7, WEEKLY_CHART_ROWS, 4).clear(ExcelScript.ClearApplyTo.contents); // H3:K14
+  const weeklyChartRows = chartWeekly.slice(-WEEKLY_CHART_ROWS);
+  if (weeklyChartRows.length > 0) {
+    dashWs.getRangeByIndexes(2, 7, weeklyChartRows.length, 4).setValues(
+      weeklyChartRows.map((w) => [w.label, w.vcas, w.pozde, w.nesplneno])
+    );
+  }
+
+  dashWs.getRangeByIndexes(18, 7, WORKLOAD_CHART_ROWS, 4).clear(ExcelScript.ClearApplyTo.contents); // H19:K32
+  const workloadChartRows = chartWorkload.slice(0, WORKLOAD_CHART_ROWS);
+  if (workloadChartRows.length > 0) {
+    dashWs.getRangeByIndexes(18, 7, workloadChartRows.length, 4).setValues(
+      workloadChartRows.map((w) => [w.tech, w.planned, w.capacity, w.utilization])
+    );
+  }
+
+  dashWs.getRangeByIndexes(36, 7, REGIONAL_CHART_ROWS, 2).clear(ExcelScript.ClearApplyTo.contents); // H37:I48
+  const regionalChartRows = chartRegional.slice(0, REGIONAL_CHART_ROWS);
+  if (regionalChartRows.length > 0) {
+    dashWs.getRangeByIndexes(36, 7, regionalChartRows.length, 2).setValues(
+      regionalChartRows.map((r) => [r.market, r.completionPercent])
+    );
+  }
+
+  console.log("Reporting Engine: dashboard refreshed, " + output.length + " detail rows + 4 KPI tiles + 3 chart data blocks written.");
 }
