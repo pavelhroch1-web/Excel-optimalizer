@@ -18,6 +18,8 @@ import {
   isoWeekNumber,
   weeksBetween,
   determineComplianceStatus,
+  findNeglected,
+  computeFailureRateByGroup,
 } from "../office-scripts/shared/core";
 
 let passed = 0;
@@ -389,6 +391,67 @@ test("multiple actual visits - earliest one determines the status", () => {
     1, 33, 2026
   );
   assert.strictEqual(status, "Splneno_vcas");
+});
+
+// ==========================================================================
+console.log("findNeglected()");
+// ==========================================================================
+
+test("POS at or beyond the threshold are flagged", () => {
+  const items = [
+    { posId: "A", weeksSinceLastVisit: 26 },
+    { posId: "B", weeksSinceLastVisit: 25 },
+    { posId: "C", weeksSinceLastVisit: 30 },
+  ];
+  assert.deepStrictEqual(findNeglected(items, 26), ["A", "C"]);
+});
+test("null weeksSinceLastVisit (never visited, no history) is not flagged - not enough information, not a false positive", () => {
+  const items = [{ posId: "A", weeksSinceLastVisit: null }];
+  assert.deepStrictEqual(findNeglected(items, 26), []);
+});
+test("empty list returns empty, no crash", () => {
+  assert.deepStrictEqual(findNeglected([], 26), []);
+});
+
+// ==========================================================================
+console.log("computeFailureRateByGroup()");
+// ==========================================================================
+
+test("failure rate is computed correctly per group", () => {
+  const rows = [
+    { group: "Novak", status: "Nesplneno" },
+    { group: "Novak", status: "Nesplneno" },
+    { group: "Novak", status: "Splneno_vcas" },
+    { group: "Svoboda", status: "Splneno_vcas" },
+  ];
+  const result = computeFailureRateByGroup(rows, ["Nesplneno"]);
+  const novak = result.find((r) => r.group == "Novak")!;
+  const svoboda = result.find((r) => r.group == "Svoboda")!;
+  assert.strictEqual(novak.total, 3);
+  assert.strictEqual(novak.failed, 2);
+  assert.ok(Math.abs(novak.rate - 2 / 3) < 1e-9);
+  assert.strictEqual(svoboda.rate, 0);
+});
+test("rows with an empty group are skipped (e.g. unresolved extra-visit executor)", () => {
+  const rows = [
+    { group: "", status: "Navic_evidovano" },
+    { group: "Novak", status: "Splneno_vcas" },
+  ];
+  const result = computeFailureRateByGroup(rows, ["Nesplneno"]);
+  assert.strictEqual(result.length, 1);
+  assert.strictEqual(result[0].group, "Novak");
+});
+test("multiple failure statuses can be counted together", () => {
+  const rows = [
+    { group: "Novak", status: "Nesplneno" },
+    { group: "Novak", status: "Splneno_pozde" },
+    { group: "Novak", status: "Splneno_vcas" },
+  ];
+  const result = computeFailureRateByGroup(rows, ["Nesplneno", "Splneno_pozde"]);
+  assert.strictEqual(result[0].failed, 2);
+});
+test("empty input returns empty output, no crash", () => {
+  assert.deepStrictEqual(computeFailureRateByGroup([], ["Nesplneno"]), []);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

@@ -342,3 +342,68 @@ export function resolveCapacity(
   const key = tech + "|" + year + "|" + week;
   return overrideMap[key] !== undefined ? overrideMap[key] : workDaysCount * targetVisitsPerDay;
 }
+
+// ============================================================================
+// ADVISOR (diagnostic only - these functions never select or exclude a POS
+// from a plan, they only classify already-known facts into alerts. Advisor
+// Engine writes their output to ADVISOR_LOG, never to MANAGER_PLAN or
+// POS_MASTER's decision fields - see docs/BUSINESS_RULES.md section 13.)
+// ============================================================================
+
+export interface NeglectCandidate {
+  posId: string;
+  weeksSinceLastVisit: number | null;
+}
+
+// Returns posIds at or beyond thresholdWeeks since their last real visit.
+// Called twice by Advisor Engine (once per configured threshold) to produce
+// WARNING vs CRITICAL tiers - this function itself has no notion of severity,
+// it is a plain threshold classifier, kept that way so it is trivial to
+// reason about and test.
+export function findNeglected(items: NeglectCandidate[], thresholdWeeks: number): string[] {
+  return items
+    .filter((i) => i.weeksSinceLastVisit !== null && i.weeksSinceLastVisit >= thresholdWeeks)
+    .map((i) => i.posId);
+}
+
+export interface ComplianceOutcome {
+  group: string; // technician name or region name - caller decides the grouping
+  status: string;
+}
+
+export interface GroupFailureRate {
+  group: string;
+  total: number;
+  failed: number;
+  rate: number; // failed / total, in [0, 1]
+}
+
+// Generic grouped failure-rate calculator, reused for both "technician
+// overload" and "regional underperformance" alerts (docs/BUSINESS_RULES.md
+// section 13) - same shape, different grouping key, so one implementation.
+// Rows with an empty group are skipped (e.g. "Navic_evidovano" rows with no
+// resolved technician - see ComplianceEngine.ts file header).
+export function computeFailureRateByGroup(
+  rows: ComplianceOutcome[],
+  failureStatuses: string[]
+): GroupFailureRate[] {
+  let byGroup: { [group: string]: { total: number; failed: number } } = {};
+  for (const row of rows) {
+    if (!row.group) {
+      continue;
+    }
+    if (!byGroup[row.group]) {
+      byGroup[row.group] = { total: 0, failed: 0 };
+    }
+    byGroup[row.group].total++;
+    if (failureStatuses.includes(row.status)) {
+      byGroup[row.group].failed++;
+    }
+  }
+  return Object.keys(byGroup).map((group) => ({
+    group,
+    total: byGroup[group].total,
+    failed: byGroup[group].failed,
+    rate: byGroup[group].failed / byGroup[group].total,
+  }));
+}

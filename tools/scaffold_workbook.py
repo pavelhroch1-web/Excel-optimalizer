@@ -53,6 +53,10 @@ def main(ref_path, out_path):
     control_ws.append(["GPS_EXTRA_RADIUS_METERS", 300, "Radius for the GPS bonus overflow rule."])
     control_ws.append(["GPS_EXTRA_MAX_VISITS", 5, "Max extra visits per technician/week from the GPS bonus rule."])
     control_ws.append(["COMPLIANCE_LATE_CUTOFF_WEEKS", 1, "Weeks past the planned week before a still-unrealized visit becomes Nesplneno instead of Pending. Proposed default per docs/BUSINESS_RULES.md section 12, not yet formally reconfirmed."])
+    control_ws.append(["ADVISOR_NEGLECT_WARNING_RATIO_PERCENT", 80, "Proposed default (not a confirmed business rule): WARNING neglect alert fires at this % of NEGLECTED_AFTER_WEEKS, CRITICAL fires at 100%. Tune on real data."])
+    control_ws.append(["ADVISOR_TREND_WINDOW_WEEKS", 4, "Proposed default: how many recent weeks of COMPLIANCE_LOG feed the technician/region overload alerts. Tune on real data."])
+    control_ws.append(["ADVISOR_OVERLOAD_WARNING_RATE_PERCENT", 20, "Proposed default (not a confirmed business rule): technician/region Nesplneno rate over the trend window that triggers a WARNING. Tune on real data."])
+    control_ws.append(["ADVISOR_OVERLOAD_CRITICAL_RATE_PERCENT", 35, "Proposed default (not a confirmed business rule): technician/region Nesplneno rate over the trend window that triggers a CRITICAL alert. Tune on real data."])
 
     # CATEGORY_RULES: copy reference rows + add explicit confirmed default row
     cat_ws = src_wb["CATEGORY_RULES"]
@@ -130,10 +134,19 @@ def main(ref_path, out_path):
         ],
     )
 
-    # ADVISOR_RULES (structure only — Advisor Engine not built yet)
+    # ADVISOR_RULES (reserved for a future fully config-driven rule table -
+    # AdvisorEngine.ts v1 reads its three alert types' thresholds directly
+    # from CONTROL instead, see docs/BACKLOG.md for the planned generalization)
     write_table(
         dst_wb, "ADVISOR_RULES",
         ["ruleId", "type", "condition", "threshold", "severity", "messageTemplate", "active"],
+        [],
+    )
+
+    # ADVISOR_LOG (append-only output of AdvisorEngine.ts)
+    write_table(
+        dst_wb, "ADVISOR_LOG",
+        ["type", "severity", "subjectType", "subjectId", "message", "evaluatedAt"],
         [],
     )
 

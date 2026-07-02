@@ -227,7 +227,13 @@ principle.
   MANAGER_PLAN by POS+week, writes COMPLIANCE_LOG, updates POS_MASTER's real last-visit fields.
   Per-visit LOS/LOT campaign attribution deliberately NOT implemented - blocked on missing
   structured data in the SalesApp export, see BUSINESS_RULES.md.
-- Advisor / Route refinement / Plan lifecycle — not started, see BACKLOG.md.
+- Advisor Engine v1 (`office-scripts/AdvisorEngine.ts`) — done, tested (11 new unit tests +
+  simulation against real technician distribution). Three alert types: NEGLECT_RISK (two-tier,
+  from POS_MASTER), TECHNICIAN_OVERLOAD and REGIONAL_UNDERPERFORMANCE (from COMPLIANCE_LOG).
+  Diagnostic only - never writes to MANAGER_PLAN or POS_MASTER decision fields. All alert
+  thresholds are proposed defaults in CONTROL, explicitly flagged as tunable, not confirmed
+  business rules - see docs/BUSINESS_RULES.md section 13 and BACKLOG.md.
+- Route/Geo Engine refinement / Plan lifecycle — not started, see BACKLOG.md.
 
 ## 14. Next step
 

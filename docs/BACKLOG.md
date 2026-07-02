@@ -3,6 +3,24 @@
 Non-blocking items found during implementation. Not stopping work for these; tracked here so
 they aren't lost.
 
+## Advisor Engine follow-ups (not blocking, tracked for later)
+- Campaign-completion risk alerts: waiting on an active HARD cadence rule with a recurring
+  deadline (GECO/CORN currently inactive by config).
+- Combine-visit (LOS+LOT) opportunity alerts: blocked on the same open campaign-attribution
+  question as Compliance Engine's per-visit breakdown (docs/BUSINESS_RULES.md).
+- Override-consequence notes (Advisor flags when a manual override conflicts with automatic
+  Filters/Cadence logic): mechanical, not blocked on anything, just not built yet - good next
+  small increment.
+- ADVISOR_RULES config table exists but AdvisorEngine.ts v1 reads its three alert types' actual
+  thresholds from new CONTROL rows instead of from ADVISOR_RULES rows. Generalizing to a fully
+  config-driven rule table (arbitrary new alert types without code changes) is a reasonable
+  future refactor once there's a second or third concrete alert type to generalize from - didn't
+  build the generalized version speculatively ahead of a second real use case.
+- All four new CONTROL threshold values added this round (ADVISOR_NEGLECT_WARNING_RATIO_PERCENT,
+  ADVISOR_TREND_WINDOW_WEEKS, ADVISOR_OVERLOAD_WARNING_RATE_PERCENT,
+  ADVISOR_OVERLOAD_CRITICAL_RATE_PERCENT) are proposed defaults, not confirmed business rules -
+  should be tuned once real weekly data accumulates.
+
 ## Deferred engines (per agreed bottom-up build order)
 - SalesApp import + basic real VISIT_HISTORY_ACTUAL/Compliance Engine — DONE (ComplianceEngine.ts).
   Per-POS LOS/LOT campaign attribution specifically remains blocked - see BUSINESS_RULES.md
