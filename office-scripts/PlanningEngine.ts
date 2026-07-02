@@ -394,9 +394,10 @@ function main(workbook: ExcelScript.Workbook) {
   const paretoGroups = readTable("PARETO_GROUPS");
   const scoreProfiles = readTable("SCORE_PROFILES");
   const capacityOverride = readTable("CAPACITY_OVERRIDE");
+  const planLifecycle = readTable("PLAN_LIFECYCLE");
+  const existingManagerPlan = readTable("MANAGER_PLAN");
 
   const outWs = workbook.getWorksheet("MANAGER_PLAN");
-  outWs.getRange("A2:Q200000").clear(); // 17 output columns = A..Q
 
   // ==========================================================================
   // CONFIG READERS (adapter code - reshapes sheet rows into the plain
@@ -425,6 +426,44 @@ function main(workbook: ExcelScript.Workbook) {
     radiusMeters: setting("GPS_EXTRA_RADIUS_METERS", 300),
     maxVisits: setting("GPS_EXTRA_MAX_VISITS", 5),
   };
+
+  // PLAN LIFECYCLE: a week that has been Published/Active/Closed is locked -
+  // Planning Engine must never regenerate or overwrite its rows (this is
+  // what makes the later Published snapshot in MANAGER_PLAN_PUBLISHED
+  // trustworthy). Only Draft weeks (or weeks with no PLAN_LIFECYCLE row yet,
+  // i.e. never touched before) are freely regenerated on every run. Single-
+  // year scope assumed (matches core.ts's weeksBetween 52-week
+  // simplification elsewhere) - a week number alone identifies the lock.
+  let lockedWeeks = new Set<number>();
+  if (planLifecycle.length >= 2) {
+    const plHeaders = (planLifecycle[0] as string[]).map((h) => String(h));
+    const plIdx = (name: string) => plHeaders.indexOf(name);
+    for (let i = 1; i < planLifecycle.length; i++) {
+      const row = planLifecycle[i];
+      if (Number(row[plIdx("year")]) != YEAR) {
+        continue;
+      }
+      const status = String(row[plIdx("status")]);
+      if (status == "Published" || status == "Active" || status == "Closed") {
+        lockedWeeks.add(Number(row[plIdx("week")]));
+      }
+    }
+  }
+
+  // Existing MANAGER_PLAN rows belonging to a locked week are preserved
+  // as-is; only Draft-week rows are dropped and regenerated below.
+  let keptRows: (string | number)[][] = [];
+  if (existingManagerPlan.length >= 2) {
+    for (let i = 1; i < existingManagerPlan.length; i++) {
+      const row = existingManagerPlan[i];
+      if (!row[0]) {
+        continue;
+      }
+      if (lockedWeeks.has(Number(row[0]))) {
+        keptRows.push(row as (string | number)[]);
+      }
+    }
+  }
 
   let activeTerms: string[] = [];
   for (let i = 1; i < terminals.length; i++) {
@@ -651,12 +690,30 @@ function main(workbook: ExcelScript.Workbook) {
   // GENERATE PLAN
   // ==========================================================================
 
+  // POS already committed in a locked week (per technician) must not be
+  // re-selected for a Draft week - otherwise the same POS could appear
+  // twice in the same campaign run.
+  let committedByTech: { [tech: string]: Set<string> } = {};
+  for (const row of keptRows) {
+    const tech = String(row[3]);
+    const posId = String(row[4]);
+    if (!committedByTech[tech]) {
+      committedByTech[tech] = new Set<string>();
+    }
+    committedByTech[tech].add(posId);
+  }
+
   let output: (string | number)[][] = [];
+  let touchedWeeks = new Set<number>();
 
   for (const tech of Object.keys(groups)) {
-    let used: POSItem[] = [];
+    let used: POSItem[] = groups[tech].filter((p) => committedByTech[tech]?.has(p.pos));
     for (let w = 0; w < CAMPAIGN_LENGTH; w++) {
       const week = START_WEEK + w;
+      if (lockedWeeks.has(week)) {
+        continue; // locked - existing rows already carried over via keptRows
+      }
+      touchedWeeks.add(week);
       const days = workDays(YEAR, week);
       const capacity = resolveCapacity(capacityOverrideMap, tech, YEAR, week, days.length, TARGET_DAY);
 
@@ -717,12 +774,44 @@ function main(workbook: ExcelScript.Workbook) {
     }
   }
 
-  if (output.length > 0) {
-    outWs.getRangeByIndexes(1, 0, output.length, 17).setValues(output);
+  // Locked-week rows (keptRows) + freshly generated Draft-week rows together
+  // make up the new MANAGER_PLAN content. Locked rows are never rewritten
+  // with different values - they are copied through byte-for-byte.
+  const combined = [...keptRows, ...output];
+  outWs.getRange("A2:Q200000").clear(); // 17 output columns = A..Q
+  if (combined.length > 0) {
+    outWs.getRangeByIndexes(1, 0, combined.length, 17).setValues(combined);
+  }
+
+  // Register any newly-touched week in PLAN_LIFECYCLE as Draft, if it has no
+  // row yet. Existing rows (Draft or locked) are left untouched here -
+  // Draft->Published only happens via PublishEngine.ts, and
+  // Published->Active->Closed only via ComplianceEngine.ts.
+  if (touchedWeeks.size > 0) {
+    const plWs = workbook.getWorksheet("PLAN_LIFECYCLE");
+    const plExisting = plWs.getUsedRange();
+    const plRows = plExisting ? plExisting.getValues() : [];
+    let knownWeeks = new Set<number>();
+    for (let i = 1; i < plRows.length; i++) {
+      if (Number(plRows[i][0]) == YEAR) {
+        knownWeeks.add(Number(plRows[i][1]));
+      }
+    }
+    const newLifecycleRows: (string | number)[][] = [];
+    for (const week of touchedWeeks) {
+      if (!knownWeeks.has(week)) {
+        newLifecycleRows.push([YEAR, week, "Draft", "", ""]);
+      }
+    }
+    if (newLifecycleRows.length > 0) {
+      const startRow = plRows.length > 0 ? plRows.length : 1;
+      plWs.getRangeByIndexes(startRow, 0, newLifecycleRows.length, 5).setValues(newLifecycleRows);
+    }
   }
 
   console.log(
-    "Planning Engine: generated " + output.length + " planned visits across " +
+    "Planning Engine: generated " + output.length + " new planned visits (" +
+      keptRows.length + " locked-week visits carried over unchanged) across " +
       Object.keys(groups).length + " technicians (weeks " + START_WEEK + "-" +
       (START_WEEK + CAMPAIGN_LENGTH - 1) + ")."
   );

@@ -194,6 +194,28 @@ def main(ref_path, out_path):
         [],
     )
 
+    # PLAN_LIFECYCLE (Draft -> Published -> Active -> Closed, one row per
+    # (year, week). Draft->Published only via PublishEngine.ts (explicit
+    # manager action); Published->Active->Closed recomputed by
+    # ComplianceEngine.ts on every run - see docs/BUSINESS_RULES.md section 11)
+    write_table(
+        dst_wb, "PLAN_LIFECYCLE",
+        ["year", "week", "status", "publishedAt", "closedAt"],
+        [],
+    )
+
+    # MANAGER_PLAN_PUBLISHED (immutable snapshot, append-only - what was
+    # actually sent to technicians. ComplianceEngine.ts compares against
+    # this, never against the freely-regenerated MANAGER_PLAN, per product
+    # owner: "Compliance vzdy porovnava pouze Published snapshot")
+    write_table(
+        dst_wb, "MANAGER_PLAN_PUBLISHED",
+        ["WEEK", "DATE", "DAY", "TECHNICIAN", "POS", "KATEGORIE", "NAZEV_PROVOZOVNY",
+         "ULICE", "CISLO", "MESTO", "OBLAST", "POS_AREA", "PPT", "LOS_ACTIVITY",
+         "LOT_ACTIVITY", "REASON", "GPS_GROUP", "publishedAt"],
+        [],
+    )
+
     # SALESAPP_IMPORT (staging - paste the weekly SalesApp export here; header
     # row matches the real export format so column-name lookup in
     # ComplianceEngine.ts works regardless of export column order/extras)

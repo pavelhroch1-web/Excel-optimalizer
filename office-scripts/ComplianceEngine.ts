@@ -56,6 +56,75 @@ function main(workbook: ExcelScript.Workbook) {
   }
   // SYNC-BLOCK-END: text.ts
 
+  // SYNC-BLOCK-START: dates.ts
+  function isoMonday(year: number, week: number): Date {
+    let d = new Date(year, 0, 4);
+    let day = d.getDay();
+    if (day == 0) {
+      day = 7;
+    }
+    d.setDate(d.getDate() - day + 1 + (week - 1) * 7);
+    return d;
+  }
+
+  function easter(y: number): Date {
+    const f = Math.floor;
+    let a = y % 19;
+    let b = f(y / 100);
+    let c = y % 100;
+    let d = f(b / 4);
+    let e = b % 4;
+    let g = f((8 * b + 13) / 25);
+    let h = (19 * a + b - d - g + 15) % 30;
+    let i = f(c / 4);
+    let k = c % 4;
+    let l = (32 + 2 * e + 2 * i - h - k) % 7;
+    let m = f((a + 11 * h + 22 * l) / 451);
+    let month = f((h + l - 7 * m + 114) / 31);
+    let day = ((h + l - 7 * m + 114) % 31) + 1;
+    return new Date(y, month - 1, day);
+  }
+
+  // Czech public holidays: 11 fixed dates + Good Friday + Easter Monday.
+  function isHoliday(date: Date, year: number): boolean {
+    const fixed = [
+      "1-1", "1-5", "8-5", "5-7", "6-7", "28-9",
+      "28-10", "17-11", "24-12", "25-12", "26-12",
+    ];
+    const key = date.getDate() + "-" + (date.getMonth() + 1);
+    if (fixed.includes(key)) {
+      return true;
+    }
+    const e = easter(year);
+    let friday = new Date(e);
+    friday.setDate(e.getDate() - 2);
+    let monday = new Date(e);
+    monday.setDate(e.getDate() + 1);
+    return (
+      date.toDateString() == friday.toDateString() ||
+      date.toDateString() == monday.toDateString()
+    );
+  }
+
+  // Returns the working (non-holiday) Mon-Fri days for a given ISO week.
+  // This is the automatic part of dynamic capacity - CAPACITY_OVERRIDE (a
+  // new V11 config table) can still override the resulting day/visit count
+  // manually; see docs/BUSINESS_RULES.md section 8.
+  function workDays(year: number, week: number): { day: string; date: Date }[] {
+    const names = ["MON", "TUE", "WED", "THU", "FRI"];
+    let start = isoMonday(year, week);
+    let result: { day: string; date: Date }[] = [];
+    for (let i = 0; i < 5; i++) {
+      let d = new Date(start);
+      d.setDate(start.getDate() + i);
+      if (!isHoliday(d, year)) {
+        result.push({ day: names[i], date: d });
+      }
+    }
+    return result;
+  }
+  // SYNC-BLOCK-END: dates.ts
+
   // SYNC-BLOCK-START: core.ts (compliance)
   function isoWeekNumber(date: Date): { week: number; year: number } {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -106,6 +175,34 @@ function main(workbook: ExcelScript.Workbook) {
     return "Splneno_pozde"; // late is still late even beyond lateCutoffWeeks -
     // it happened, so it is not "Nesplneno" (which means it never happened)
   }
+
+  type PlanStatus = "Draft" | "Published" | "Active" | "Closed";
+
+  function advanceLifecycleStatus(
+    current: PlanStatus,
+    mondayHasPassed: boolean,
+    hasPendingVisits: boolean
+  ): PlanStatus {
+    if (current == "Closed") {
+      return "Closed"; // terminal - a closed week is never reopened
+    }
+    if (current == "Draft") {
+      return "Draft"; // only PublishEngine.ts moves Draft -> Published
+    }
+    // current is Published or Active: closing (no visits still Pending) takes
+    // priority over the Published/Active distinction, which is otherwise only
+    // about whether the week has chronologically started yet.
+    if (!hasPendingVisits) {
+      return "Closed";
+    }
+    if (current == "Active") {
+      return "Active"; // monotonic - a week that already reached Active can
+      // never have mondayHasPassed become false again (time doesn't run
+      // backward), so never regress it to Published even if called with an
+      // inconsistent mondayHasPassed value.
+    }
+    return mondayHasPassed ? "Active" : "Published";
+  }
   // SYNC-BLOCK-END: core.ts (compliance)
 
   // ==========================================================================
@@ -119,10 +216,14 @@ function main(workbook: ExcelScript.Workbook) {
   }
 
   const salesApp = readTable("SALESAPP_IMPORT");
-  const managerPlan = readTable("MANAGER_PLAN");
+  // Compliance always compares against the immutable Published snapshot,
+  // never against the freely-regenerated MANAGER_PLAN Draft - see
+  // docs/BUSINESS_RULES.md section 11 and PublishEngine.ts.
+  const managerPlanPublished = readTable("MANAGER_PLAN_PUBLISHED");
   const control = readTable("CONTROL");
   const visitHistoryActual = readTable("VISIT_HISTORY_ACTUAL");
   const posMaster = readTable("POS_MASTER");
+  const planLifecycle = readTable("PLAN_LIFECYCLE");
 
   function setting(name: string, fallback: number): number {
     for (let i = 1; i < control.length; i++) {
@@ -139,8 +240,8 @@ function main(workbook: ExcelScript.Workbook) {
     console.log("Compliance Engine: SALESAPP_IMPORT is empty, nothing to do.");
     return;
   }
-  if (managerPlan.length < 2) {
-    console.log("Compliance Engine: MANAGER_PLAN is empty - run Planning Engine first.");
+  if (managerPlanPublished.length < 2) {
+    console.log("Compliance Engine: MANAGER_PLAN_PUBLISHED is empty - run Planning Engine then Publish Engine first.");
     return;
   }
 
@@ -260,21 +361,22 @@ function main(workbook: ExcelScript.Workbook) {
   }
 
   // ==========================================================================
-  // MATCH MANAGER_PLAN -> COMPLIANCE_LOG
+  // MATCH MANAGER_PLAN_PUBLISHED -> COMPLIANCE_LOG
   // ==========================================================================
 
-  const mpHeaders = (managerPlan[0] as string[]).map((h) => String(h));
+  const mpHeaders = (managerPlanPublished[0] as string[]).map((h) => String(h));
   const mpIdx = (name: string) => mpHeaders.indexOf(name);
   const cWeek = mpIdx("WEEK");
   const cPos2 = mpIdx("POS");
   const cTech2 = mpIdx("TECHNICIAN");
 
-  // One planned row per (posId, week) pair, even if MANAGER_PLAN has that POS
-  // only once per week (it should - Planning Engine doesn't double-book a POS
-  // in the same week - but de-duplicate defensively rather than assume).
+  // One planned row per (posId, week) pair, even if the published snapshot
+  // has that POS only once per week (it should - Planning Engine doesn't
+  // double-book a POS in the same week - but de-duplicate defensively rather
+  // than assume).
   let plannedSet: { [key: string]: { posId: string; week: number; tech: string } } = {};
-  for (let i = 1; i < managerPlan.length; i++) {
-    const row = managerPlan[i];
+  for (let i = 1; i < managerPlanPublished.length; i++) {
+    const row = managerPlanPublished[i];
     const posId = String(row[cPos2]);
     const week = Number(row[cWeek]);
     if (!posId || !week) {
@@ -282,9 +384,10 @@ function main(workbook: ExcelScript.Workbook) {
     }
     plannedSet[posId + "|" + week] = { posId, week, tech: String(row[cTech2]) };
   }
-  // Assumes MANAGER_PLAN's YEAR is the same as latestYear from SalesApp - true
-  // for the current single-year campaign scope of this project. Flagged as a
-  // known simplification if the project ever spans a year boundary.
+  // Assumes MANAGER_PLAN_PUBLISHED's YEAR is the same as latestYear from
+  // SalesApp - true for the current single-year campaign scope of this
+  // project. Flagged as a known simplification if the project ever spans a
+  // year boundary.
   const plannedYear = latestYear || new Date().getFullYear();
 
   let complianceRows: (string | number)[][] = [];
@@ -321,6 +424,54 @@ function main(workbook: ExcelScript.Workbook) {
     complianceWs
       .getRangeByIndexes(complianceStartRow, 0, complianceRows.length, 8)
       .setValues(complianceRows);
+  }
+
+  // ==========================================================================
+  // ADVANCE PLAN LIFECYCLE (Published -> Active -> Closed, mechanical -
+  // see docs/BUSINESS_RULES.md section 11. Draft -> Published only happens
+  // in PublishEngine.ts, never here.)
+  // ==========================================================================
+
+  if (planLifecycle.length >= 2) {
+    const plHeaders = (planLifecycle[0] as string[]).map((h) => String(h));
+    const plIdx = (name: string) => plHeaders.indexOf(name);
+    const today = new Date();
+
+    // hasPendingVisits per (week, year), from the planned rows just
+    // evaluated above (Navic_evidovano rows are extra visits, not part of
+    // any week's planned-completion set, so they are excluded here).
+    let pendingByWeek: { [key: string]: boolean } = {};
+    for (const r of complianceRows) {
+      const status = String(r[4]);
+      if (status == "Navic_evidovano") {
+        continue;
+      }
+      const key = String(r[3]) + "|" + String(r[2]); // plannedYear|plannedWeek
+      if (status == "Pending") {
+        pendingByWeek[key] = true;
+      } else if (!(key in pendingByWeek)) {
+        pendingByWeek[key] = false;
+      }
+    }
+
+    for (let i = 1; i < planLifecycle.length; i++) {
+      const row = planLifecycle[i];
+      const year = Number(row[plIdx("year")]);
+      const week = Number(row[plIdx("week")]);
+      const current = String(row[plIdx("status")]) as PlanStatus;
+      const key = year + "|" + week;
+      if (!(key in pendingByWeek)) {
+        continue; // no compliance data for this week yet - nothing to advance
+      }
+      const mondayHasPassed = isoMonday(year, week) <= today;
+      const next = advanceLifecycleStatus(current, mondayHasPassed, pendingByWeek[key]);
+      if (next != current) {
+        workbook.getWorksheet("PLAN_LIFECYCLE").getRangeByIndexes(i, 2, 1, 1).setValue(next);
+        if (next == "Closed") {
+          workbook.getWorksheet("PLAN_LIFECYCLE").getRangeByIndexes(i, 4, 1, 1).setValue(now);
+        }
+      }
+    }
   }
 
   // ==========================================================================

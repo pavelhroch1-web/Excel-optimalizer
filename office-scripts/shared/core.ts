@@ -430,3 +430,41 @@ export function latestByKey<T extends TimestampedRow>(rows: T[]): T[] {
   }
   return Object.values(latest);
 }
+
+// ============================================================================
+// PLAN LIFECYCLE (Draft -> Published -> Active -> Closed)
+// ============================================================================
+// Draft->Published only ever happens via an explicit manager action
+// (PublishEngine.ts), never automatically - this function does not produce
+// that transition. Published->Active->Closed are mechanical/derived from
+// data already available (today's date vs. the week's Monday, and whether
+// any planned visit for that week is still Pending) and are recomputed by
+// Compliance Engine on every run - see docs/BUSINESS_RULES.md section 11.
+
+export type PlanStatus = "Draft" | "Published" | "Active" | "Closed";
+
+export function advanceLifecycleStatus(
+  current: PlanStatus,
+  mondayHasPassed: boolean,
+  hasPendingVisits: boolean
+): PlanStatus {
+  if (current == "Closed") {
+    return "Closed"; // terminal - a closed week is never reopened
+  }
+  if (current == "Draft") {
+    return "Draft"; // only PublishEngine.ts moves Draft -> Published
+  }
+  // current is Published or Active: closing (no visits still Pending) takes
+  // priority over the Published/Active distinction, which is otherwise only
+  // about whether the week has chronologically started yet.
+  if (!hasPendingVisits) {
+    return "Closed";
+  }
+  if (current == "Active") {
+    return "Active"; // monotonic - a week that already reached Active can
+    // never have mondayHasPassed become false again (time doesn't run
+    // backward), so never regress it to Published even if called with an
+    // inconsistent mondayHasPassed value.
+  }
+  return mondayHasPassed ? "Active" : "Published";
+}

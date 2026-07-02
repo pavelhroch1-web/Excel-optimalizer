@@ -37,9 +37,12 @@ they aren't lost.
   kept close to legacy geoDays() to reduce risk while getting the pipeline working end to end
 - TECHNICIAN_PLAN (simplified per-technician output view)
 - SEASONAL_STRATEGY / SCORE_PROFILES switching (only DEFAULT profile is read today)
-- Plan lifecycle (Draft/Published/Active/Closed state machine) — PlanningEngine.ts currently
-  overwrites MANAGER_PLAN on every run, same as V10.5.5's OUTPUT_PLAN, no lock/publish concept
-  yet
+- Plan lifecycle — DONE (PublishEngine.ts, PLAN_LIFECYCLE, MANAGER_PLAN_PUBLISHED). Follow-up not
+  yet built: "post-publish amendment" (docs/BUSINESS_RULES.md section 11 - manual changes to an
+  already-Published week should be recorded as a visible, timestamped delta, not a silent
+  rewrite). Today, a manager can still edit POS_MASTER overrides, but there is no mechanism yet
+  to amend a specific already-published visit and have that show up distinctly from the original
+  snapshot.
 
 ## Simplifications in PlanningEngine.ts v1 (tracked, not hidden)
 - Campaign-change min-gap override ("NEW CAMPAIGN OVERRIDE" in V10.5.5 — revisit a CORE POS

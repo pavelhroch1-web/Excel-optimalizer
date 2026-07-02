@@ -21,6 +21,7 @@ import {
   findNeglected,
   computeFailureRateByGroup,
   latestByKey,
+  advanceLifecycleStatus,
 } from "../office-scripts/shared/core";
 
 let passed = 0;
@@ -476,6 +477,36 @@ test("single row per key is returned unchanged", () => {
 });
 test("empty input returns empty output, no crash", () => {
   assert.deepStrictEqual(latestByKey([]), []);
+});
+
+// ==========================================================================
+console.log("advanceLifecycleStatus()");
+// ==========================================================================
+
+test("Draft never auto-advances - only PublishEngine moves it", () => {
+  assert.strictEqual(advanceLifecycleStatus("Draft", true, true), "Draft");
+  assert.strictEqual(advanceLifecycleStatus("Draft", false, false), "Draft");
+});
+test("Closed is terminal - never reopens even if flags suggest otherwise", () => {
+  assert.strictEqual(advanceLifecycleStatus("Closed", false, true), "Closed");
+});
+test("Published stays Published if Monday hasn't passed and visits are still pending", () => {
+  assert.strictEqual(advanceLifecycleStatus("Published", false, true), "Published");
+});
+test("Published becomes Active once Monday has passed and visits are still pending", () => {
+  assert.strictEqual(advanceLifecycleStatus("Published", true, true), "Active");
+});
+test("Published closes immediately if no visits are pending, even before Monday", () => {
+  assert.strictEqual(advanceLifecycleStatus("Published", false, false), "Closed");
+});
+test("Active closes once no visits are pending", () => {
+  assert.strictEqual(advanceLifecycleStatus("Active", true, false), "Closed");
+});
+test("Active stays Active while visits are still pending", () => {
+  assert.strictEqual(advanceLifecycleStatus("Active", true, true), "Active");
+});
+test("Active never regresses to Published even if mondayHasPassed is somehow false (monotonic - time doesn't run backward, found by exhaustive case enumeration)", () => {
+  assert.strictEqual(advanceLifecycleStatus("Active", false, true), "Active");
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

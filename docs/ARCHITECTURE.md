@@ -239,13 +239,17 @@ principle.
   overview, compliance summary, technician KPI, most-recent Advisor alert counts. Computes nothing
   new - pure aggregation over data the other engines already produced.
 - Route/Geo Engine refinement — not started, see BACKLOG.md.
-- **Plan lifecycle (Draft/Published/Active/Closed)** — not started. Flagged explicitly to the
-  product owner as a workflow change (not purely technical), since it would add an explicit
-  Publish step to the weekly cycle and change what re-running Planning Engine mid-week does.
-  Currently MANAGER_PLAN is simply overwritten on every Planning Engine run, so nothing yet
-  guarantees "what was actually sent to technicians" stays fixed once Compliance Engine later
-  compares against it - a real gap for multi-week accuracy, not just a nice-to-have. Needs
-  product-owner sign-off before building, per the agreed autonomy boundary.
+- **Plan lifecycle (Draft/Published/Active/Closed)** — done, approved and implemented.
+  `office-scripts/PublishEngine.ts` is a new deployable script (the explicit "Publish" action):
+  finds the earliest Draft week, snapshots it into MANAGER_PLAN_PUBLISHED (new sheet, append-
+  only, immutable), marks it Published in PLAN_LIFECYCLE (new sheet). PlanningEngine.ts now
+  never regenerates a locked (Published/Active/Closed) week - existing rows for that week are
+  carried through byte-for-byte, and POS already committed to a locked week are excluded from
+  that technician's candidate pool for other weeks. ComplianceEngine.ts now reads
+  MANAGER_PLAN_PUBLISHED exclusively (never MANAGER_PLAN) and, after each run, advances
+  Published->Active->Closed per week using `core.ts`'s `advanceLifecycleStatus` (tested,
+  including a monotonic-time edge case found by exhaustive case enumeration during review: once
+  a week reaches Active it must never regress to Published).
 
 ## 14. Next step
 

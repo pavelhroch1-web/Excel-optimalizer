@@ -177,6 +177,24 @@ a day slot (no more silent loss) — not eliminate the overflow behaviour itself
 STATUS: CONFIRMED (spec); **implementation deferred to Route/Geo Engine build (not part of the
 bottom-up infrastructure phase)**
 
+## 6b. Plan lifecycle - implemented
+
+**RULE: Draft -> Published -> Active -> Closed**
+ACTION:
+- Draft: Planning Engine freely regenerates these weeks on every run.
+- Published: set only by an explicit manager action (PublishEngine.ts). Snapshots that week's
+  MANAGER_PLAN rows into the immutable, append-only MANAGER_PLAN_PUBLISHED. From this point,
+  Planning Engine never touches that week's rows again.
+- Active: mechanical - the week's Monday has passed (system date, no external calendar).
+- Closed: mechanical - no planned visit for that week is still Pending (per Compliance Engine's
+  determineComplianceStatus). Closing takes priority over the Published/Active distinction, and
+  can happen before the week's Monday if every visit resolves early. Terminal - never reopened.
+STATUS: CONFIRMED, implemented (core.ts `advanceLifecycleStatus`, PublishEngine.ts,
+ComplianceEngine.ts). Compliance Engine reads MANAGER_PLAN_PUBLISHED exclusively, never the
+freely-regenerated MANAGER_PLAN - this was the explicit product-owner requirement for this phase.
+Only one week is published per PublishEngine.ts run (the earliest Draft week), matching the real
+weekly ritual rather than publishing the whole rolling horizon at once.
+
 ## 7. GPS / Weekly composition
 
 **RULE: GPS shapes the week, not individual tie-breaks**

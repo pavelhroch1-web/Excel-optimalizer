@@ -42,6 +42,20 @@ main risk of this pattern.
 4. Check the `POS_MASTER` sheet - it should now have one row per POS from `RAW_DATA`, and the
    console log will report how many rows were upserted vs retained unchanged.
 
+## Weekly deployment order
+
+1. `ImportEngine.ts` — RAW_DATA/POS_STATUS_IMPORT/ACTIVITY_PLAN -> POS_MASTER.
+2. `PlanningEngine.ts` — generates/regenerates Draft weeks in MANAGER_PLAN (never touches
+   Published/Active/Closed weeks - see PLAN_LIFECYCLE).
+3. Review/adjust MANAGER_PLAN manually (POS_MASTER overrides) as needed, re-run step 2.
+4. `PublishEngine.ts` — explicit action, once you're ready to lock and send a week's plan.
+   Publishes the earliest Draft week into MANAGER_PLAN_PUBLISHED.
+5. Send the Published week's rows to technicians (outside this workbook, e.g. export/print).
+6. Next cycle: import the new SalesApp export into SALESAPP_IMPORT, run `ComplianceEngine.ts`
+   (compares only against MANAGER_PLAN_PUBLISHED, advances plan lifecycle, updates POS_MASTER).
+7. `AdvisorEngine.ts` — run any time after Import/Compliance for fresh alerts.
+8. `ReportingEngine.ts` — run any time for an updated DASHBOARD.
+
 ## What's intentionally NOT here yet
 
 Per the bottom-up build order agreed with the product owner: no Planning Engine, Advisor
