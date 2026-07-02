@@ -207,8 +207,10 @@ IMPORT_HUB_GUIDANCE = {
         "Editovat lze jen žlutě podbarvené sloupce (ruční poznámky/výjimky) - zbytek počítají enginy."
     ),
     "ACTIVITY_PLAN": (
-        "ACTIVITY_PLAN = plánování kampaní (LOS/LOT). Přidej nebo uprav kampaň a hned "
-        "vidíš odhad dopadu (počet návštěv, časová osa) vpravo - žádné přepočítávání ručně."
+        "KROK 4 týdenní rutiny: ACTIVITY_PLAN = plánování kampaní (LOS/LOT). Přidej nebo "
+        "uprav kampaň v řádku (typ, název, od týdne, do týdne) a hned vidíš vpravo odhad "
+        "dopadu (počet návštěv, časová osa) - žádné přepočítávání ručně. Po úpravě pokračuj "
+        "spuštěním Planning Engine (IMPORT_HUB, krok 5)."
     ),
 }
 
@@ -222,23 +224,31 @@ def add_sheet_purpose_notes(wb):
 
 
 def build_import_hub(wb):
-    """The actual front door for data entry - one sheet that answers "what do
-    I paste, is it in yet, what happens next" instead of making the user
-    figure out which of 3 separate staging sheets does what. Office Scripts
-    have no OS file-picker API (see docs/ARCHITECTURE.md section 15d) so this
-    cannot be a literal drag-and-drop widget - it is the closest equivalent
-    achievable on this platform: one screen, live row counts per staging
-    sheet (so "did my paste work" is answered without opening each sheet),
-    one-click links to each paste target, and an explicit "then do this"
-    trail. Pure presentation - reads existing sheets, writes nothing any
-    engine depends on."""
+    """The actual front door for data entry - foolproof by construction, not
+    by trusting the user to remember which of 3 staging sheets a file goes
+    to. Product owner's real weekly routine is fixed (SalesApp export -> PPT
+    campaign assignment -> small activity tweaks -> run planner -> publish),
+    so this screen is built around that exact sequence as numbered steps,
+    each answering the same 4 questions on-screen instead of in a doc
+    nobody reads: where does this data come from, what file goes here, what
+    happens after you run the engine, what's the next step.
+
+    Office Scripts have no OS file-picker API (see docs/ARCHITECTURE.md
+    section 15d) so this cannot be a literal drag-and-drop widget - it is
+    the closest equivalent achievable on this platform: one screen, live
+    row counts per staging sheet (so "did my paste work" is answered
+    without opening each sheet), one-click links to each paste target.
+    Pure presentation - reads existing sheets, writes nothing any engine
+    depends on."""
     if "IMPORT_HUB" in wb.sheetnames:
         del wb["IMPORT_HUB"]
     ws = wb.create_sheet("IMPORT_HUB")
     ws.sheet_view.showGridLines = False
-    ws.column_dimensions["A"].width = 3
-    for col in "BCDEFG":
-        ws.column_dimensions[col].width = 18
+    ws.column_dimensions["A"].width = 4
+    ws.column_dimensions["B"].width = 30
+    for col in "CDEF":
+        ws.column_dimensions[col].width = 16
+    ws.column_dimensions["G"].width = 20
 
     ws.merge_cells("A1:G2")
     ws["A1"] = "IMPORT HUB"
@@ -248,44 +258,89 @@ def build_import_hub(wb):
     ws.row_dimensions[1].height = 28
     ws.row_dimensions[2].height = 22
     ws.merge_cells("A3:G3")
-    ws["A3"] = "Vlož exporty sem - systém je sám sloučí, deduplikuje a zachová historii"
+    ws["A3"] = "Týdenní rutina - postupuj podle kroků níže, nic jiného řešit nemusíš"
     ws["A3"].font = Font(italic=True, size=11, color=WHITE)
     ws["A3"].fill = PatternFill("solid", fgColor=NAVY)
     ws["A3"].alignment = Alignment(horizontal="left", vertical="center", indent=2)
     ws.row_dimensions[3].height = 20
 
     r = 5
-    ws.cell(r, 1, "STAV IMPORTNÍCH ZDROJŮ").font = TITLE_FONT
-    r += 1
-    sources = [
-        ("RAW_DATA", "Export POS dat", "2E75B6"),
-        ("POS_STATUS_IMPORT", "Export stavu POS (aktivní/uzavřené)", "2E75B6"),
-        ("SALESAPP_IMPORT", "Export ze SalesApp (návštěvy)", "2E75B6"),
-    ]
-    for sheet_name, label, color in sources:
-        ws.cell(r, 1, "●").font = Font(bold=True, size=14, color=color)
-        ws.cell(r, 1).alignment = Alignment(horizontal="center", vertical="center")
-        ws.merge_cells(f"B{r}:C{r}")
-        ws.cell(r, 2, label).font = Font(size=11)
-        ws.cell(r, 2).alignment = Alignment(vertical="center")
-        ws.cell(r, 4, "Řádků nyní:").font = Font(size=9, color="595959")
-        ws.cell(r, 5, f'=COUNTA({sheet_name}!A:A)-1').font = Font(bold=True, size=13, color=NAVY)
-        ws.cell(r, 5).alignment = Alignment(horizontal="center")
-        _nav_button(ws, f"G{r}", "Vložit / otevřít →", sheet_name, color=color)
-        ws.row_dimensions[r].height = 24
-        r += 1
-    r += 1
 
-    ws.cell(r, 1, "POZNÁMKA").font = Font(bold=True, size=9, color="595959")
-    r += 1
-    for text in [
-        "Můžeš vložit více exportů za sebou (přidávej pod poslední řádek, nepřepisuj) -",
-        "klidně i celý rok historie SalesApp najednou. Identifikace vždy podle POS_ID;",
-        "provozovny se stejnou adresou (CORN/9PODNIK pravidlo) se stále slučují jako jeden",
-        "fyzický POS. Duplicity a historie se řeší automaticky - nic se neztratí.",
-    ]:
+    def step_card(num, title, source, target_sheet, after, color, extra_note=None):
+        nonlocal r
+        badge_row = r
         ws.merge_cells(f"B{r}:G{r}")
-        ws.cell(r, 2, text).font = NOTE_FONT
+        ws.cell(r, 2, f"KROK {num} — {title}").font = Font(bold=True, size=13, color=NAVY)
+        r += 1
+        ws.merge_cells(f"B{r}:G{r}")
+        ws.cell(r, 2, f"Odkud: {source}").font = Font(size=10)
+        r += 1
+        ws.merge_cells(f"B{r}:G{r}")
+        ws.cell(r, 2, f"Co se stane po importu: {after}").font = NOTE_FONT
+        r += 1
+        if target_sheet:
+            ws.cell(r, 2, "Řádků nyní:").font = Font(size=9, color="595959")
+            ws.cell(r, 3, f'=COUNTA({target_sheet}!A:A)-1').font = Font(bold=True, size=13, color=NAVY)
+            _nav_button(ws, f"F{r}", "Vložit / otevřít →", target_sheet, color=color)
+        elif extra_note:
+            ws.merge_cells(f"B{r}:G{r}")
+            ws.cell(r, 2, extra_note).font = Font(italic=True, size=9, color="808080")
+        # Badge spans exactly the 4 rows this card just used (title, source,
+        # after, action row) - written last since only now is r_end known.
+        ws.merge_cells(f"A{badge_row}:A{r}")
+        ws.cell(badge_row, 1, str(num)).font = Font(bold=True, size=18, color=WHITE)
+        ws.cell(badge_row, 1).fill = PatternFill("solid", fgColor=color)
+        ws.cell(badge_row, 1).alignment = Alignment(horizontal="center", vertical="center")
+        r += 2
+
+    step_card(
+        1, "Export ze SalesApp (návštěvy)",
+        "SalesApp → export realizovaných návštěv za uplynulý týden (klidně i více týdnů/měsíců najednou)",
+        "SALESAPP_IMPORT",
+        "Compliance Engine sloučí nové řádky s historií, odstraní duplicity podle UID a přepočítá plnění plánu.",
+        "2E75B6",
+    )
+    step_card(
+        2, "PPT zadání kampaní (export POS dat)",
+        "Export POS dat od zákazníka (PPT zadání) - stejná struktura každý týden",
+        "RAW_DATA",
+        "Import Engine sloučí podle POS_ID; provozovny se stejnou adresou (CORN/9PODNIK) zůstávají jeden fyzický POS. Ruční poznámky u POS se nepřepíší.",
+        "2E75B6",
+        extra_note=None,
+    )
+    ws.merge_cells(f"B{r}:G{r}")
+    ws.cell(r, 2, "Volitelně: export stavu POS (aktivní/uzavřené) patří do listu POS_STATUS_IMPORT").font = NOTE_FONT
+    r += 1
+    ws.cell(r, 2, "Řádků nyní:").font = Font(size=9, color="595959")
+    ws.cell(r, 3, '=COUNTA(POS_STATUS_IMPORT!A:A)-1').font = Font(bold=True, size=11, color=NAVY)
+    _nav_button(ws, f"F{r}", "Otevřít →", "POS_STATUS_IMPORT", color="2E75B6")
+    r += 2
+
+    step_card(
+        3, "Spusť Import Engine",
+        "Záložka Automatizace v Excelu",
+        None,
+        "POS_MASTER se aktualizuje, historie návštěv se rozšíří (nikdy nepřepisuje ani nemaže).",
+        "BF8F00",
+        extra_note="⚙ Automatizace - spouští se jako Office Script, ne jako list.",
+    )
+
+    ws.merge_cells(f"A{r}:G{r}")
+    ws.cell(r, 1, "POKRAČUJ DÁL")
+    ws.cell(r, 1).font = TITLE_FONT
+    r += 1
+    for num, title, target, color in [
+        (4, "Uprav aktivity/kampaně, pokud je potřeba", "ACTIVITY_PLAN", "BF8F00"),
+        (5, "Spusť Planning Engine, zkontroluj rozpis a publikuj", "TECHNICIAN_PLAN", "375623"),
+    ]:
+        ws.cell(r, 1, str(num)).font = Font(bold=True, size=14, color=WHITE)
+        ws.cell(r, 1).fill = PatternFill("solid", fgColor=color)
+        ws.cell(r, 1).alignment = Alignment(horizontal="center", vertical="center")
+        ws.merge_cells(f"B{r}:E{r}")
+        ws.cell(r, 2, f"KROK {num} — {title}").font = Font(size=11)
+        ws.cell(r, 2).alignment = Alignment(vertical="center")
+        _nav_button(ws, f"G{r}", "Otevřít →", target, color=color)
+        ws.row_dimensions[r].height = 22
         r += 1
     r += 1
 
@@ -293,16 +348,6 @@ def build_import_hub(wb):
     r += 1
     ws.cell(r, 1, '=IFERROR(TEXT(MAX(POS_MASTER!AM:AM),"DD.MM.YYYY HH:MM"),"zatím žádný import")')
     ws.cell(r, 1).font = Font(bold=True, size=14, color=NAVY)
-    r += 2
-
-    ws.cell(r, 1, "DALŠÍ KROK").font = TITLE_FONT
-    r += 1
-    ws.merge_cells(f"A{r}:G{r}")
-    ws.cell(r, 1, "1) Vlož export(y) výše  →  2) Spusť Import Engine  →  3) Spusť Planning Engine")
-    ws.cell(r, 1).font = Font(bold=True, size=11, color=NAVY)
-    ws.cell(r, 1).fill = PatternFill("solid", fgColor="FFF2CC")
-    ws.cell(r, 1).alignment = Alignment(horizontal="left", vertical="center", indent=1)
-    ws.row_dimensions[r].height = 22
     r += 2
 
     _nav_button(ws, f"A{r}", "← Zpět na HOME", "HOME", color="404040")
