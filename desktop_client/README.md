@@ -34,8 +34,8 @@ You don't need Python installed to *use* the app this way - only once, to
 1. One-time setup on a Windows PC: install Python from
    https://python.org (check "Add python.exe to PATH" during install).
 2. Double-click `build_exe.bat` in this folder (or run it from a command
-   prompt: `build_exe.bat`). It installs the two required libraries
-   (`openpyxl`, `pyinstaller`) and packages the app.
+   prompt: `build_exe.bat`). It installs the required libraries
+   (`openpyxl`, `ttkbootstrap`, `pyinstaller`) and packages the app.
 3. The result is `dist\FieldForceDistributionClient.exe` - a single file.
    Copy it anywhere (Desktop, a shared drive, wherever) and run it with a
    double-click, on that PC or any other Windows PC - Python is no longer
@@ -53,13 +53,13 @@ Windows produces a genuine Windows `.exe`, not a Linux binary.)
 ### B) Running the Python source directly (any OS, for development/testing)
 
 - Python 3.10+
-- `openpyxl` (`pip install openpyxl`)
+- `openpyxl` and `ttkbootstrap` (`pip install openpyxl ttkbootstrap`)
 - Tkinter — ships with the standard Windows/macOS Python installers; on
   Linux it may need a separate OS package (e.g. `sudo apt install
   python3-tk`).
 
 ```
-pip install openpyxl
+pip install openpyxl ttkbootstrap
 python3 distribution_client.py
 ```
 

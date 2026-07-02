@@ -23,9 +23,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Instaluji potrebne knihovny ^(openpyxl, pyinstaller^)...
+echo Instaluji potrebne knihovny ^(openpyxl, ttkbootstrap, pyinstaller^)...
 python -m pip install --quiet --upgrade pip
-python -m pip install --quiet openpyxl pyinstaller
+python -m pip install --quiet openpyxl ttkbootstrap pyinstaller
 if errorlevel 1 (
     echo Instalace knihoven selhala. Zkontroluj pripojeni k internetu.
     pause
@@ -34,8 +34,14 @@ if errorlevel 1 (
 
 echo.
 echo Balim aplikaci do jednoho .exe souboru...
+REM --hidden-import PIL._tkinter_finder: ttkbootstrap renders scrollbars via
+REM Pillow, and PyInstaller's automatic PIL hook misses this submodule -
+REM without this flag the packaged .exe crashes on startup with
+REM ModuleNotFoundError even though it runs fine from source (confirmed by
+REM actually running the packaged build, not just the .py source).
 python -m PyInstaller --onefile --windowed --noconfirm ^
     --name FieldForceDistributionClient ^
+    --hidden-import PIL._tkinter_finder ^
     distribution_client.py
 
 if errorlevel 1 (
