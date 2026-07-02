@@ -213,6 +213,16 @@ principle.
 - SalesApp → LOS/LOT activity mapping not yet confirmed (purpose columns seen so far describe
   visit stage, not clearly which campaign/product was serviced).
 
+## 13a. Implementation status
+
+- Import Engine (`office-scripts/ImportEngine.ts`) — done, tested against real production data.
+- Planning Engine v1 (`office-scripts/PlanningEngine.ts`) — done, tested against real production
+  data (see verification notes in the commit history / conversation record). Covers Filters,
+  Cadence (CORE + config-driven Mandatory), Pareto (PER_TECHNICIAN), campaign hold-back, GPS
+  bonus (corrected spec), capacity (dynamic + override), MANAGER_PLAN output. Simplifications and
+  deferred pieces tracked in `docs/BACKLOG.md`, not hidden.
+- Advisor / Compliance / Route refinement / Plan lifecycle — not started, see BACKLOG.md.
+
 ## 14. Next step
 
 Implementation begins engine-by-engine per the migration plan (§12), starting with Phase 0 once

@@ -46,6 +46,13 @@ def main(ref_path, out_path):
     for name in REFERENCE_SHEETS_KEEP_AS_IS:
         copy_sheet(src_wb, dst_wb, name)
 
+    # Add GPS bonus config keys to CONTROL (docs/BUSINESS_RULES.md 6a - corrected
+    # spec: bounded, capacity-aware overflow, not a hard cap at capacity).
+    control_ws = dst_wb["CONTROL"]
+    control_ws.append(["GPS_EXTRA_ENABLED", 1, "1=on. Allows a small overflow beyond capacity for POS very close to an already-selected visit."])
+    control_ws.append(["GPS_EXTRA_RADIUS_METERS", 300, "Radius for the GPS bonus overflow rule."])
+    control_ws.append(["GPS_EXTRA_MAX_VISITS", 5, "Max extra visits per technician/week from the GPS bonus rule."])
+
     # CATEGORY_RULES: copy reference rows + add explicit confirmed default row
     cat_ws = src_wb["CATEGORY_RULES"]
     cat_rows = [list(r) for r in cat_ws.iter_rows(values_only=True)]
@@ -160,6 +167,16 @@ def main(ref_path, out_path):
             "plannerNotes",
             "importedAt", "updatedAt",
         ],
+        [],
+    )
+
+    # MANAGER_PLAN (Planning Engine output - headers match legacy OUTPUT_PLAN
+    # column order so the shape is familiar, populated by PlanningEngine.ts)
+    write_table(
+        dst_wb, "MANAGER_PLAN",
+        ["WEEK", "DATE", "DAY", "TECHNICIAN", "POS", "KATEGORIE", "NAZEV_PROVOZOVNY",
+         "ULICE", "CISLO", "MESTO", "OBLAST", "POS_AREA", "PPT", "LOS_ACTIVITY",
+         "LOT_ACTIVITY", "REASON", "GPS_GROUP"],
         [],
     )
 

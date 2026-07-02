@@ -1,0 +1,681 @@
+// ============================================================================
+// FIELD FORCE OPTIMIZER V11 - PLANNING ENGINE (first functional Generate Plan)
+// ============================================================================
+// Deployable Office Script - paste the whole file into Excel's Code Editor.
+// Run AFTER Import Engine (POS_MASTER must be populated).
+//
+// SCOPE OF THIS FIRST VERSION (deliberately narrow, per product-owner request
+// "co nejdriv funkcni Generate Plan nad realnymi daty"):
+//   - Reads POS_MASTER (not RAW_DATA) - Import Engine already ran.
+//   - Filters: TERMINAL_RULES, MARKET_RULES, CATEGORY_RULES (config-driven,
+//     replaces V10.5.5's hardcoded categoryRule() fallback with the explicit
+//     "*" default row).
+//   - Cadence: CORE (SOFT_HIGH_WEIGHT, evolution of V10.5.5's score constant)
+//     and MANDATORY (config-driven, generalizes V10.5.5's hardcoded 9PODNIK
+//     check - reads scope/matchValue/dedupBy from CADENCE_RULES instead of a
+//     literal string). GECO/CORN rows are seeded `active=NO` in CADENCE_RULES
+//     and are skipped entirely by this engine until activated - not guessed.
+//   - Pareto: PER_TECHNICIAN top-20%, exactly preserving V10.5.5 behaviour,
+//     scope read from PARETO_GROUPS (switchable later without code changes).
+//   - Campaign hold-back: preserves V10.5.5's campaignChangeSoon() reorder.
+//   - GPS bonus: corrected spec (docs/BUSINESS_RULES.md 6a) - bounded,
+//     capacity-aware overflow, tagged "GPS BONUS", every selected POS is
+//     guaranteed a day slot (fixes the V10.5.5 addNearby() silent-loss bug).
+//   - Capacity: CAPACITY_OVERRIDE table if present, else workDays x
+//     TARGET_VISITS_DAY (holiday-adjusted, no external calendar).
+//   - Output: MANAGER_PLAN only, with a REASON text column (structured
+//     SCORE_LOG breakdown deferred - noted as a follow-up, not blocking).
+//   - Manual overrides: FORCE_EXCLUDE always removes a POS. FORCE_INCLUDE
+//     bypasses Filters (proposed default from BUSINESS_RULES.md 10, not yet
+//     formally confirmed - flagged here, not silently buried).
+//   - NOT in this version: Advisor Engine, Compliance Engine, Plan lifecycle
+//     (Draft/Published/Active/Closed), TECHNICIAN_PLAN, SEASONAL_STRATEGY
+//     profile switching. All explicitly deferred per product-owner instruction
+//     to get one working pipeline before adding further business logic.
+// ============================================================================
+
+function main(workbook: ExcelScript.Workbook) {
+  // ---- SHARED: text.ts ----
+  function norm(v: string): string {
+    return v
+      .toUpperCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .trim();
+  }
+
+  // ---- SHARED: dates.ts ----
+  function isoMonday(year: number, week: number): Date {
+    let d = new Date(year, 0, 4);
+    let day = d.getDay();
+    if (day == 0) {
+      day = 7;
+    }
+    d.setDate(d.getDate() - day + 1 + (week - 1) * 7);
+    return d;
+  }
+  function easter(y: number): Date {
+    const f = Math.floor;
+    let a = y % 19;
+    let b = f(y / 100);
+    let c = y % 100;
+    let d = f(b / 4);
+    let e = b % 4;
+    let g = f((8 * b + 13) / 25);
+    let h = (19 * a + b - d - g + 15) % 30;
+    let i = f(c / 4);
+    let k = c % 4;
+    let l = (32 + 2 * e + 2 * i - h - k) % 7;
+    let m = f((a + 11 * h + 22 * l) / 451);
+    let month = f((h + l - 7 * m + 114) / 31);
+    let day = ((h + l - 7 * m + 114) % 31) + 1;
+    return new Date(y, month - 1, day);
+  }
+  function isHoliday(date: Date, year: number): boolean {
+    const fixed = [
+      "1-1", "1-5", "8-5", "5-7", "6-7", "28-9",
+      "28-10", "17-11", "24-12", "25-12", "26-12",
+    ];
+    const key = date.getDate() + "-" + (date.getMonth() + 1);
+    if (fixed.includes(key)) {
+      return true;
+    }
+    const e = easter(year);
+    let friday = new Date(e);
+    friday.setDate(e.getDate() - 2);
+    let monday = new Date(e);
+    monday.setDate(e.getDate() + 1);
+    return (
+      date.toDateString() == friday.toDateString() ||
+      date.toDateString() == monday.toDateString()
+    );
+  }
+  function workDays(year: number, week: number): { day: string; date: Date }[] {
+    const names = ["MON", "TUE", "WED", "THU", "FRI"];
+    let start = isoMonday(year, week);
+    let result: { day: string; date: Date }[] = [];
+    for (let i = 0; i < 5; i++) {
+      let d = new Date(start);
+      d.setDate(start.getDate() + i);
+      if (!isHoliday(d, year)) {
+        result.push({ day: names[i], date: d });
+      }
+    }
+    return result;
+  }
+
+  // ---- SHARED: geo.ts ----
+  function distanceKm(ax: number, ay: number, bx: number, by: number): number {
+    const dx = (ax - bx) * 111;
+    const dy = (ay - by) * 72;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  // ==========================================================================
+  // LOAD SHEETS
+  // ==========================================================================
+
+  function readTable(sheetName: string): (string | number | boolean)[][] {
+    const ws = workbook.getWorksheet(sheetName);
+    const range = ws.getUsedRange();
+    return range ? range.getValues() : [];
+  }
+
+  const posMaster = readTable("POS_MASTER");
+  const control = readTable("CONTROL");
+  const activity = readTable("ACTIVITY_PLAN");
+  const terminals = readTable("TERMINAL_RULES");
+  const markets = readTable("MARKET_RULES");
+  const categoryRules = readTable("CATEGORY_RULES");
+  const cadenceRules = readTable("CADENCE_RULES");
+  const paretoGroups = readTable("PARETO_GROUPS");
+  const scoreProfiles = readTable("SCORE_PROFILES");
+  const capacityOverride = readTable("CAPACITY_OVERRIDE");
+
+  const outWs = workbook.getWorksheet("MANAGER_PLAN");
+  outWs.getRange("A2:Q200000").clear(); // 17 output columns = A..Q
+
+  // ==========================================================================
+  // CONFIG READERS
+  // ==========================================================================
+
+  function setting(name: string, fallback: number): number {
+    for (let i = 1; i < control.length; i++) {
+      if (norm(String(control[i][0])) == norm(name)) {
+        const v = Number(control[i][1]);
+        return isNaN(v) ? fallback : v;
+      }
+    }
+    return fallback;
+  }
+
+  const START_WEEK = setting("CAMPAIGN_START_WEEK", 30);
+  const CAMPAIGN_LENGTH = setting("CAMPAIGN_LENGTH", 4);
+  const TARGET_DAY = setting("TARGET_VISITS_DAY", 8);
+  const STANDARD_GAP = setting("STANDARD_VISIT_GAP", 8);
+  const NEGLECTED_AFTER = setting("NEGLECTED_AFTER_WEEKS", 26);
+  const YEAR = setting("YEAR", new Date().getFullYear());
+  const SYNC_WINDOW = setting("SYNC_WINDOW_WEEKS", 1);
+  const GPS_EXTRA_ENABLED = setting("GPS_EXTRA_ENABLED", 0) === 1;
+  const GPS_EXTRA_RADIUS_METERS = setting("GPS_EXTRA_RADIUS_METERS", 300);
+  const GPS_EXTRA_MAX_VISITS = setting("GPS_EXTRA_MAX_VISITS", 5);
+
+  // TERMINAL_RULES -> active terminal types
+  let activeTerms: string[] = [];
+  for (let i = 1; i < terminals.length; i++) {
+    if (norm(String(terminals[i][1])) == "YES") {
+      activeTerms.push(norm(String(terminals[i][0])));
+    }
+  }
+  function terminalOK(v: string): boolean {
+    const value = norm(v);
+    for (const t of activeTerms) {
+      if (value.includes(t)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // MARKET_RULES -> active markets (new filter, did not exist in V10.5.5)
+  let activeMarkets: string[] = [];
+  for (let i = 1; i < markets.length; i++) {
+    if (norm(String(markets[i][1])) == "YES") {
+      activeMarkets.push(norm(String(markets[i][0])));
+    }
+  }
+  function marketOK(v: string): boolean {
+    return activeMarkets.includes(norm(v));
+  }
+
+  // CATEGORY_RULES -> table lookup with explicit "*" default (replaces
+  // V10.5.5's implicit startsWith("1")->CORE / else NORMAL code fallback;
+  // that default is now a visible config row, seeded by scaffold_workbook.py).
+  function categoryRule(cat: string): string {
+    const c = norm(cat);
+    let starPrefixRule: string | null = null;
+    for (let i = 1; i < categoryRules.length; i++) {
+      const key = norm(String(categoryRules[i][0]));
+      if (key == c) {
+        return norm(String(categoryRules[i][1]));
+      }
+      if (key == "STARTS_1" && c.startsWith("1")) {
+        starPrefixRule = norm(String(categoryRules[i][1]));
+      }
+      if (key == "*") {
+        starPrefixRule = starPrefixRule ?? norm(String(categoryRules[i][1]));
+      }
+    }
+    return starPrefixRule ?? "NORMAL";
+  }
+
+  // CADENCE_RULES -> CORE min-gap + MANDATORY definitions (config-driven,
+  // GECO/CORN rows with active<>YES are skipped entirely).
+  interface CadenceRule {
+    ruleId: string;
+    scope: string;
+    matchValue: string[];
+    minGapWeeks: number | null;
+    maxIntervalWeeks: number | null;
+    intervalType: string;
+    guaranteeType: string;
+    dedupBy: string;
+    campaignChangeOverride: boolean;
+    priority: number;
+  }
+  const cadHeaders = (cadenceRules[0] as string[]).map((h) => String(h));
+  const cIdx = (name: string) => cadHeaders.indexOf(name);
+  let activeCadenceRules: CadenceRule[] = [];
+  for (let i = 1; i < cadenceRules.length; i++) {
+    const row = cadenceRules[i];
+    if (norm(String(row[cIdx("active")])) != "YES") {
+      continue;
+    }
+    activeCadenceRules.push({
+      ruleId: String(row[cIdx("ruleId")]),
+      scope: norm(String(row[cIdx("scope")])),
+      matchValue: String(row[cIdx("matchValue")])
+        .split(";")
+        .map((s) => norm(s))
+        .filter((s) => s.length > 0),
+      minGapWeeks: row[cIdx("minGapWeeks")] === "" ? null : Number(row[cIdx("minGapWeeks")]),
+      maxIntervalWeeks:
+        row[cIdx("maxIntervalWeeks")] === "" ? null : Number(row[cIdx("maxIntervalWeeks")]),
+      intervalType: norm(String(row[cIdx("intervalType")])),
+      guaranteeType: norm(String(row[cIdx("guaranteeType")])),
+      dedupBy: norm(String(row[cIdx("dedupBy")])),
+      campaignChangeOverride: norm(String(row[cIdx("campaignChangeOverride")])) == "YES",
+      priority: Number(row[cIdx("priority")]) || 0,
+    });
+  }
+  const coreRule = activeCadenceRules.find((r) => r.ruleId == "CORE") || null;
+  const mandatoryRules = activeCadenceRules.filter(
+    (r) => r.intervalType == "ONCE_PER_CAMPAIGN" && r.guaranteeType == "HARD"
+  );
+
+  // PARETO_GROUPS -> premium tier definition (PER_TECHNICIAN preserved from
+  // V10.5.5; scope kept switchable for a later decision, not changed here).
+  let premiumPercent = 20;
+  let premiumScope = "PER_TECHNICIAN";
+  const parHeaders = (paretoGroups[0] as string[]).map((h) => String(h));
+  const pIdx = (name: string) => parHeaders.indexOf(name);
+  for (let i = 1; i < paretoGroups.length; i++) {
+    const row = paretoGroups[i];
+    if (String(row[pIdx("tierId")]) == "PREMIUM_TOP20" && norm(String(row[pIdx("active")])) == "YES") {
+      premiumPercent = Number(row[pIdx("boundaryValue")]) || 20;
+      premiumScope = norm(String(row[pIdx("scope")]));
+    }
+  }
+
+  // SCORE_PROFILES -> DEFAULT weights (same magnitudes as V10.5.5's constants,
+  // now configurable instead of hardcoded, so they can be retuned without a
+  // code change).
+  let weights: { [component: string]: number } = {};
+  for (let i = 1; i < scoreProfiles.length; i++) {
+    const row = scoreProfiles[i];
+    if (norm(String(row[0])) == "DEFAULT") {
+      weights[norm(String(row[1]))] = Number(row[2]) || 0;
+    }
+  }
+  const W_CORE = weights["CORE"] ?? 100000000;
+  const W_KATEGORIZACE_A = weights["KATEGORIZACE_A"] ?? 10000000;
+  const W_PPT = weights["PPT"] ?? 1;
+  const W_NEGLECTED_BONUS = weights["NEGLECTED_BONUS"] ?? 50000;
+
+  // CAPACITY_OVERRIDE -> technician/year/week -> capacity
+  let capacityOverrideMap: { [key: string]: number } = {};
+  for (let i = 1; i < capacityOverride.length; i++) {
+    const row = capacityOverride[i];
+    if (!row[0]) {
+      continue;
+    }
+    const key = String(row[0]) + "|" + String(row[1]) + "|" + String(row[2]);
+    capacityOverrideMap[key] = Number(row[3]);
+  }
+
+  // ACTIVITY_PLAN -> los/lot activity per week (unchanged from V10.5.5;
+  // PRIORITY/OVERRIDE_GAP columns still intentionally unread here)
+  let los: { [week: number]: string } = {};
+  let lot: { [week: number]: string } = {};
+  for (let i = 1; i < activity.length; i++) {
+    const row = activity[i];
+    if (!row[0]) {
+      continue;
+    }
+    for (let w = Number(row[2]); w <= Number(row[3]); w++) {
+      if (norm(String(row[0])) == "LOS") {
+        los[w] = String(row[1]);
+      }
+      if (norm(String(row[0])) == "LOT") {
+        lot[w] = String(row[1]);
+      }
+    }
+  }
+  function campaignChangeSoon(week: number): boolean {
+    for (let i = 1; i <= SYNC_WINDOW; i++) {
+      const future = week + i;
+      if (los[week] != los[future] && los[future]) {
+        return true;
+      }
+      if (lot[week] != lot[future] && lot[future]) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ==========================================================================
+  // BUILD CANDIDATE LIST FROM POS_MASTER
+  // ==========================================================================
+
+  interface POSItem {
+    pos: string;
+    tech: string;
+    kategorie: string;
+    classification: string;
+    nazev: string;
+    ulice: string;
+    cislo: string;
+    mesto: string;
+    oblast: string;
+    posArea: string;
+    ppt: number;
+    x: number;
+    y: number;
+    weeksSinceLastVisit: number | null;
+    forceInclude: boolean;
+    forceExclude: boolean;
+    core: boolean;
+    mandatoryRuleId: string | null;
+    premium: boolean;
+    score: number;
+    reason: string;
+  }
+
+  const mHeaders = (posMaster[0] as string[]).map((h) => String(h));
+  const midx = (name: string) => mHeaders.indexOf(name);
+
+  let groups: { [tech: string]: POSItem[] } = {};
+
+  for (let i = 1; i < posMaster.length; i++) {
+    const r = posMaster[i];
+    if (!r[midx("posId")]) {
+      continue;
+    }
+    if (String(r[midx("status")]) != "Active") {
+      continue; // Closed POS are never candidates (docs/BUSINESS_RULES.md section 2)
+    }
+
+    const overrideType = norm(String(r[midx("managerOverrideType")] ?? ""));
+    const forceExclude = overrideType == "FORCE_EXCLUDE";
+    if (forceExclude) {
+      continue; // manual override always wins - never even enters the pool
+    }
+    const forceInclude = overrideType == "FORCE_INCLUDE";
+
+    const category = String(r[midx("category")]);
+    const rule = categoryRule(category);
+    const passesFilters =
+      terminalOK(String(r[midx("terminalType")])) &&
+      marketOK(String(r[midx("market")])) &&
+      rule != "EXCLUDE";
+
+    // FORCE_INCLUDE bypasses Filters entirely - proposed default per
+    // docs/BUSINESS_RULES.md section 10, not yet formally reconfirmed.
+    if (!passesFilters && !forceInclude) {
+      continue;
+    }
+
+    const tech = String(
+      r[midx("managerOverrideTechnician")] || r[midx("assignedTechnician")]
+    );
+    const weeksSince =
+      r[midx("weeksSinceLastVisit")] === "" || r[midx("weeksSinceLastVisit")] === undefined
+        ? null
+        : Number(r[midx("weeksSinceLastVisit")]);
+
+    const item: POSItem = {
+      pos: String(r[midx("posId")]),
+      tech: tech,
+      kategorie: category,
+      classification: String(r[midx("classification")]),
+      nazev: String(r[midx("nazev")]),
+      ulice: String(r[midx("street")]),
+      cislo: String(r[midx("houseNumber")]),
+      mesto: String(r[midx("city")]),
+      oblast: String(r[midx("area")]),
+      posArea: String(r[midx("posArea")]),
+      ppt: Number(r[midx("ppt")]) || 0,
+      x: Number(r[midx("gpsX")]) || 0,
+      y: Number(r[midx("gpsY")]) || 0,
+      weeksSinceLastVisit: weeksSince,
+      forceInclude: forceInclude,
+      forceExclude: false,
+      core: rule == "CORE",
+      mandatoryRuleId: null,
+      premium: false,
+      score: 0,
+      reason: "",
+    };
+
+    for (const mr of mandatoryRules) {
+      const matches =
+        (mr.scope == "CATEGORY" && mr.matchValue.includes(norm(category))) ||
+        (mr.scope == "CATEGORYPREFIX" &&
+          mr.matchValue.some((p) => norm(category).startsWith(p)));
+      if (matches) {
+        item.mandatoryRuleId = mr.ruleId;
+        break;
+      }
+    }
+
+    // Gap-based score adjustment (evolution of V10.5.5's gapPenalty logic)
+    let gapAdjustment = 0;
+    if (weeksSince !== null) {
+      const changedSoon = false; // per-POS activity-change detection needs
+      // real current-vs-target LOS/LOT comparison, which is Compliance
+      // Engine's job (not built yet) - so the "NEW CAMPAIGN OVERRIDE" min-gap
+      // exception from V10.5.5 is deferred, not silently dropped. Tracked as
+      // a known simplification of this first version.
+      const minGap = item.core && coreRule ? coreRule.minGapWeeks ?? 2 : STANDARD_GAP;
+      if (weeksSince < minGap && !item.forceInclude) {
+        gapAdjustment = -1000000;
+      }
+      if (weeksSince >= NEGLECTED_AFTER) {
+        gapAdjustment += W_NEGLECTED_BONUS;
+        item.reason += "NEGLECTED POS | ";
+      }
+    }
+
+    item.score =
+      (item.core ? W_CORE : 0) +
+      (item.classification == "A" ? W_KATEGORIZACE_A : 0) +
+      item.ppt * W_PPT +
+      gapAdjustment;
+
+    if (!groups[tech]) {
+      groups[tech] = [];
+    }
+    groups[tech].push(item);
+  }
+
+  // ==========================================================================
+  // PREMIUM / PARETO TOP-20% (PER_TECHNICIAN, preserves V10.5.5 behaviour)
+  // ==========================================================================
+
+  for (const tech of Object.keys(groups)) {
+    groups[tech].sort((a, b) => b.score - a.score);
+    const limit = Math.ceil((groups[tech].length * premiumPercent) / 100);
+    for (let i = 0; i < groups[tech].length; i++) {
+      if (i < limit) {
+        groups[tech][i].premium = true;
+      }
+    }
+  }
+  // premiumScope is read but only PER_TECHNICIAN is implemented in this first
+  // version - GLOBAL/PER_REGION/PER_MARKET scopes are a later extension.
+
+  // ==========================================================================
+  // MANDATORY PICK (config-driven, generalizes V10.5.5's mandatoryPodnik())
+  // ==========================================================================
+
+  function pickMandatory(list: POSItem[]): POSItem[] {
+    let byAddress: { [key: string]: POSItem } = {};
+    let noDedup: POSItem[] = [];
+    for (const p of list) {
+      if (!p.mandatoryRuleId) {
+        continue;
+      }
+      const rule = mandatoryRules.find((r) => r.ruleId == p.mandatoryRuleId);
+      if (rule && rule.dedupBy == "ADDRESS") {
+        const key = norm(p.ulice + "|" + p.mesto);
+        if (!byAddress[key] || p.ppt > byAddress[key].ppt) {
+          byAddress[key] = p;
+        }
+      } else {
+        noDedup.push(p);
+      }
+    }
+    let result = [...Object.values(byAddress), ...noDedup];
+    for (const p of result) {
+      p.reason += "MANDATORY (" + p.mandatoryRuleId + ") | ";
+    }
+    return result;
+  }
+
+  // ==========================================================================
+  // GPS BONUS (corrected spec - bounded, capacity-aware, no silent loss)
+  // ==========================================================================
+
+  function addGpsBonus(selected: POSItem[], pool: POSItem[]): POSItem[] {
+    if (!GPS_EXTRA_ENABLED) {
+      return selected;
+    }
+    let result = [...selected];
+    let added = 0;
+    const radiusKm = GPS_EXTRA_RADIUS_METERS / 1000;
+    for (const anchor of selected) {
+      if (added >= GPS_EXTRA_MAX_VISITS) {
+        break;
+      }
+      let near = pool
+        .filter(
+          (p) =>
+            !result.includes(p) &&
+            distanceKm(anchor.x, anchor.y, p.x, p.y) <= radiusKm
+        )
+        .sort((a, b) => b.score - a.score);
+      for (const n of near) {
+        if (added >= GPS_EXTRA_MAX_VISITS) {
+          break;
+        }
+        n.reason += "GPS BONUS | ";
+        result.push(n);
+        added++;
+      }
+    }
+    return result;
+    // NOTE: unlike V10.5.5's addNearby(), every POS added here is guaranteed
+    // a day slot by geoDays() below - perDayTarget is computed from the
+    // actual selected length, not a fixed TARGET_DAY, so nothing added here
+    // can be silently dropped.
+  }
+
+  // ==========================================================================
+  // WEEK SELECTION
+  // ==========================================================================
+
+  function selectWeekPOS(list: POSItem[], week: number, capacity: number): POSItem[] {
+    let result: POSItem[] = [];
+    const mandatory = pickMandatory(list);
+    for (const m of mandatory) {
+      result.push(m);
+      capacity--;
+    }
+    const holdPremium = campaignChangeSoon(week);
+    let candidates = list.filter((p) => !result.includes(p));
+    candidates.sort((a, b) => {
+      if (a.forceInclude != b.forceInclude) {
+        return a.forceInclude ? -1 : 1; // forced POS always sort first
+      }
+      if (holdPremium) {
+        const ap = a.premium ? 1 : 0;
+        const bp = b.premium ? 1 : 0;
+        if (ap != bp) {
+          return ap - bp;
+        }
+      }
+      return b.score - a.score;
+    });
+    while (result.length < capacity && candidates.length > 0) {
+      const p = candidates.shift();
+      if (p) {
+        if (p.premium) {
+          p.reason += "PREMIUM | ";
+        }
+        result.push(p);
+      }
+    }
+    result = addGpsBonus(result, list);
+    return result;
+  }
+
+  // ==========================================================================
+  // GEO DAY CLUSTERING (perDayTarget derived from actual selection size, so
+  // GPS-bonus overflow is always placed - fixes the V10.5.5 silent-loss bug)
+  // ==========================================================================
+
+  function geoDays(
+    list: POSItem[],
+    days: { day: string; date: Date }[]
+  ): { p: POSItem; day: string; date: string; group: number }[] {
+    let remaining = [...list];
+    let result: { p: POSItem; day: string; date: string; group: number }[] = [];
+    let group = 1;
+    const perDayTarget = days.length > 0 ? Math.ceil(list.length / days.length) : 0;
+    for (const d of days) {
+      if (remaining.length == 0) {
+        break;
+      }
+      remaining.sort((a, b) => b.score - a.score);
+      const anchor = remaining.shift();
+      if (!anchor) {
+        break;
+      }
+      result.push({ p: anchor, day: d.day, date: d.date.toLocaleDateString("cs-CZ"), group });
+      remaining.sort(
+        (a, b) => distanceKm(anchor.x, anchor.y, a.x, a.y) - distanceKm(anchor.x, anchor.y, b.x, b.y)
+      );
+      const take = Math.min(perDayTarget - 1, remaining.length);
+      for (let i = 0; i < take; i++) {
+        const near = remaining.shift();
+        if (near) {
+          near.reason += "NEARBY | ";
+          result.push({ p: near, day: d.day, date: d.date.toLocaleDateString("cs-CZ"), group });
+        }
+      }
+      group++;
+    }
+    // Any still-remaining items (only possible if days.length == 0, i.e. a
+    // fully-holiday week) are left unplaced and NOT marked used by the
+    // caller - see the week loop below.
+    return result;
+  }
+
+  // ==========================================================================
+  // GENERATE PLAN
+  // ==========================================================================
+
+  let output: (string | number)[][] = [];
+
+  for (const tech of Object.keys(groups)) {
+    let used: POSItem[] = [];
+    for (let w = 0; w < CAMPAIGN_LENGTH; w++) {
+      const week = START_WEEK + w;
+      const days = workDays(YEAR, week);
+      const overrideKey = tech + "|" + YEAR + "|" + week;
+      const capacity =
+        capacityOverrideMap[overrideKey] !== undefined
+          ? capacityOverrideMap[overrideKey]
+          : days.length * TARGET_DAY;
+
+      if (capacity <= 0 || days.length == 0) {
+        continue; // technician has zero capacity this week - skip cleanly
+      }
+
+      const available = groups[tech].filter((p) => !used.includes(p));
+      const selected = selectWeekPOS(available, week, capacity);
+      const planned = geoDays(selected, days);
+      // Only mark as used the POS that geoDays() actually placed - fixes the
+      // V10.5.5 defect where selected-but-unplaced POS were silently
+      // consumed without ever being visited or logged.
+      for (const row of planned) {
+        used.push(row.p);
+      }
+
+      for (const row of planned) {
+        const p = row.p;
+        let reason = "";
+        if (p.core) {
+          reason += "CORE | ";
+        }
+        reason += p.reason;
+        output.push([
+          week, row.date, row.day, tech, p.pos,
+          p.kategorie, p.nazev, p.ulice, p.cislo, p.mesto, p.oblast, p.posArea,
+          p.ppt, los[week] || "", lot[week] || "", reason, row.group,
+        ]);
+      }
+    }
+  }
+
+  if (output.length > 0) {
+    outWs.getRangeByIndexes(1, 0, output.length, 17).setValues(output);
+  }
+
+  console.log(
+    "Planning Engine: generated " + output.length + " planned visits across " +
+      Object.keys(groups).length + " technicians (weeks " + START_WEEK + "-" +
+      (START_WEEK + CAMPAIGN_LENGTH - 1) + ")."
+  );
+}
