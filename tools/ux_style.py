@@ -1126,7 +1126,7 @@ def _build_dashboard_charts(ws):
     workload_chart.set_categories(w_cats)
     for series, color in zip(workload_chart.series, ["375623", "BFBFBF"]):
         series.graphicalProperties.solidFill = color
-    ws.add_chart(workload_chart, "M17")
+    ws.add_chart(workload_chart, "M19")  # 2-row buffer below the weekly trend chart above (M1, ~15 rows tall) so they don't visually crowd each other
 
     # Progress bar on Utilization % (K19:K32) - safe here (unlike the
     # flowing detail sections, where the same column means different things
@@ -1156,7 +1156,7 @@ def _build_dashboard_charts(ws):
     regional_chart.add_data(r_data, titles_from_data=True)
     regional_chart.set_categories(r_cats)
     regional_chart.series[0].graphicalProperties.solidFill = "2E75B6"
-    ws.add_chart(regional_chart, "M35")
+    ws.add_chart(regional_chart, "M37")  # same buffer reasoning as the workload chart above
 
     # Progress bar on Completion % (I37:I48) - same reasoning as above.
     ws.conditional_formatting.add(
