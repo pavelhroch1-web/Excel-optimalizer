@@ -86,3 +86,25 @@ they aren't lost.
 - GPS bonus radius (300m) and max (5) are global CONTROL settings; could eventually be a
   per-CADENCE_RULES-row parameter if different POS groups need different bonus radii. Not
   needed until there's a concrete case for it.
+
+## Approved, deferred until core is stable: Weekly Distribution Helper
+Product owner approved the architecture direction (docs/ARCHITECTURE.md section 16b territory,
+but narrower and concrete) but explicitly deprioritized it until FieldForceOptimizer's core
+workflow is considered done. Scope, exactly as specified, so it isn't rediscovered/re-litigated
+later:
+- A separate, standalone utility - NOT part of the planning architecture, not a companion app,
+  not a dashboard. Runs once, on demand, after Publish.
+- Reads TECHNICIAN_PLAN from the already-published workbook (a local file, e.g. on OneDrive/a
+  shared folder - no API, no live connection to Excel while it runs).
+- Generates one PDF per technician (named after the technician), saved to a folder the user picks.
+- Triggered from an "Export pro techniky" button in Excel (mechanism TBD at implementation time -
+  likely a narrow VBA/Office Scripts hook to launch the external tool, or simply "run this script"
+  as a manual step, matching the project's existing no-Power-Automate constraint).
+- Explicitly MUST NOT: read SALESAPP_IMPORT or any import-stage sheet, generate or influence any
+  plan, write anything back to the workbook, or contain any business logic (cadence, scoring,
+  compliance classification, etc.). Pure read of MANAGER_PLAN_PUBLISHED (via TECHNICIAN_PLAN's
+  already-published values)/formatting/PDF-per-technician split, nothing else.
+- Technically low-risk when the time comes: `tools/scaffold_workbook.py`/`tools/ux_style.py`
+  already open and read this exact workbook via openpyxl with no Excel installation required -
+  the distribution helper would reuse that same pattern, just writing PDFs instead of styling
+  cells.
