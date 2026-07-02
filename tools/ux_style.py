@@ -224,7 +224,7 @@ def add_sheet_purpose_notes(wb):
         ws["A1"].comment = Comment(text, "Field Force Optimizer")
 
 
-def build_import_hub(wb):
+def build_import_hub(wb, pos_master_tech_col="O"):
     """The actual front door for data entry - foolproof by construction, not
     by trusting the user to remember which of 3 staging sheets a file goes
     to. Product owner's real weekly routine is fixed (SalesApp export -> PPT
@@ -344,6 +344,26 @@ def build_import_hub(wb):
         "BF8F00",
         extra_note="⚙ Automatizace - spouští se jako Office Script, ne jako list.",
     )
+
+    # Before Planning Engine: the one check that actually matters here. A
+    # POS with no assigned technician never gets planned - Planning Engine
+    # has nothing to route it to, and nothing else on this workbook would
+    # ever surface that gap. It's invisible until a customer complains their
+    # terminal hasn't been serviced in months. Checked right here, between
+    # "data just landed" and "run the planner", because this is the one
+    # point in the week where fixing it (correcting the assignment in
+    # RAW_DATA or via a manager override) is still cheap.
+    unassigned_formula = f'=COUNTIFS(POS_MASTER!Q:Q,"Active",POS_MASTER!{pos_master_tech_col}:{pos_master_tech_col},"")'
+    ws.merge_cells(f"B{r}:D{r}")
+    ws.cell(r, 2, "Aktivní POS bez přiřazeného technika:").font = Font(size=10)
+    check_cell = ws.cell(r, 5, unassigned_formula)
+    check_cell.font = Font(bold=True, size=14, color=NAVY)
+    ws.conditional_formatting.add(
+        check_cell.coordinate,
+        FormulaRule(formula=[f"{check_cell.coordinate}>0"], fill=PatternFill("solid", fgColor="FCE4D6"), font=Font(bold=True, size=14, color="C00000")),
+    )
+    _nav_button(ws, f"G{r}", "Zkontrolovat →", "POS_MASTER", color="7030A0")
+    r += 2
 
     ws.merge_cells(f"A{r}:G{r}")
     ws.cell(r, 1, "POKRAČUJ DÁL")
@@ -1343,7 +1363,7 @@ def apply_all(wb, control_rows):
         protect_config_sheet(wb[sheet_name], sheet_name)
 
     add_sheet_purpose_notes(wb)
-    build_import_hub(wb)
+    build_import_hub(wb, pos_master_tech_col=tech_col)
 
     build_home(wb, {
         k: v for k, v in control_values.items()
