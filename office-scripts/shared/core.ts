@@ -536,3 +536,86 @@ export function computeVolumeTrend(
   const significant = Math.abs(ratioPercent - 100) >= thresholdPercent;
   return { trailingAvg, baselineAvg, ratioPercent, significant };
 }
+
+// ============================================================================
+// PUBLISHED PLAN DRIFT (docs/ARCHITECTURE.md section 21) - diagnostic only,
+// same AdvisorEngine.ts contract as everything else in this file: never
+// changes MANAGER_PLAN_PUBLISHED or POS_MASTER, only flags that the two have
+// drifted apart since publish. A Published/Active week is a commitment
+// already sent to technicians (PublishEngine.ts) - Planning Engine will
+// never touch it again, by design (docs/BUSINESS_RULES.md section 11).
+// These functions answer "does that frozen commitment still match today's
+// POS_MASTER reality", not "should the plan be regenerated" - the answer to
+// that second question is always a human decision.
+// ============================================================================
+
+export interface OpenPlanRow {
+  posId: string;
+  plannedTechnician: string;
+}
+
+export interface POSCurrentState {
+  status: string; // "Active" | "Closed"
+  assignedTechnician: string;
+}
+
+export interface DriftAlert {
+  posId: string;
+  type: "CLOSED_POS_IN_PLAN" | "TECHNICIAN_REASSIGNED";
+  plannedTechnician: string;
+  currentTechnician: string;
+}
+
+// openPlanRows: one entry per (posId, still-open published week) - callers
+// should already have filtered to Published/Active weeks only (a Closed
+// week is history, not a live commitment, and Draft weeks never reach this
+// function at all since they aren't in MANAGER_PLAN_PUBLISHED). Rows whose
+// posId has no POS_MASTER entry are skipped (nothing to compare against -
+// a genuinely missing POS_MASTER row is a different, unrelated data
+// problem, not "drift").
+export function findPublishedPlanDrift(
+  openPlanRows: OpenPlanRow[],
+  posState: { [posId: string]: POSCurrentState }
+): DriftAlert[] {
+  let seen = new Set<string>(); // one alert per (posId, type), even if the POS appears in several still-open weeks
+  let alerts: DriftAlert[] = [];
+  for (const row of openPlanRows) {
+    const current = posState[row.posId];
+    if (!current) {
+      continue;
+    }
+    if (current.status == "Closed") {
+      const key = row.posId + "|CLOSED_POS_IN_PLAN";
+      if (!seen.has(key)) {
+        seen.add(key);
+        alerts.push({
+          posId: row.posId,
+          type: "CLOSED_POS_IN_PLAN",
+          plannedTechnician: row.plannedTechnician,
+          currentTechnician: current.assignedTechnician,
+        });
+      }
+    }
+    if (current.assignedTechnician && current.assignedTechnician != row.plannedTechnician) {
+      const key = row.posId + "|TECHNICIAN_REASSIGNED";
+      if (!seen.has(key)) {
+        seen.add(key);
+        alerts.push({
+          posId: row.posId,
+          type: "TECHNICIAN_REASSIGNED",
+          plannedTechnician: row.plannedTechnician,
+          currentTechnician: current.assignedTechnician,
+        });
+      }
+    }
+  }
+  return alerts;
+}
+
+// Active POS that have never appeared in any published plan at all - a
+// different signal from findPublishedPlanDrift above (that one is about a
+// commitment going stale; this one is about a POS that was never part of
+// any commitment yet, typically because it's new since the last publish).
+export function findUnplannedActivePOS(activePosIds: string[], everPlannedPosIds: Set<string>): string[] {
+  return activePosIds.filter((posId) => !everPlannedPosIds.has(posId));
+}

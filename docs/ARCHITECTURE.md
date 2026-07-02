@@ -761,3 +761,69 @@ only by a human clicking through Excel's ribbon each time, which fails the "no m
 for everything else in this project. The `REGIONAL OVERVIEW` bar chart (regions on one axis,
 completion % on the other) is the honest substitute: same information, visually ranked, achievable
 and re-render-safe with no manual step.
+
+## 21. Published Plan Drift + year-boundary fix
+
+Product owner's real operating model: plans are published ~2 weeks ahead, so a Published/Active
+week and a Draft week always coexist. Verified in the actual code (not just asserted) that this
+already works: `ComplianceEngine.ts` reads only `MANAGER_PLAN_PUBLISHED`, never Draft
+`MANAGER_PLAN` (confirmed at the exact line); `PlanningEngine.ts` builds a `lockedWeeks` set from
+any week whose `PLAN_LIFECYCLE` status is Published/Active/Closed and never regenerates it; each
+week has an independently-advancing lifecycle status (`advanceLifecycleStatus`), not a manually
+toggled "block" - so the scenario in the product owner's own example (week 31-34 Active, 35-38
+Draft) falls out of the existing per-week model with no special-casing needed.
+
+### 21a. Real bug found while verifying: single flat "plannedYear" per Compliance run
+
+`ComplianceEngine.ts` derived `plannedYear` once per run (`latestYear`, guessed from the newest
+SalesApp import) and applied it to every planned row being evaluated that run - a real-not-
+theoretical bug for a 3-year continuous-use system, since it will silently misclassify compliance
+for any published week whose real calendar year differs from that one guess, every year the
+campaign's week-numbering crosses Dec->Jan.
+
+**Fix**: `plannedSet` now derives `{week, year}` per row via `isoWeekNumber()` on that row's own
+`MANAGER_PLAN_PUBLISHED.DATE` column - the same true-ISO derivation already used consistently for
+actual SalesApp visit dates, so both sides of every comparison now use the same numbering system.
+Kept a separate `rawWeek` per entry specifically for matching `PLAN_LIFECYCLE`'s own key, since
+that table is written by `PublishEngine.ts` using a different, unrelated convention
+(`CONTROL.YEAR` + `PlanningEngine.ts`'s week-offset counter, which can exceed 52/53 by design -
+see `isoMonday()`'s pure date-arithmetic rollover). Conflating the two would have broken
+`PLAN_LIFECYCLE`'s Published->Active->Closed advancement for any week crossing the boundary - this
+was the one real risk in doing the fix, and is why `pendingByRawWeek` (matching `PLAN_LIFECYCLE`'s
+raw convention) is kept deliberately separate from the true-ISO week/year used for
+`COMPLIANCE_LOG`'s output and classification.
+
+No compliance business rule changed (what counts as Splneno_vcas/pozde/Nesplneno is untouched) -
+only the year/week *input* to that unchanged classification is now correct. Verified: `isoWeekNumber()`
+itself needed no change (already ISO-8601 correct - added 6 pinning regression tests: ordinary
+mid-year, ISO week 1, ISO week 53 - which 2026 actually has, the Jan-1-belongs-to-previous-year's-
+week-53 edge case, and a Dec31/Jan1 pair, 87 tests total). Full `ComplianceEngine.ts` runs via
+`tools/sim/run_e2e.ts` for both an ordinary same-year case and a real year-boundary case (POS
+planned/visited week 53/2026 and week 1/2027 under the same `CONTROL.YEAR=2026` campaign anchor) -
+both correctly classified, both `PLAN_LIFECYCLE` rows correctly advanced to Closed.
+
+### 21b. Published Plan Drift (new AdvisorEngine.ts alert types)
+
+Separate question the product owner asked next: can the system detect that a *already-published*
+plan has gone stale relative to fresh `POS_MASTER` data (a POS closed, a technician reassigned)
+since publish - without ever auto-regenerating the frozen commitment? Verified this did not exist:
+neither `ComplianceEngine.ts` nor `AdvisorEngine.ts` compared current `POS_MASTER` state against
+what was frozen into `MANAGER_PLAN_PUBLISHED` at publish time.
+
+Added three new diagnostic-only alert types (same `ADVISOR_LOG`, never-writes-back-to-plan contract
+as every other Advisor alert):
+
+- **`CLOSED_POS_IN_PLAN`** (WARNING) - a POS is present in a still-open (Published/Active, not yet
+  Closed) published week, but `POS_MASTER.status` is now `"Closed"`.
+- **`TECHNICIAN_REASSIGNED`** (WARNING) - same still-open-week scope, but
+  `POS_MASTER.assignedTechnician` no longer matches the technician recorded in the frozen snapshot.
+- **`UNPLANNED_ACTIVE_POS`** (INFO) - an Active POS that has never appeared in *any* published plan
+  at all (typically new since the last publish) - a different signal from `NEGLECT_RISK` (which
+  needs weeks of history to fire); this one can fire on the very first run after import.
+
+Deliberately NOT built: a "campaign changed" check - too ambiguous to define without generating
+noise (per product owner: "příliš nejednoznačné"). `core.ts`'s `findPublishedPlanDrift()` and
+`findUnplannedActivePOS()` are pure, unit-tested (10 new tests, matching the same swappable-signal
+pattern as `computeVolumeTrend()`), and verified end-to-end via `tools/sim/run_e2e.ts` with a
+4-POS synthetic scenario (one closed, one reassigned, one unchanged, one never-planned) - all four
+produced exactly the expected alert (or correctly stayed silent for the unchanged one).

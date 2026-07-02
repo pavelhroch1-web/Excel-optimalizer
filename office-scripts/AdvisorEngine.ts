@@ -32,10 +32,22 @@
 //     action, just flags that recent volume has moved meaningfully. Stays
 //     silent (produces zero alerts of this type) until there is enough
 //     history - correct behavior for a new workbook, not a bug.
+//   - CLOSED_POS_IN_PLAN / TECHNICIAN_REASSIGNED (Published Plan Drift -
+//     docs/ARCHITECTURE.md section 21): a Published/Active week is frozen
+//     by design (PlanningEngine.ts never touches it again) - these two
+//     alerts flag when POS_MASTER has moved on since publish (a POS closed,
+//     or its technician reassigned) while the frozen commitment hasn't.
+//     Never regenerates or edits the plan - purely "here's what's gone
+//     stale, you decide."
+//   - UNPLANNED_ACTIVE_POS: an Active POS that has never appeared in any
+//     published plan at all - typically a POS that's new since the last
+//     publish. A different signal from NEGLECT_RISK (which needs weeks of
+//     history to fire) - this one can fire on the very first run after a
+//     new POS is imported.
 //   All threshold VALUES below are proposed defaults, not confirmed business
 //   rules - see the CONTROL rows added by scaffold_workbook.py, each with an
 //   explicit "proposed default, tune on real data" note. The MECHANISM
-//   (config-driven, no hardcoded alert types beyond these four) is the
+//   (config-driven, no hardcoded alert types beyond these) is the
 //   confirmed, tested part.
 //
 // NOT IN THIS VERSION (see docs/BACKLOG.md):
@@ -161,6 +173,66 @@ function main(workbook: ExcelScript.Workbook) {
     const ratioPercent = Math.round((trailingAvg / baselineAvg) * 1000) / 10;
     const significant = Math.abs(ratioPercent - 100) >= thresholdPercent;
     return { trailingAvg, baselineAvg, ratioPercent, significant };
+  }
+
+  interface OpenPlanRow {
+    posId: string;
+    plannedTechnician: string;
+  }
+
+  interface POSCurrentState {
+    status: string; // "Active" | "Closed"
+    assignedTechnician: string;
+  }
+
+  interface DriftAlert {
+    posId: string;
+    type: "CLOSED_POS_IN_PLAN" | "TECHNICIAN_REASSIGNED";
+    plannedTechnician: string;
+    currentTechnician: string;
+  }
+
+  function findPublishedPlanDrift(
+    openPlanRows: OpenPlanRow[],
+    posState: { [posId: string]: POSCurrentState }
+  ): DriftAlert[] {
+    let seen = new Set<string>(); // one alert per (posId, type), even if the POS appears in several still-open weeks
+    let alerts: DriftAlert[] = [];
+    for (const row of openPlanRows) {
+      const current = posState[row.posId];
+      if (!current) {
+        continue;
+      }
+      if (current.status == "Closed") {
+        const key = row.posId + "|CLOSED_POS_IN_PLAN";
+        if (!seen.has(key)) {
+          seen.add(key);
+          alerts.push({
+            posId: row.posId,
+            type: "CLOSED_POS_IN_PLAN",
+            plannedTechnician: row.plannedTechnician,
+            currentTechnician: current.assignedTechnician,
+          });
+        }
+      }
+      if (current.assignedTechnician && current.assignedTechnician != row.plannedTechnician) {
+        const key = row.posId + "|TECHNICIAN_REASSIGNED";
+        if (!seen.has(key)) {
+          seen.add(key);
+          alerts.push({
+            posId: row.posId,
+            type: "TECHNICIAN_REASSIGNED",
+            plannedTechnician: row.plannedTechnician,
+            currentTechnician: current.assignedTechnician,
+          });
+        }
+      }
+    }
+    return alerts;
+  }
+
+  function findUnplannedActivePOS(activePosIds: string[], everPlannedPosIds: Set<string>): string[] {
+    return activePosIds.filter((posId) => !everPlannedPosIds.has(posId));
   }
   // SYNC-BLOCK-END: core.ts (advisor)
 
@@ -393,6 +465,110 @@ function main(workbook: ExcelScript.Workbook) {
   }
 
   // ==========================================================================
+  // PUBLISHED PLAN DRIFT + UNPLANNED ACTIVE POS (docs/ARCHITECTURE.md
+  // section 21). Reads MANAGER_PLAN_PUBLISHED (never Draft MANAGER_PLAN -
+  // same "only the frozen commitment matters" rule as ComplianceEngine.ts)
+  // joined against PLAN_LIFECYCLE to find weeks still Published/Active (not
+  // yet Closed - a Closed week is history, drift no longer matters), and
+  // compares those rows against the CURRENT POS_MASTER. Diagnostic only:
+  // never edits MANAGER_PLAN_PUBLISHED or POS_MASTER.
+  // ==========================================================================
+
+  const managerPlanPublished = readTable("MANAGER_PLAN_PUBLISHED");
+  const planLifecycleForDrift = readTable("PLAN_LIFECYCLE");
+  if (managerPlanPublished.length >= 2) {
+    let openWeeks = new Set<string>(); // "year|week", Published or Active only
+    if (planLifecycleForDrift.length >= 2) {
+      const plHeaders = (planLifecycleForDrift[0] as string[]).map((h) => String(h));
+      const plIdx = (name: string) => plHeaders.indexOf(name);
+      for (let i = 1; i < planLifecycleForDrift.length; i++) {
+        const row = planLifecycleForDrift[i];
+        const status = String(row[plIdx("status")]);
+        if (status == "Published" || status == "Active") {
+          openWeeks.add(String(row[plIdx("year")]) + "|" + String(row[plIdx("week")]));
+        }
+      }
+    }
+
+    const mpHeaders = (managerPlanPublished[0] as string[]).map((h) => String(h));
+    const mpIdx = (name: string) => mpHeaders.indexOf(name);
+    const cWeek3 = mpIdx("WEEK");
+    const cPos3 = mpIdx("POS");
+    const cTech3 = mpIdx("TECHNICIAN");
+
+    let openPlanRows: OpenPlanRow[] = [];
+    let everPlannedPosIds = new Set<string>();
+    for (let i = 1; i < managerPlanPublished.length; i++) {
+      const row = managerPlanPublished[i];
+      const posId = String(row[cPos3]);
+      const week = String(row[cWeek3]);
+      if (!posId) {
+        continue;
+      }
+      everPlannedPosIds.add(posId);
+      // openWeeks doesn't carry a per-row year for MANAGER_PLAN_PUBLISHED
+      // (only PLAN_LIFECYCLE does) - matches on week alone across whatever
+      // years are currently open. Narrow enough in practice: a week number
+      // only stays "open" (Published/Active, not yet Closed) for a few
+      // weeks at a time, so a cross-year collision here is not a realistic
+      // false positive.
+      let isOpen = false;
+      for (const key of openWeeks) {
+        if (key.endsWith("|" + week)) {
+          isOpen = true;
+          break;
+        }
+      }
+      if (isOpen) {
+        openPlanRows.push({ posId, plannedTechnician: String(row[cTech3]) });
+      }
+    }
+
+    let posState: { [posId: string]: POSCurrentState } = {};
+    let activePosIds: string[] = [];
+    for (let i = 1; i < posMaster.length; i++) {
+      const posId = String(posMaster[i][midx("posId")]);
+      if (!posId) {
+        continue;
+      }
+      const status = String(posMaster[i][midx("status")]);
+      posState[posId] = { status, assignedTechnician: String(posMaster[i][midx("assignedTechnician")]) };
+      if (status == "Active") {
+        activePosIds.push(posId);
+      }
+    }
+
+    const driftAlerts = findPublishedPlanDrift(openPlanRows, posState);
+    for (const d of driftAlerts) {
+      if (d.type == "CLOSED_POS_IN_PLAN") {
+        alertRows.push([
+          "CLOSED_POS_IN_PLAN", "WARNING", "POS", d.posId,
+          "POS " + d.posId + " je v aktualne otevrenem publikovanem planu (technik " + d.plannedTechnician +
+            "), ale v POS_MASTER je nyni veden jako Closed.",
+          now,
+        ]);
+      } else {
+        alertRows.push([
+          "TECHNICIAN_REASSIGNED", "WARNING", "POS", d.posId,
+          "POS " + d.posId + " byl publikovan pro technika " + d.plannedTechnician +
+            ", ale POS_MASTER nyni uvadi jineho technika (" + d.currentTechnician + ").",
+          now,
+        ]);
+      }
+    }
+
+    for (const posId of findUnplannedActivePOS(activePosIds, everPlannedPosIds)) {
+      alertRows.push([
+        "UNPLANNED_ACTIVE_POS", "INFO", "POS", posId,
+        "POS " + posId + " je Active v POS_MASTER, ale nebyl zatim soucasti zadneho publikovaneho planu.",
+        now,
+      ]);
+    }
+  } else {
+    console.log("Advisor Engine: MANAGER_PLAN_PUBLISHED is empty - skipping Published Plan Drift checks (run Publish Engine first).");
+  }
+
+  // ==========================================================================
   // WRITE ADVISOR_LOG (append-only - each run's alerts are a new snapshot,
   // old alerts stay for trend history rather than being overwritten)
   // ==========================================================================
@@ -409,6 +585,9 @@ function main(workbook: ExcelScript.Workbook) {
       alertRows.filter((r) => r[0] == "NEGLECT_RISK").length + " neglect risk, " +
       alertRows.filter((r) => r[0] == "TECHNICIAN_OVERLOAD").length + " technician overload, " +
       alertRows.filter((r) => r[0] == "REGIONAL_UNDERPERFORMANCE").length + " regional underperformance, " +
-      alertRows.filter((r) => r[0] == "VOLUME_TREND_SIGNAL").length + " volume trend signal)."
+      alertRows.filter((r) => r[0] == "VOLUME_TREND_SIGNAL").length + " volume trend signal, " +
+      alertRows.filter((r) => r[0] == "CLOSED_POS_IN_PLAN").length + " closed POS in plan, " +
+      alertRows.filter((r) => r[0] == "TECHNICIAN_REASSIGNED").length + " technician reassigned, " +
+      alertRows.filter((r) => r[0] == "UNPLANNED_ACTIVE_POS").length + " unplanned active POS)."
   );
 }

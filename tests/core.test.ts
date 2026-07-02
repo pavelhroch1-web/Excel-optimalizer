@@ -23,6 +23,8 @@ import {
   latestByKey,
   advanceLifecycleStatus,
   computeVolumeTrend,
+  findPublishedPlanDrift,
+  findUnplannedActivePOS,
 } from "../office-scripts/shared/core";
 
 let passed = 0;
@@ -612,6 +614,76 @@ test("unsorted input is sorted internally before windowing", () => {
   const signal = computeVolumeTrend(shuffled, 2, 2, 25);
   assert.strictEqual(signal!.baselineAvg, 10);
   assert.strictEqual(signal!.trailingAvg, 20);
+});
+
+// ==========================================================================
+console.log("findPublishedPlanDrift()");
+// ==========================================================================
+
+test("flags a POS that is Active in the plan but Closed in POS_MASTER", () => {
+  const alerts = findPublishedPlanDrift(
+    [{ posId: "POS1", plannedTechnician: "Novak" }],
+    { POS1: { status: "Closed", assignedTechnician: "Novak" } }
+  );
+  assert.strictEqual(alerts.length, 1);
+  assert.strictEqual(alerts[0].type, "CLOSED_POS_IN_PLAN");
+});
+test("flags a POS whose technician was reassigned since publish", () => {
+  const alerts = findPublishedPlanDrift(
+    [{ posId: "POS1", plannedTechnician: "Novak" }],
+    { POS1: { status: "Active", assignedTechnician: "Svoboda" } }
+  );
+  assert.strictEqual(alerts.length, 1);
+  assert.strictEqual(alerts[0].type, "TECHNICIAN_REASSIGNED");
+  assert.strictEqual(alerts[0].plannedTechnician, "Novak");
+  assert.strictEqual(alerts[0].currentTechnician, "Svoboda");
+});
+test("a POS can be flagged for both reasons at once (closed AND reassigned)", () => {
+  const alerts = findPublishedPlanDrift(
+    [{ posId: "POS1", plannedTechnician: "Novak" }],
+    { POS1: { status: "Closed", assignedTechnician: "Svoboda" } }
+  );
+  assert.strictEqual(alerts.length, 2);
+});
+test("no drift when POS_MASTER still matches the published plan exactly", () => {
+  const alerts = findPublishedPlanDrift(
+    [{ posId: "POS1", plannedTechnician: "Novak" }],
+    { POS1: { status: "Active", assignedTechnician: "Novak" } }
+  );
+  assert.strictEqual(alerts.length, 0);
+});
+test("a POS appearing in several still-open weeks is only flagged once per reason", () => {
+  const alerts = findPublishedPlanDrift(
+    [
+      { posId: "POS1", plannedTechnician: "Novak" },
+      { posId: "POS1", plannedTechnician: "Novak" },
+    ],
+    { POS1: { status: "Closed", assignedTechnician: "Novak" } }
+  );
+  assert.strictEqual(alerts.length, 1);
+});
+test("a row with no matching POS_MASTER entry is skipped, not flagged", () => {
+  const alerts = findPublishedPlanDrift([{ posId: "GHOST", plannedTechnician: "Novak" }], {});
+  assert.strictEqual(alerts.length, 0);
+});
+test("empty input returns empty output, no crash", () => {
+  assert.deepStrictEqual(findPublishedPlanDrift([], {}), []);
+});
+
+// ==========================================================================
+console.log("findUnplannedActivePOS()");
+// ==========================================================================
+
+test("finds an Active POS absent from the ever-planned set", () => {
+  const result = findUnplannedActivePOS(["POS1", "POS2"], new Set(["POS1"]));
+  assert.deepStrictEqual(result, ["POS2"]);
+});
+test("returns nothing when every Active POS has been planned at some point", () => {
+  const result = findUnplannedActivePOS(["POS1", "POS2"], new Set(["POS1", "POS2"]));
+  assert.deepStrictEqual(result, []);
+});
+test("empty input returns empty output, no crash", () => {
+  assert.deepStrictEqual(findUnplannedActivePOS([], new Set()), []);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");
