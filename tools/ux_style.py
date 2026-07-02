@@ -53,6 +53,7 @@ SHEET_GROUPS = [
     ("TECHNICIAN_PLAN", "375623"),
     ("POS_MASTER", "7030A0"),
     ("ACTIVITY_PLAN", "BF8F00"),
+    ("IMPORT_HUB", "2E75B6"),
     ("RAW_DATA", "2E75B6"),
     ("POS_STATUS_IMPORT", "2E75B6"),
     ("SALESAPP_IMPORT", "2E75B6"),
@@ -78,7 +79,7 @@ SHEET_GROUPS = [
 # Everything else that stays visible (import staging) is a necessary but
 # occasional "mailbox", not part of the daily working set - communicated on
 # HOME, not hidden, because the user must paste into it weekly.
-CORE_DAILY_SHEETS = ["HOME", "DASHBOARD", "TECHNICIAN_PLAN", "POS_MASTER", "ACTIVITY_PLAN"]
+CORE_DAILY_SHEETS = ["HOME", "DASHBOARD", "TECHNICIAN_PLAN", "POS_MASTER", "ACTIVITY_PLAN", "IMPORT_HUB"]
 IMPORT_UTILITY_SHEETS = ["RAW_DATA", "POS_STATUS_IMPORT", "SALESAPP_IMPORT"]
 
 # Everything not in CORE_DAILY_SHEETS/IMPORT_UTILITY_SHEETS is implementation
@@ -201,6 +202,94 @@ def add_import_hub_guidance(wb):
             continue
         ws = wb[sheet_name]
         ws["A1"].comment = Comment(text, "Field Force Optimizer")
+
+
+def build_import_hub(wb):
+    """The actual front door for data entry - one sheet that answers "what do
+    I paste, is it in yet, what happens next" instead of making the user
+    figure out which of 3 separate staging sheets does what. Office Scripts
+    have no OS file-picker API (see docs/ARCHITECTURE.md section 15d) so this
+    cannot be a literal drag-and-drop widget - it is the closest equivalent
+    achievable on this platform: one screen, live row counts per staging
+    sheet (so "did my paste work" is answered without opening each sheet),
+    one-click links to each paste target, and an explicit "then do this"
+    trail. Pure presentation - reads existing sheets, writes nothing any
+    engine depends on."""
+    if "IMPORT_HUB" in wb.sheetnames:
+        del wb["IMPORT_HUB"]
+    ws = wb.create_sheet("IMPORT_HUB")
+    ws.sheet_view.showGridLines = False
+    ws.column_dimensions["A"].width = 3
+    for col in "BCDEFG":
+        ws.column_dimensions[col].width = 18
+
+    ws.merge_cells("A1:G2")
+    ws["A1"] = "IMPORT HUB"
+    ws["A1"].font = Font(bold=True, size=22, color=WHITE)
+    ws["A1"].fill = PatternFill("solid", fgColor=NAVY)
+    ws["A1"].alignment = Alignment(horizontal="left", vertical="center", indent=2)
+    ws.row_dimensions[1].height = 28
+    ws.row_dimensions[2].height = 22
+    ws.merge_cells("A3:G3")
+    ws["A3"] = "Vlož exporty sem - systém je sám sloučí, deduplikuje a zachová historii"
+    ws["A3"].font = Font(italic=True, size=11, color=WHITE)
+    ws["A3"].fill = PatternFill("solid", fgColor=NAVY)
+    ws["A3"].alignment = Alignment(horizontal="left", vertical="center", indent=2)
+    ws.row_dimensions[3].height = 20
+
+    r = 5
+    ws.cell(r, 1, "STAV IMPORTNÍCH ZDROJŮ").font = TITLE_FONT
+    r += 1
+    sources = [
+        ("RAW_DATA", "Export POS dat", "2E75B6"),
+        ("POS_STATUS_IMPORT", "Export stavu POS (aktivní/uzavřené)", "2E75B6"),
+        ("SALESAPP_IMPORT", "Export ze SalesApp (návštěvy)", "2E75B6"),
+    ]
+    for sheet_name, label, color in sources:
+        ws.cell(r, 1, "●").font = Font(bold=True, size=14, color=color)
+        ws.cell(r, 1).alignment = Alignment(horizontal="center", vertical="center")
+        ws.merge_cells(f"B{r}:C{r}")
+        ws.cell(r, 2, label).font = Font(size=11)
+        ws.cell(r, 2).alignment = Alignment(vertical="center")
+        ws.cell(r, 4, "Řádků nyní:").font = Font(size=9, color="595959")
+        ws.cell(r, 5, f'=COUNTA({sheet_name}!A:A)-1').font = Font(bold=True, size=13, color=NAVY)
+        ws.cell(r, 5).alignment = Alignment(horizontal="center")
+        _nav_button(ws, f"G{r}", "Vložit / otevřít →", sheet_name, color=color)
+        ws.row_dimensions[r].height = 24
+        r += 1
+    r += 1
+
+    ws.cell(r, 1, "POZNÁMKA").font = Font(bold=True, size=9, color="595959")
+    r += 1
+    for text in [
+        "Můžeš vložit více exportů za sebou (přidávej pod poslední řádek, nepřepisuj) -",
+        "klidně i celý rok historie SalesApp najednou. Identifikace vždy podle POS_ID;",
+        "provozovny se stejnou adresou (CORN/9PODNIK pravidlo) se stále slučují jako jeden",
+        "fyzický POS. Duplicity a historie se řeší automaticky - nic se neztratí.",
+    ]:
+        ws.merge_cells(f"B{r}:G{r}")
+        ws.cell(r, 2, text).font = NOTE_FONT
+        r += 1
+    r += 1
+
+    ws.cell(r, 1, "POSLEDNÍ AKTUALIZACE POS_MASTER").font = Font(size=9, color="595959")
+    r += 1
+    ws.cell(r, 1, '=IFERROR(TEXT(MAX(POS_MASTER!AM:AM),"DD.MM.YYYY HH:MM"),"zatím žádný import")')
+    ws.cell(r, 1).font = Font(bold=True, size=14, color=NAVY)
+    r += 2
+
+    ws.cell(r, 1, "DALŠÍ KROK").font = TITLE_FONT
+    r += 1
+    ws.merge_cells(f"A{r}:G{r}")
+    ws.cell(r, 1, "1) Vlož export(y) výše  →  2) Spusť Import Engine  →  3) Spusť Planning Engine")
+    ws.cell(r, 1).font = Font(bold=True, size=11, color=NAVY)
+    ws.cell(r, 1).fill = PatternFill("solid", fgColor="FFF2CC")
+    ws.cell(r, 1).alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[r].height = 22
+    r += 2
+
+    _nav_button(ws, f"A{r}", "← Zpět na HOME", "HOME", color="404040")
+    return ws
 
 
 def color_editable_columns(ws, sheet_name, max_rows=500):
@@ -362,9 +451,9 @@ def build_home(wb, real_control_values):
     stages = [
         # (num, name, description, status formula, target sheet or None, color)
         (
-            "1", "IMPORT DAT", "Nahraj export(y) POS a SalesApp - lze i více najednou, viz poznámka na listu",
+            "1", "IMPORT DAT", "Otevři Import Hub a vlož export(y) - lze i více najednou",
             '=IF(COUNTA(POS_MASTER!A:A)>1,"✅ Hotovo","❌ Chybí")',
-            "RAW_DATA", "2E75B6",
+            "IMPORT_HUB", "2E75B6",
         ),
         (
             "2", "PLÁN KAMPANÍ", "Nastav kampaně v ACTIVITY_PLAN",
@@ -679,7 +768,17 @@ def build_technician_plan(wb, n_rows=3000, pos_master_notes_col="AK"):
 
     formulas = [
         lambda r: f'=IF($D{r}="","",MANAGER_PLAN!B{r})',  # DATUM
-        lambda r: f'=IF($D{r}="","",MANAGER_PLAN!C{r})',  # DEN
+        # DEN: dates.ts's workDays() names Monday-Friday as MON/TUE/WED/THU/FRI
+        # (English abbreviations, fine for an internal sheet like MANAGER_PLAN)
+        # - translated to Czech here since this sheet is what a technician
+        # actually reads. SWITCH falls back to the raw value for anything
+        # unexpected rather than showing blank, so a format change upstream
+        # fails loud, not silent.
+        lambda r: (
+            f'=IF($D{r}="","",SWITCH(MANAGER_PLAN!C{r},'
+            f'"MON","Pondělí","TUE","Úterý","WED","Středa","THU","Čtvrtek","FRI","Pátek",'
+            f'MANAGER_PLAN!C{r}))'
+        ),  # DEN
         lambda r: f'=IF(MANAGER_PLAN!E{r}="","",MANAGER_PLAN!D{r})',  # TECHNIK
         lambda r: f'=IF(MANAGER_PLAN!E{r}="","",MANAGER_PLAN!E{r})',  # POS
         lambda r: f'=IF($D{r}="","",MANAGER_PLAN!G{r})',  # NAZEV PROVOZOVNY
@@ -705,6 +804,13 @@ def build_technician_plan(wb, n_rows=3000, pos_master_notes_col="AK"):
 
     ws.auto_filter.ref = f"A1:J{n_rows}"
     apply_banded_rows(ws, 2, n_rows, len(headers))
+    # Highlight today's visits - the one row (or handful, one per technician)
+    # a technician actually needs when they open this sheet on the day
+    # itself, so they don't have to filter/scroll to find it.
+    ws.conditional_formatting.add(
+        f"A2:J{n_rows}",
+        FormulaRule(formula=["$A2=TODAY()"], fill=PatternFill("solid", fgColor="FFF2A6")),
+    )
     ws.freeze_panes = "A2"
 
     # Print-ready: this sheet is explicitly meant to be printed/exported per
@@ -832,6 +938,7 @@ def apply_all(wb, control_rows):
         protect_config_sheet(wb[sheet_name], sheet_name)
 
     add_import_hub_guidance(wb)
+    build_import_hub(wb)
 
     build_home(wb, {
         k: v for k, v in control_values.items()
