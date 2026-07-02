@@ -1,0 +1,334 @@
+// Unit tests for office-scripts/shared/core.ts (pure logic, no Excel dependency).
+// Run with: npx ts-node tests/core.test.ts
+// No external test framework needed - Node's built-in assert is enough for
+// this size of test suite and keeps the project dependency-free.
+
+import * as assert from "assert";
+import {
+  POSItem,
+  CadenceRule,
+  categoryRule,
+  computeScore,
+  applyPremiumTier,
+  pickMandatory,
+  selectWeekPOS,
+  addGpsBonus,
+  geoDays,
+  resolveCapacity,
+} from "../office-scripts/shared/core";
+
+let passed = 0;
+let failed = 0;
+
+function test(name: string, fn: () => void) {
+  try {
+    fn();
+    passed++;
+    console.log("  PASS  " + name);
+  } catch (e) {
+    failed++;
+    console.log("  FAIL  " + name);
+    console.log("        " + (e as Error).message);
+  }
+}
+
+function makeItem(overrides: Partial<POSItem>): POSItem {
+  return {
+    pos: "1",
+    tech: "TECH_A",
+    kategorie: "4OSTATNI",
+    classification: "B",
+    nazev: "Test Shop",
+    ulice: "Main St",
+    cislo: "1",
+    mesto: "Praha",
+    oblast: "Praha",
+    posArea: "RSA",
+    ppt: 1000,
+    x: 50.0,
+    y: 14.0,
+    weeksSinceLastVisit: null,
+    forceInclude: false,
+    core: false,
+    mandatoryRuleId: null,
+    premium: false,
+    score: 0,
+    reason: "",
+    ...overrides,
+  };
+}
+
+// ==========================================================================
+console.log("categoryRule()");
+// ==========================================================================
+
+const categoryTable = [
+  { key: "STARTS_1", value: "CORE" },
+  { key: "1FAST", value: "NORMAL" },
+  { key: "1CD", value: "EXCLUDE" },
+  { key: "1POSTA", value: "EXCLUDE" },
+  { key: "*", value: "NORMAL" },
+];
+
+test("exact-match category overrides the STARTS_1 default", () => {
+  assert.strictEqual(categoryRule(categoryTable, "1FAST"), "NORMAL");
+});
+test("unlisted 1-prefixed category falls back to STARTS_1 -> CORE", () => {
+  assert.strictEqual(categoryRule(categoryTable, "1GECO"), "CORE");
+});
+test("category with no rule and no 1-prefix falls back to explicit * default", () => {
+  assert.strictEqual(categoryRule(categoryTable, "4OSTATNI"), "NORMAL");
+});
+test("explicit EXCLUDE category is respected", () => {
+  assert.strictEqual(categoryRule(categoryTable, "1CD"), "EXCLUDE");
+});
+test("missing * default row still falls back to NORMAL (not a crash)", () => {
+  const noDefaultTable = categoryTable.filter((r) => r.key != "*");
+  assert.strictEqual(categoryRule(noDefaultTable, "4OSTATNI"), "NORMAL");
+});
+
+// ==========================================================================
+console.log("computeScore()");
+// ==========================================================================
+
+const weights = { core: 100000000, kategorizaceA: 10000000, ppt: 1, neglectedBonus: 50000 };
+
+test("CORE weight applied when item.core = true", () => {
+  const item = makeItem({ core: true, ppt: 500 });
+  const { score } = computeScore(item, weights, 8, 26);
+  assert.strictEqual(score, 100000000 + 500);
+});
+test("KATEGORIZACE A weight applied", () => {
+  const item = makeItem({ classification: "A", ppt: 500 });
+  const { score } = computeScore(item, weights, 8, 26);
+  assert.strictEqual(score, 10000000 + 500);
+});
+test("gap below minGap without forceInclude is heavily penalized", () => {
+  const item = makeItem({ weeksSinceLastVisit: 2, ppt: 500 });
+  const { score } = computeScore(item, weights, 8, 26);
+  assert.strictEqual(score, 500 - 1000000);
+});
+test("forceInclude bypasses the gap penalty", () => {
+  const item = makeItem({ weeksSinceLastVisit: 2, forceInclude: true, ppt: 500 });
+  const { score } = computeScore(item, weights, 8, 26);
+  assert.strictEqual(score, 500);
+});
+test("neglected bonus applies exactly at the threshold (boundary)", () => {
+  const item = makeItem({ weeksSinceLastVisit: 26, ppt: 0 });
+  const { score, gapReason } = computeScore(item, weights, 8, 26);
+  assert.strictEqual(score, 50000);
+  assert.strictEqual(gapReason, "NEGLECTED POS | ");
+});
+test("weeksSinceLastVisit=25 (one below threshold) gets no neglected bonus", () => {
+  const item = makeItem({ weeksSinceLastVisit: 25, ppt: 0 });
+  const { score } = computeScore(item, weights, 8, 26);
+  assert.strictEqual(score, 0);
+});
+test("null weeksSinceLastVisit (new POS, no history) gets no gap adjustment at all", () => {
+  const item = makeItem({ weeksSinceLastVisit: null, ppt: 500 });
+  const { score } = computeScore(item, weights, 8, 26);
+  assert.strictEqual(score, 500);
+});
+
+// ==========================================================================
+console.log("applyPremiumTier()");
+// ==========================================================================
+
+test("top 20% of a 10-item list are flagged premium (exactly 2)", () => {
+  const items = Array.from({ length: 10 }, (_, i) => makeItem({ pos: String(i), score: 100 - i }));
+  applyPremiumTier(items, 20);
+  const premiumCount = items.filter((i) => i.premium).length;
+  assert.strictEqual(premiumCount, 2);
+  assert.ok(items[0].premium && items[1].premium);
+  assert.ok(!items[2].premium);
+});
+test("small list (3 items, 20%) rounds up to 1 via ceil - boundary case", () => {
+  const items = [makeItem({ pos: "a", score: 3 }), makeItem({ pos: "b", score: 2 }), makeItem({ pos: "c", score: 1 })];
+  applyPremiumTier(items, 20);
+  assert.strictEqual(items.filter((i) => i.premium).length, 1);
+  assert.ok(items.find((i) => i.pos == "a")!.premium);
+});
+test("empty list does not crash", () => {
+  assert.doesNotThrow(() => applyPremiumTier([], 20));
+});
+
+// ==========================================================================
+console.log("pickMandatory()");
+// ==========================================================================
+
+const mandatoryRule: CadenceRule = {
+  ruleId: "MANDATORY_9PODNIK",
+  scope: "CATEGORY",
+  matchValue: ["9PODNIKC", "9PODNIKFC"],
+  minGapWeeks: null,
+  maxIntervalWeeks: null,
+  intervalType: "ONCE_PER_CAMPAIGN",
+  guaranteeType: "HARD",
+  dedupBy: "ADDRESS",
+  campaignChangeOverride: false,
+  priority: 100,
+};
+
+test("dedup by address keeps only the highest-PPT POS per street+city", () => {
+  const list = [
+    makeItem({ pos: "A", mandatoryRuleId: "MANDATORY_9PODNIK", ulice: "Hlavni", mesto: "Praha", ppt: 500 }),
+    makeItem({ pos: "B", mandatoryRuleId: "MANDATORY_9PODNIK", ulice: "Hlavni", mesto: "Praha", ppt: 900 }),
+    makeItem({ pos: "C", mandatoryRuleId: "MANDATORY_9PODNIK", ulice: "Jina", mesto: "Brno", ppt: 100 }),
+  ];
+  const result = pickMandatory(list, [mandatoryRule]);
+  assert.strictEqual(result.length, 2);
+  assert.ok(result.find((p) => p.pos == "B"));
+  assert.ok(!result.find((p) => p.pos == "A"));
+  assert.ok(result.find((p) => p.pos == "C"));
+});
+test("POS without a mandatoryRuleId are ignored", () => {
+  const list = [makeItem({ pos: "A", mandatoryRuleId: null })];
+  assert.strictEqual(pickMandatory(list, [mandatoryRule]).length, 0);
+});
+test("address dedup is case- and diacritics-insensitive (Hlavni vs HLAVNÍ is the same address)", () => {
+  const list = [
+    makeItem({ pos: "A", mandatoryRuleId: "MANDATORY_9PODNIK", ulice: "Hlavní", mesto: "Praha", ppt: 500 }),
+    makeItem({ pos: "B", mandatoryRuleId: "MANDATORY_9PODNIK", ulice: "hlavni", mesto: "PRAHA", ppt: 900 }),
+  ];
+  const result = pickMandatory(list, [mandatoryRule]);
+  assert.strictEqual(result.length, 1); // deduped to the higher-PPT POS (B)
+  assert.strictEqual(result[0].pos, "B");
+});
+
+// ==========================================================================
+console.log("selectWeekPOS()");
+// ==========================================================================
+
+test("capacity is never exceeded by the base selection (before GPS bonus)", () => {
+  const list = Array.from({ length: 50 }, (_, i) => makeItem({ pos: String(i), score: 50 - i }));
+  const result = selectWeekPOS(list, 40, [], false);
+  assert.strictEqual(result.length, 40);
+});
+test("mandatory POS are included even when they would not win on score alone", () => {
+  const list = [
+    makeItem({ pos: "M", mandatoryRuleId: "MANDATORY_9PODNIK", score: -999, ulice: "X", mesto: "Y" }),
+    ...Array.from({ length: 45 }, (_, i) => makeItem({ pos: "n" + i, score: 100 - i })),
+  ];
+  const result = selectWeekPOS(list, 40, [mandatoryRule], false);
+  assert.ok(result.find((p) => p.pos == "M"));
+  assert.strictEqual(result.length, 40);
+});
+test("forceInclude POS are always selected first regardless of score", () => {
+  const list = [
+    makeItem({ pos: "F", score: -999999, forceInclude: true }),
+    ...Array.from({ length: 45 }, (_, i) => makeItem({ pos: "n" + i, score: 100 - i })),
+  ];
+  const result = selectWeekPOS(list, 40, [], false);
+  assert.ok(result.find((p) => p.pos == "F"));
+});
+test("holdPremium pushes premium items to the back within the same capacity", () => {
+  const list = [
+    makeItem({ pos: "P1", score: 100, premium: true }),
+    makeItem({ pos: "P2", score: 90, premium: true }),
+    makeItem({ pos: "N1", score: 50, premium: false }),
+  ];
+  const result = selectWeekPOS(list, 2, [], true);
+  assert.strictEqual(result.length, 2);
+  assert.ok(result.find((p) => p.pos == "N1")); // non-premium wins the limited slots
+  assert.ok(!result.find((p) => p.pos == "P1") || !result.find((p) => p.pos == "P2"));
+});
+test("capacity=0 returns only mandatory POS, no crash", () => {
+  const list = [
+    makeItem({ pos: "M", mandatoryRuleId: "MANDATORY_9PODNIK", ulice: "X", mesto: "Y" }),
+    makeItem({ pos: "n1", score: 100 }),
+  ];
+  const result = selectWeekPOS(list, 0, [mandatoryRule], false);
+  assert.strictEqual(result.length, 1);
+  assert.strictEqual(result[0].pos, "M");
+});
+test("empty candidate list returns empty result, no crash", () => {
+  assert.deepStrictEqual(selectWeekPOS([], 40, [], false), []);
+});
+
+// ==========================================================================
+console.log("addGpsBonus()");
+// ==========================================================================
+
+test("disabled config returns the selection unchanged", () => {
+  const selected = [makeItem({ pos: "A" })];
+  const pool = [makeItem({ pos: "A" }), makeItem({ pos: "B" })];
+  const result = addGpsBonus(selected, pool, { enabled: false, radiusMeters: 300, maxVisits: 5 });
+  assert.strictEqual(result.length, 1);
+});
+test("POS just within the radius is added, just outside is not (boundary)", () => {
+  const anchor = makeItem({ pos: "ANCHOR", x: 50.0, y: 14.0 });
+  // ~250m away (well within 300m radius)
+  const near = makeItem({ pos: "NEAR", x: 50.002, y: 14.0 });
+  // ~1.1km away (outside 300m radius)
+  const far = makeItem({ pos: "FAR", x: 50.01, y: 14.0 });
+  const result = addGpsBonus([anchor], [anchor, near, far], {
+    enabled: true,
+    radiusMeters: 300,
+    maxVisits: 5,
+  });
+  assert.ok(result.find((p) => p.pos == "NEAR"), "expected NEAR to be added");
+  assert.ok(!result.find((p) => p.pos == "FAR"), "expected FAR to be excluded");
+});
+test("maxVisits caps the total bonus additions across all anchors", () => {
+  const anchor1 = makeItem({ pos: "A1", x: 50.0, y: 14.0 });
+  const anchor2 = makeItem({ pos: "A2", x: 50.0, y: 14.1 });
+  const nearby = Array.from({ length: 10 }, (_, i) =>
+    makeItem({ pos: "extra" + i, x: 50.0 + 0.0001 * (i + 1), y: 14.0 })
+  );
+  const result = addGpsBonus([anchor1, anchor2], [anchor1, anchor2, ...nearby], {
+    enabled: true,
+    radiusMeters: 5000, // generous radius so all "nearby" items qualify
+    maxVisits: 5,
+  });
+  assert.strictEqual(result.length, 2 + 5); // 2 anchors + at most 5 bonus
+});
+
+// ==========================================================================
+console.log("geoDays()");
+// ==========================================================================
+
+test("perDayTarget adapts to selection size larger than a fixed constant would allow (V10.5.5 bug fix)", () => {
+  // 45 selected items (e.g. 40 capacity + 5 GPS bonus) across 5 days - every
+  // item must be placed, none silently dropped like V10.5.5's addNearby() bug.
+  const items = Array.from({ length: 45 }, (_, i) => makeItem({ pos: String(i), score: 45 - i, x: 50 + i * 0.001, y: 14 }));
+  const days = [
+    { day: "MON", dateIso: "2026-07-27" },
+    { day: "TUE", dateIso: "2026-07-28" },
+    { day: "WED", dateIso: "2026-07-29" },
+    { day: "THU", dateIso: "2026-07-30" },
+    { day: "FRI", dateIso: "2026-07-31" },
+  ];
+  const result = geoDays(items, days);
+  assert.strictEqual(result.length, 45, "every selected POS must be placed, none lost");
+});
+test("empty days list (fully-holiday week) returns empty result without crashing", () => {
+  const items = [makeItem({ pos: "A" })];
+  assert.deepStrictEqual(geoDays(items, []), []);
+});
+test("empty item list returns empty result without crashing", () => {
+  const days = [{ day: "MON", dateIso: "2026-07-27" }];
+  assert.deepStrictEqual(geoDays([], days), []);
+});
+
+// ==========================================================================
+console.log("resolveCapacity()");
+// ==========================================================================
+
+test("uses override when present", () => {
+  const overrideMap = { "Novak|2026|42": 32 };
+  assert.strictEqual(resolveCapacity(overrideMap, "Novak", 2026, 42, 5, 8), 32);
+});
+test("falls back to workDays x targetPerDay when no override", () => {
+  assert.strictEqual(resolveCapacity({}, "Novak", 2026, 43, 5, 8), 40);
+});
+test("override of 0 is respected (not treated as missing)", () => {
+  const overrideMap = { "Novak|2026|44": 0 };
+  assert.strictEqual(resolveCapacity(overrideMap, "Novak", 2026, 44, 5, 8), 0);
+});
+
+// ==========================================================================
+
+console.log("\n" + passed + " passed, " + failed + " failed");
+if (failed > 0) {
+  process.exit(1);
+}
