@@ -21,7 +21,7 @@ this trade-off is documented in the legend so it isn't a silent gap.
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.formatting.rule import FormulaRule
 from openpyxl.worksheet.datavalidation import DataValidation
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, column_index_from_string
 
 # ============================================================================
 # PALETTE
@@ -425,21 +425,34 @@ def build_home(wb, real_control_values):
         r += 1
     r += 1
 
-    # ---- Status strip (live formulas, campaign week from CONTROL, POS
-    # count from POS_MASTER - stays accurate without any manual update) ----
+    # ---- Status strip (live formulas - stays accurate without any manual
+    # update). Two rows of 3 tiles: row 1 is "how big is the plan", row 2 is
+    # "how is it going" - the latter simply mirrors DASHBOARD's own KPI
+    # tiles (B3/C3) rather than recomputing them, so there is exactly one
+    # source of truth for compliance numbers (ReportingEngine.ts), just
+    # surfaced here too. Distinct-POS/distinct-technician tiles reuse the
+    # same SUMPRODUCT/COUNTIF distinct-count pattern already proven in
+    # redesign_activity_plan()'s reference panel. ----
     ws.cell(r, 1, "TENTO TÝDEN").font = SECTION_FONT
     r += 1
+    mp_pos_range = "MANAGER_PLAN!E2:E200000"
+    mp_tech_range = "MANAGER_PLAN!D2:D200000"
     strip = [
         ("B", "Aktuální kampaň týden", '=IFERROR(VLOOKUP("CAMPAIGN_START_WEEK",CONTROL!A:B,2,FALSE),"-")'),
         ("D", "POS v systému", '=COUNTA(POS_MASTER!A:A)-1'),
         ("F", "Naplánováno návštěv", '=COUNTA(MANAGER_PLAN!A:A)-1'),
+        ("B", "POS pokryto plánem", f'=SUMPRODUCT(({mp_pos_range}<>"")/COUNTIF({mp_pos_range},{mp_pos_range}&""))'),
+        ("D", "Techniků naplánováno", f'=SUMPRODUCT(({mp_tech_range}<>"")/COUNTIF({mp_tech_range},{mp_tech_range}&""))'),
+        ("F", "Compliance (splněno / nesplněno)", '=DASHBOARD!C3&" / "&DASHBOARD!D3'),
     ]
-    for col, label, formula in strip:
-        ws[f"{col}{r}"] = label
-        ws[f"{col}{r}"].font = Font(size=9, color="595959")
-        ws[f"{col}{r+1}"] = formula
-        ws[f"{col}{r+1}"].font = Font(bold=True, size=20, color=NAVY)
-    r += 3
+    row_offsets = [0, 0, 0, 3, 3, 3]
+    for (col, label, formula), row_offset in zip(strip, row_offsets):
+        ws[f"{col}{r + row_offset}"] = label
+        ws[f"{col}{r + row_offset}"].font = Font(size=9, color="595959")
+        value_font = Font(bold=True, size=20, color=NAVY) if row_offset == 0 else Font(bold=True, size=16, color=NAVY)
+        ws[f"{col}{r + row_offset + 1}"] = formula
+        ws[f"{col}{r + row_offset + 1}"].font = value_font
+    r += 6
 
     # ---- Quick navigation ----
     ws.cell(r, 1, "RYCHLÁ NAVIGACE").font = TITLE_FONT
@@ -586,20 +599,24 @@ def redesign_activity_plan(wb, tech_column_letter):
     ws.freeze_panes = "C2"
 
 
-def build_technician_plan(wb, n_rows=3000):
-    """Simplified, technician-facing view of MANAGER_PLAN: only the columns
-    a technician (or the manager reviewing their schedule) actually needs,
-    with the display header names/spacing the product owner asked for
-    explicitly - not MANAGER_PLAN's camelCase-ish internal names. Pure
+def build_technician_plan(wb, n_rows=3000, pos_master_notes_col="AK"):
+    """This is exactly what a technician gets - nothing else. No WEEK
+    counter, no internal category code, no POS_AREA, no system REASON tag:
+    just what's needed to go do the visit, in print/export order. Pure
     live-formula view (no engine change): stays in sync automatically
     whenever Planning Engine regenerates MANAGER_PLAN, including Draft
     weeks, so the manager sees the full upcoming picture, not just what's
     already Published.
 
-    MANAGER_PLAN's first 12 columns (A:L) are already exactly WEEK, DATE,
-    DAY, TECHNICIAN, POS, KATEGORIE, NAZEV_PROVOZOVNY, ULICE, CISLO, MESTO,
-    OBLAST, POS_AREA in that order - a direct 1:1 column-letter mapping, so
-    each formula only needs to change its display header, not reorder data.
+    MANAGER_PLAN column layout this reads from (fixed, see
+    scaffold_workbook.py): A=WEEK, B=DATE, C=DAY, D=TECHNICIAN, E=POS,
+    F=KATEGORIE, G=NAZEV_PROVOZOVNY, H=ULICE, I=CISLO, J=MESTO, K=OBLAST,
+    L=POS_AREA, M=PPT, N=LOS_ACTIVITY, O=LOT_ACTIVITY, P=REASON, Q=GPS_GROUP.
+    AKTIVITA combines N+O (a POS can carry both a LOS and a LOT campaign in
+    the same week). POZNÁMKA is NOT column P (REASON is an internal
+    cadence-engine tag, e.g. "CORE cadence due" - not something a
+    technician needs) - it's a live lookup of POS_MASTER.plannerNotes, the
+    actual manager-written note for that POS.
 
     n_rows=3000 note: PlanningEngine.ts keeps every Published/Active/Closed
     week in MANAGER_PLAN forever (never trims old weeks), so this static
@@ -614,24 +631,54 @@ def build_technician_plan(wb, n_rows=3000):
     ws = wb.create_sheet("TECHNICIAN_PLAN")
 
     headers = [
-        "WEEK", "DATE", "DAY", "TECHNICIAN", "POS", "KATEGORIE",
-        "NAZEV PROVOZOVNY", "ULICE", "ČÍSLO POPISNÉ/ORIENTAČNÍ", "MĚSTO",
-        "OBLAST", "POS AREA",
+        "DATUM", "DEN", "TECHNIK", "POS", "NÁZEV PROVOZOVNY",
+        "ULICE", "MĚSTO", "OBLAST", "AKTIVITA", "POZNÁMKA",
     ]
     for i, h in enumerate(headers):
         ws.cell(1, i + 1, h)
 
+    formulas = [
+        lambda r: f'=IF($D{r}="","",MANAGER_PLAN!B{r})',  # DATUM
+        lambda r: f'=IF($D{r}="","",MANAGER_PLAN!C{r})',  # DEN
+        lambda r: f'=IF(MANAGER_PLAN!E{r}="","",MANAGER_PLAN!D{r})',  # TECHNIK
+        lambda r: f'=IF(MANAGER_PLAN!E{r}="","",MANAGER_PLAN!E{r})',  # POS
+        lambda r: f'=IF($D{r}="","",MANAGER_PLAN!G{r})',  # NAZEV PROVOZOVNY
+        lambda r: f'=IF($D{r}="","",TRIM(MANAGER_PLAN!H{r}&" "&MANAGER_PLAN!I{r}))',  # ULICE (+ CISLO)
+        lambda r: f'=IF($D{r}="","",MANAGER_PLAN!J{r})',  # MESTO
+        lambda r: f'=IF($D{r}="","",MANAGER_PLAN!K{r})',  # OBLAST
+        lambda r: (
+            f'=IF($D{r}="","",TRIM(IF(MANAGER_PLAN!N{r}<>"","LOS: "&MANAGER_PLAN!N{r}&" ","")'
+            f'&IF(MANAGER_PLAN!O{r}<>"","LOT: "&MANAGER_PLAN!O{r},"")))'
+        ),  # AKTIVITA
+        lambda r: (
+            f'=IF($D{r}="","",IFERROR(VLOOKUP($D{r},POS_MASTER!$A:${pos_master_notes_col},'
+            f'{pos_master_notes_col_index(pos_master_notes_col)},FALSE),""))'
+        ),  # POZNAMKA (manager note from POS_MASTER, not the internal REASON tag)
+    ]
     for r in range(2, n_rows + 1):
-        for i in range(len(headers)):
-            col_letter = get_column_letter(i + 1)
-            ws.cell(r, i + 1, f'=IF(MANAGER_PLAN!{col_letter}{r}="","",MANAGER_PLAN!{col_letter}{r})')
+        for i, formula_fn in enumerate(formulas):
+            ws.cell(r, i + 1, formula_fn(r))
 
     for i, h in enumerate(headers):
-        ws.column_dimensions[get_column_letter(i + 1)].width = max(14, len(h) + 2)
+        width = 12 if h in ("DATUM", "DEN", "TECHNIK", "POS") else 20
+        ws.column_dimensions[get_column_letter(i + 1)].width = width
 
-    ws.auto_filter.ref = f"A1:L{n_rows}"
+    ws.auto_filter.ref = f"A1:J{n_rows}"
     apply_banded_rows(ws, 2, n_rows, len(headers))
+    ws.freeze_panes = "A2"
+
+    # Print-ready: this sheet is explicitly meant to be printed/exported per
+    # technician, not just viewed on screen.
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.print_title_rows = "1:1"
     return ws
+
+
+def pos_master_notes_col_index(col_letter):
+    return column_index_from_string(col_letter)
 
 
 def apply_banded_rows(ws, first_data_row, last_row, n_cols, band_color="F2F2F2"):

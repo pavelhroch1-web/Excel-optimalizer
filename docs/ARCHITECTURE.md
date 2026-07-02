@@ -389,3 +389,94 @@ clear(contents) fix.
 Implementation begins engine-by-engine per the migration plan (§12), starting with Phase 0 once
 the full V10.5.5 script is provided. Config table structures (§9) can be scaffolded in parallel
 since they do not depend on the open script review.
+
+## 15. Phase 9 — product hub redesign, and Import Hub architecture (design)
+
+Following explicit product-owner direction ("chci aplikaci, ne hezký Excel" / "chci interní
+firemní software, kdyby náhodou běžel v Excelu"), and a standing rule now made explicit: business
+logic in PlanningEngine/PublishEngine/ComplianceEngine/AdvisorEngine/ReportingEngine (the Plan
+Lifecycle, POS-number-as-identifier, the address-based dedup rule, cadence/scoring/compliance
+classification) is frozen and is the single source of truth. Everything in this section is
+UX/workflow/infrastructure - it changes what the user sees and how data gets in, never what the
+engines decide.
+
+### 15a. Navigation bug fix
+
+`_nav_button()` in `tools/ux_style.py` previously wrote a `=HYPERLINK()` formula. openpyxl never
+evaluates formulas, so the cell was saved with an empty cached `<v/>` - in some Excel/Excel Online
+contexts this doesn't get recalculated on open, so the button looked dead (confirmed real bug
+report, not a preference). Fixed by using `Cell.hyperlink` (a native hyperlink relationship, no
+calculation dependency at all - works the instant the file opens). Verified via XML inspection and
+by reloading the regenerated workbook and checking every hyperlink's `.target`.
+
+### 15b. HOME as a live pipeline hub, not a nicer landing page
+
+`build_home()` was rewritten around the explicit pipeline the product owner described: Import dat
+→ Plán kampaní → Rozpis techniků → Publikace → Vyhodnocení → Dashboard. Each stage is a row with a
+**live** status formula reading the actual sheet it produces/consumes (`COUNTA(POS_MASTER!A:A)>1`,
+`COUNTA(ACTIVITY_PLAN!A:A)>1`, `COUNTA(MANAGER_PLAN!A:A)>1`, a `PLAN_LIFECYCLE` status count for
+Published/Active, `COUNTA(COMPLIANCE_LOG!A:A)>1`), color-coded green/red via conditional
+formatting, with a one-click link to the sheet. A single "DALŠÍ KROK" callout above the pipeline
+resolves via `IFS()` to the first incomplete stage, so the answer to "what do I do now" doesn't
+require reading anything else on the sheet. The KPI strip was expanded from 3 to 6 live tiles:
+campaign week, POS count, planned-visit count (existing), plus distinct-POS-covered-by-plan and
+distinct-technicians-planned (same `SUMPRODUCT`/`COUNTIF` distinct-count pattern already proven in
+ACTIVITY_PLAN's reference panel), plus a compliance readout that mirrors DASHBOARD's own
+Splněno/Nesplněno tiles directly (`=DASHBOARD!C3&" / "&DASHBOARD!D3`) rather than recomputing them
+- one source of truth (ReportingEngine.ts), surfaced in two places.
+
+Deliberately not built as a "last week" compliance number: `COMPLIANCE_LOG.plannedWeek`/
+`plannedYear` use PlanningEngine's campaign-relative week counter and a single `latestYear` for the
+whole run (a known, already-documented simplification - see BACKLOG.md), not guaranteed-accurate
+calendar ISO week/year. Building a "minulý týden" filter on top of that would silently rely on a
+labeled-as-known-fuzzy value being exact, which is worse than not having the tile - flagged here
+rather than shipped as a mislabeled number.
+
+### 15c. TECHNICIAN_PLAN redesign
+
+Replaced the previous 12-column formula view (which mirrored MANAGER_PLAN's internal layout,
+including WEEK/KATEGORIE/POS_AREA) with the exact column set requested: DATUM, DEN, TECHNIK, POS,
+NÁZEV PROVOZOVNY, ULICE (merged with house number), MĚSTO, OBLAST, AKTIVITA (LOS/LOT combined, a
+POS can carry both in the same week), POZNÁMKA. POZNÁMKA is a live `VLOOKUP` into
+`POS_MASTER.plannerNotes` (the manager's actual note for that POS), not `MANAGER_PLAN.REASON`
+(the cadence engine's internal tag, e.g. "CORE cadence due" - not something a technician needs).
+Print setup added (landscape, fit-to-width, repeat header row) since this sheet is explicitly meant
+to be printed or exported per technician, not just viewed on screen.
+
+### 15d. Import Hub — architecture proposal (not implemented)
+
+Product owner's target state: pick one or more SalesApp/Manager Plan/Corn exports, or point at a
+watched folder, and the system loads/merges/dedupes into one internal dataset - business logic
+never knows how many source files data came from, POS number stays the sole primary identifier,
+and the existing address-based dedup rule (today implemented as `MANDATORY_9PODNIK`'s
+`dedupBy: "ADDRESS"` in `CADENCE_RULES` - confirmed with product owner this is the rule being
+referred to, not the inactive `CORN` cadence row of the same name) is unchanged.
+
+**Hard platform constraint, stated plainly so it isn't silently glossed over:** Office Scripts run
+inside Excel's sandbox and have no filesystem access and no OS file-picker API. A literal "[ Vybrat
+soubor... ]" button that opens a native file dialog is not achievable with Office Scripts alone -
+this is a platform limit, not an effort trade-off. Two paths get close to the target experience
+without that primitive:
+
+1. **Near-term (stays 100% Office Scripts + Excel):** a watched OneDrive/SharePoint folder plus a
+   Power Automate flow ("When a file is created in a folder" trigger → run an Office Script that
+   reads the new file's rows and appends them to a staging table). The user's actual action becomes
+   "drop the export into the folder" - no copy/paste, no manual file selection inside Excel. This
+   matches the "sledovaná složka" alternative the product owner already proposed as acceptable.
+2. **ImportEngine merge/dedupe generalization:** today `RAW_DATA`/`POS_STATUS_IMPORT`/
+   `SALESAPP_IMPORT` are each a single staging sheet, one file at a time. The proposed next step is
+   an `IMPORT_STAGING` table with an added `sourceFile` column, so multiple files' rows can coexist
+   before merge; `ImportEngine.ts` then groups by POS number (falling back to the existing
+   address-dedup rule for the CORN/9PODNIK case) and produces one `POS_MASTER` row per physical POS
+   regardless of how many source rows fed it. This is additive to `ImportEngine.ts` - it changes
+   *how many files* can feed the merge step, not the dedup rule itself or any other engine's
+   decision logic - but because it does touch a listed frozen engine, this step needs an explicit
+   go-ahead before implementation, per the current freeze.
+
+**Forward compatibility with a future desktop app:** the reason POS number is enforced everywhere
+as the sole identifier, and the reason business logic already only reads from `POS_MASTER`/
+`MANAGER_PLAN`/`COMPLIANCE_LOG` (never straight from staging sheets), is exactly so the import
+mechanism can be swapped later without touching engine code - a desktop app would just be a
+different way of getting rows into those same staging tables (e.g. writing directly into the
+workbook via the Excel file format, or a local queue synced into it) with a real OS file dialog
+replacing the folder-drop step. Nothing in this design assumes Excel-only.
