@@ -270,11 +270,21 @@ def build_legend(ws, start_row):
 
 
 def _nav_button(ws, cell_ref, label, target_sheet, color=NAVY, width=None):
-    ws[cell_ref] = f'=HYPERLINK("#{target_sheet}!A1","{label}")'
-    ws[cell_ref].font = Font(bold=True, size=12, color=WHITE)
-    ws[cell_ref].fill = PatternFill("solid", fgColor=color)
-    ws[cell_ref].alignment = Alignment(horizontal="center", vertical="center")
-    ws[cell_ref].border = THIN_BORDER
+    # Real cell-level hyperlink (openpyxl Cell.hyperlink), NOT a =HYPERLINK()
+    # formula. openpyxl never calculates formulas, so a formula-based
+    # button is stored with an empty cached value; some Excel contexts
+    # recalculate on open (fullCalcOnLoad) and some don't render it until
+    # you force a recalc, making the button look dead - this was a real
+    # bug (product owner confirmed nav buttons did not work), found and
+    # fixed by inspecting the saved XML. A native hyperlink has no
+    # calculation dependency at all: it works the instant the file opens.
+    cell = ws[cell_ref]
+    cell.value = label
+    cell.hyperlink = f"#{target_sheet}!A1"
+    cell.font = Font(bold=True, size=12, color=WHITE, underline=None)
+    cell.fill = PatternFill("solid", fgColor=color)
+    cell.alignment = Alignment(horizontal="center", vertical="center")
+    cell.border = THIN_BORDER
 
 
 def build_home(wb, real_control_values):
