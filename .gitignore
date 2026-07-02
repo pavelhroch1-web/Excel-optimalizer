@@ -2,3 +2,7 @@
 # scenarios, regenerable via tools/sim/xlsx_to_json.py + run_e2e.ts) - not
 # source, not committed.
 tools/sim/*.json
+
+# Python bytecode cache
+__pycache__/
+*.pyc

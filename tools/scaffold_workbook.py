@@ -13,6 +13,7 @@ Usage: python3 tools/scaffold_workbook.py <path-to-reference-workbook.xlsx> <out
 import sys
 import openpyxl
 from openpyxl.utils import get_column_letter
+from ux_style import apply_all
 
 REFERENCE_SHEETS_KEEP_AS_IS = [
     "RAW_DATA", "CONTROL", "ACTIVITY_PLAN", "TERMINAL_RULES", "VISIT_HISTORY",
@@ -247,6 +248,12 @@ def main(ref_path, out_path):
 
     # DASHBOARD (Reporting Engine output - written fresh on every run)
     write_table(dst_wb, "DASHBOARD", ["", "", "", "", "", ""], [])
+
+    # UX pass: sheet organization, color coding, dropdowns, legend,
+    # START_HERE, ACTIVITY_PLAN timeline - pure presentation, see
+    # tools/ux_style.py. Runs last so it sees the final sheet content.
+    control_rows_for_ux = list(dst_wb["CONTROL"].iter_rows(values_only=True))
+    apply_all(dst_wb, control_rows_for_ux)
 
     dst_wb.save(out_path)
     print(f"Scaffold written to {out_path}")

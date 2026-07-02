@@ -275,6 +275,56 @@ Advisor -> Reporting. Confirmed:
   individually-correct pure functions cannot catch - it only appears when
   multiple runs are chained, which is what `tools/sim/` is for.
 
+## 13c. Workbook UX layer (Phase 7)
+
+`tools/ux_style.py`, applied automatically at the end of `scaffold_workbook.py`.
+Pure presentation - no business logic, no data model change, no engine
+touched except a verified-safe read-order fix inside the styling script
+itself. Delivers:
+
+- **Sheet organization**: reordered and tab-colored by role - Input (blue),
+  Config (amber), Core/Output (purple/green), Logs (grey), Dashboard/
+  START_HERE first. See `SHEET_GROUPS` in the script.
+- **Color coding**: editable cells (cream) vs. system-managed (grey) per
+  sheet, with a legend on START_HERE. Import-staging sheets (RAW_DATA,
+  POS_STATUS_IMPORT, SALESAPP_IMPORT) get a flat "paste zone" wash; outputs
+  and logs get their own distinct washes.
+- **Data validation dropdowns** on every YES/NO, enum-like, and override
+  field across the config sheets and POS_MASTER's manual override columns.
+- **Real cell locking + sheet protection** - but ONLY on sheets no engine
+  ever writes to (pure config: CONTROL, *_RULES, CADENCE_RULES,
+  PARETO_GROUPS, SCORE_PROFILES, ADVISOR_RULES, CAPACITY_OVERRIDE,
+  ACTIVITY_PLAN). Engine-writable sheets (POS_MASTER, MANAGER_PLAN*,
+  PLAN_LIFECYCLE, COMPLIANCE_LOG, ADVISOR_LOG, VISIT_HISTORY_ACTUAL,
+  DASHBOARD) deliberately get NO real protection, because Excel's Protect
+  Sheet blocks Office Scripts' Range.clear()/setValues() unless the script
+  explicitly unprotects first, which none of ours do - enabling it there
+  would break every engine on first run. This trade-off is stated in the
+  legend, not hidden.
+- **START_HERE**: installation steps, weekly workflow, sheet map, current
+  campaign config snapshot, legend.
+- **ACTIVITY_PLAN redesign**: the original A:F data table is left at its
+  exact position (ImportEngine.ts still reads it positionally) - new
+  columns G onward add a live per-campaign visit-count estimate (Excel
+  formula, recalculates instantly on edit, explicitly labeled "orientační"
+  since it estimates network capacity during the campaign window, not the
+  exact scored/selected POS count) and a Gantt-style timeline heatmap
+  (conditional formatting, one column per week, colored when a campaign's
+  START_WEEK..END_WEEK covers that week) so overlapping/consecutive
+  campaigns are visible at a glance without opening a chart.
+
+Found and fixed one real inefficiency while building this: the timeline
+row-count was read from `ws.max_row` after decorative pre-styling had
+already inflated it (styling 500 future rows registers them in the sheet),
+producing ~12,000 conditional-formatting rules for 2 real campaign rows.
+Fixed by computing the real row count from actual column-A content and by
+reordering the styling passes; verified down to the expected 48 rules.
+
+Verified with `tools/sim/`: full Import -> Planning -> Publish pipeline
+against the styled workbook produces identical row counts to the
+unstyled version (11,605 POS, 4,847 visits, 1,215 published) - the UX
+pass changes no value an engine depends on.
+
 ## 14. Next step
 
 Implementation begins engine-by-engine per the migration plan (§12), starting with Phase 0 once
