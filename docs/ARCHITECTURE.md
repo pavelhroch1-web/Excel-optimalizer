@@ -233,7 +233,19 @@ principle.
   Diagnostic only - never writes to MANAGER_PLAN or POS_MASTER decision fields. All alert
   thresholds are proposed defaults in CONTROL, explicitly flagged as tunable, not confirmed
   business rules - see docs/BUSINESS_RULES.md section 13 and BACKLOG.md.
-- Route/Geo Engine refinement / Plan lifecycle — not started, see BACKLOG.md.
+- Reporting Engine v1 (`office-scripts/ReportingEngine.ts`) — done, tested (3 new unit tests for
+  the `latestByKey` dedup helper, which matters because COMPLIANCE_LOG/ADVISOR_LOG are append-
+  only and can hold several evaluations of the same subject over time). Writes DASHBOARD: network
+  overview, compliance summary, technician KPI, most-recent Advisor alert counts. Computes nothing
+  new - pure aggregation over data the other engines already produced.
+- Route/Geo Engine refinement — not started, see BACKLOG.md.
+- **Plan lifecycle (Draft/Published/Active/Closed)** — not started. Flagged explicitly to the
+  product owner as a workflow change (not purely technical), since it would add an explicit
+  Publish step to the weekly cycle and change what re-running Planning Engine mid-week does.
+  Currently MANAGER_PLAN is simply overwritten on every Planning Engine run, so nothing yet
+  guarantees "what was actually sent to technicians" stays fixed once Compliance Engine later
+  compares against it - a real gap for multi-week accuracy, not just a nice-to-have. Needs
+  product-owner sign-off before building, per the agreed autonomy boundary.
 
 ## 14. Next step
 

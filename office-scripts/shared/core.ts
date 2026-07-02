@@ -407,3 +407,26 @@ export function computeFailureRateByGroup(
     rate: byGroup[group].failed / byGroup[group].total,
   }));
 }
+
+// ============================================================================
+// REPORTING (Reporting Engine computes nothing new - see ARCHITECTURE.md
+// section 5 - it only aggregates. This helper handles one recurring need:
+// append-only logs like COMPLIANCE_LOG/ADVISOR_LOG can contain several rows
+// for the same logical subject over time (re-evaluated on each engine run);
+// a dashboard should show current state, i.e. only the newest row per key.)
+// ============================================================================
+
+export interface TimestampedRow {
+  key: string;
+  timestamp: string; // ISO string, lexicographically comparable
+}
+
+export function latestByKey<T extends TimestampedRow>(rows: T[]): T[] {
+  let latest: { [key: string]: T } = {};
+  for (const row of rows) {
+    if (!latest[row.key] || row.timestamp > latest[row.key].timestamp) {
+      latest[row.key] = row;
+    }
+  }
+  return Object.values(latest);
+}

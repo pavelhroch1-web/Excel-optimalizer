@@ -223,6 +223,9 @@ def main(ref_path, out_path):
         [],
     )
 
+    # DASHBOARD (Reporting Engine output - written fresh on every run)
+    write_table(dst_wb, "DASHBOARD", ["", "", "", "", "", ""], [])
+
     dst_wb.save(out_path)
     print(f"Scaffold written to {out_path}")
     print("Sheets:", dst_wb.sheetnames)

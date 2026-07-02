@@ -20,6 +20,7 @@ import {
   determineComplianceStatus,
   findNeglected,
   computeFailureRateByGroup,
+  latestByKey,
 } from "../office-scripts/shared/core";
 
 let passed = 0;
@@ -452,6 +453,29 @@ test("multiple failure statuses can be counted together", () => {
 });
 test("empty input returns empty output, no crash", () => {
   assert.deepStrictEqual(computeFailureRateByGroup([], ["Nesplneno"]), []);
+});
+
+// ==========================================================================
+console.log("latestByKey()");
+// ==========================================================================
+
+test("keeps only the row with the newest timestamp per key", () => {
+  const rows = [
+    { key: "A|31", timestamp: "2026-08-01T00:00:00Z", status: "Pending" },
+    { key: "A|31", timestamp: "2026-08-08T00:00:00Z", status: "Nesplneno" },
+    { key: "B|31", timestamp: "2026-08-01T00:00:00Z", status: "Splneno_vcas" },
+  ];
+  const result = latestByKey(rows);
+  const a = result.find((r) => r.key == "A|31")!;
+  assert.strictEqual(a.status, "Nesplneno");
+  assert.strictEqual(result.length, 2);
+});
+test("single row per key is returned unchanged", () => {
+  const rows = [{ key: "A", timestamp: "2026-08-01T00:00:00Z" }];
+  assert.deepStrictEqual(latestByKey(rows), rows);
+});
+test("empty input returns empty output, no crash", () => {
+  assert.deepStrictEqual(latestByKey([]), []);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");
