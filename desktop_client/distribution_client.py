@@ -1,14 +1,29 @@
 """
-Field Force Optimizer - Distribution Client (V1)
+Field Force Optimizer - Distribution Client (V1 view/export + V2 local
+engine execution)
 
-A small standalone desktop app - NOT part of the planning architecture.
-FieldForceOptimizer (the Excel workbook + Office Scripts) remains the sole
-source of truth for all planning business logic: cadence, scoring,
-compliance, capacity, publication. This app never plans, never optimizes,
-never reads SALESAPP_IMPORT or any import-stage sheet, and never writes
-anything back to the source workbook. It only reads the already-published
-TECHNICIAN_PLAN sheet and gives the user a faster, more pleasant way to
-browse it and export a separate Excel file per technician.
+A small standalone desktop app. Two distinct capabilities, kept clearly
+separated in the UI because they carry very different risk:
+
+  1. VIEW/EXPORT (read-only, the original V1 scope): reads the already-
+     published TECHNICIAN_PLAN sheet and lets the user browse it and
+     export a separate Excel file per technician. Never writes to the
+     source workbook.
+
+  2. RUN IMPORT/PLANNING/PUBLISH LOCALLY (V2, product-owner-approved
+     architecture change - see docs/ARCHITECTURE.md "Desktop Client local
+     engine execution"): runs a Python port of ImportEngine.ts/
+     PlanningEngine.ts/PublishEngine.ts (desktop_client/engines/) directly
+     against the workbook file on disk, via openpyxl - no Microsoft Graph
+     API, no online sync, matching the project's hard "no external API"
+     constraint. This DOES write to the source workbook (with an automatic
+     backup first) and DOES duplicate business logic that used to exist
+     only in Office Scripts - a deliberate, documented exception to
+     "FieldForceOptimizer is the sole source of truth", mitigated by
+     tools/sim/compare_engines.py verifying the Python port against the
+     real TypeScript engines on real production data. Excel/Office Scripts
+     remain the authoritative implementation; this is a second, tested
+     implementation of the same rules, not a replacement.
 
 Usage: python3 distribution_client.py
 Requires: openpyxl, ttkbootstrap (pip install openpyxl ttkbootstrap).
@@ -16,21 +31,9 @@ ttkbootstrap is a themed skin for Tkinter (still stdlib Tkinter underneath,
 no separate GUI framework/runtime) - gives a modern flat look with almost
 no extra code versus plain ttk.
 
-Workflow this supports (per docs/BACKLOG.md "Distribution Client desktop
-app"):
-  1. Open a workbook - local file, or a file inside a OneDrive-synced
-     folder (from this app's point of view that is just a local file path;
-     there is no OneDrive API involved, no live connection, no sync).
-  2. Browse/search the list of technicians and see the selected
-     technician's weekly plan on screen.
-  3. One click: export a separate .xlsx per technician, named
-     "<Technik>_<Rok>_W<Tyden>.xlsx", into a folder the user picks.
-
-All file-reading/writing logic lives in plan_export.py (no GUI dependency,
-independently unit-testable) - this file is presentation only. The search
-box below filters an already-loaded in-memory list - it does not read
-anything new from the workbook, so it stays inside the same read-only
-boundary as everything else here.
+All view/export file I/O lives in plan_export.py; all local-engine I/O
+lives in xlsx_engine_io.py + engines/ (no GUI dependency, independently
+testable) - this file is presentation only.
 """
 
 import os
@@ -40,7 +43,14 @@ from tkinter import filedialog, messagebox, ttk
 import ttkbootstrap as tb
 from ttkbootstrap.constants import BOTH, LEFT, RIGHT, X, Y, W
 
+import xlsx_engine_io
+from engines.import_engine import run as run_import_engine
+from engines.mock_workbook import MockWorkbook
+from engines.planning_engine import run as run_planning_engine
+from engines.publish_engine import run as run_publish_engine
 from plan_export import SHEET_NAME, export_technician_file, read_technician_plan
+
+ENGINE_RUNNERS = {"import": run_import_engine, "planning": run_planning_engine, "publish": run_publish_engine}
 
 # Plain tkinter.ttk.Scrollbar, not tb.Scrollbar: ttkbootstrap renders any
 # scrollbar's track/thumb via Pillow (PIL.ImageTk) as soon as a themed
@@ -79,6 +89,7 @@ class DistributionClientApp:
     def _build_layout(self):
         self._build_header()
         self._build_summary_bar()
+        self._build_engine_panel()
 
         body = tb.Frame(self.root, padding=(16, 8, 16, 12))
         body.pack(fill=BOTH, expand=True)
@@ -127,6 +138,46 @@ class DistributionClientApp:
         value_label.pack(anchor=W)
         card.value_label = value_label
         return card
+
+    def _build_engine_panel(self):
+        panel = tb.Frame(self.root, bootstyle="warning", padding=(16, 8))
+        panel.pack(fill=X)
+
+        label_col = tb.Frame(panel, bootstyle="warning")
+        label_col.pack(side=LEFT, fill=X, expand=True)
+        tb.Label(
+            label_col, text="Lokální spuštění enginů (zapisuje přímo do souboru)",
+            font=("", 9, "bold"), bootstyle="inverse-warning",
+        ).pack(anchor=W)
+        tb.Label(
+            label_col,
+            text="Vytvoří se záloha před zápisem. Zavři soubor v Excelu, než spustíš. "
+                 "Business logika je ověřená proti Office Scriptům (tools/sim/compare_engines.py), "
+                 "ale Excel zůstává oficiálním zdrojem pravdy.",
+            font=("", 8), bootstyle="inverse-warning", wraplength=560, justify="left",
+        ).pack(anchor=W)
+
+        btn_col = tb.Frame(panel, bootstyle="warning")
+        btn_col.pack(side=RIGHT)
+        self.import_btn = tb.Button(
+            btn_col, text="▶ Import", bootstyle="dark", width=12, state="disabled",
+            command=lambda: self._run_local_engine(["import"], {"POS_MASTER"}, "Import Engine"),
+        )
+        self.import_btn.pack(side=LEFT, padx=3)
+        self.planning_btn = tb.Button(
+            btn_col, text="▶ Planning", bootstyle="dark", width=12, state="disabled",
+            command=lambda: self._run_local_engine(
+                ["planning"], {"MANAGER_PLAN", "PLAN_LIFECYCLE"}, "Planning Engine"
+            ),
+        )
+        self.planning_btn.pack(side=LEFT, padx=3)
+        self.publish_btn = tb.Button(
+            btn_col, text="▶ Publish", bootstyle="dark", width=12, state="disabled",
+            command=lambda: self._run_local_engine(
+                ["publish"], {"MANAGER_PLAN_PUBLISHED", "PLAN_LIFECYCLE"}, "Publish Engine"
+            ),
+        )
+        self.publish_btn.pack(side=LEFT, padx=3)
 
     def _build_technician_panel(self, body):
         left = tb.Frame(body, padding=(0, 0, 12, 0))
@@ -238,6 +289,9 @@ class DistributionClientApp:
 
         self.export_all_btn.config(state=("normal" if self.by_technician else "disabled"))
         self.export_selected_btn.config(state="disabled")
+        self.import_btn.config(state="normal")
+        self.planning_btn.config(state="normal")
+        self.publish_btn.config(state="normal")
         self.plan_label.config(text="Vyber technika vlevo.")
         self._clear_tree()
 
@@ -310,6 +364,43 @@ class DistributionClientApp:
             )
         else:
             messagebox.showinfo("Hotovo", f"Exportováno {len(written)} souborů do:\n{output_dir}")
+
+    def _run_local_engine(self, engine_names: list[str], output_sheets: set, label: str):
+        if not self.workbook_path:
+            return
+        confirmed = messagebox.askyesno(
+            f"Spustit {label}?",
+            f"Tato akce PŘEPÍŠE data v otevřeném souboru přímo na disku, mimo Excel:\n"
+            f"{os.path.basename(self.workbook_path)}\n\n"
+            "Před zápisem se automaticky vytvoří záložní kopie "
+            "(stejná složka, přípona .backup_RRRRMMDD_HHMMSS.xlsx).\n\n"
+            "DŮLEŽITÉ: pokud je soubor otevřený v Excelu, zavři ho teď - jinak "
+            "můžeš při příštím uložení v Excelu přepsat tento zápis, nebo naopak.\n\n"
+            "Business logika běží ve zvláštní Python implementaci, ověřené proti "
+            "skutečným Office Scripts na reálných datech, ale Excel/Office Scripts "
+            "zůstávají oficiálním zdrojem pravdy.\n\n"
+            "Pokračovat?",
+            icon="warning",
+        )
+        if not confirmed:
+            return
+        try:
+            backup_path = xlsx_engine_io.backup_workbook(self.workbook_path)
+            state = xlsx_engine_io.read_state(self.workbook_path)
+            workbook = MockWorkbook(state)
+            log_lines = [ENGINE_RUNNERS[name](workbook) for name in engine_names]
+            xlsx_engine_io.write_state(self.workbook_path, workbook.dump(), output_sheets)
+        except Exception as e:
+            messagebox.showerror(f"{label} selhalo", str(e))
+            return
+        message = "\n".join(log_lines)
+        self.set_status(" | ".join(log_lines), bootstyle="success")
+        messagebox.showinfo(
+            f"{label} dokončeno",
+            f"{message}\n\nZáloha původního souboru: {os.path.basename(backup_path)}\n\n"
+            "Pozn.: listy jako TECHNICIAN_PLAN mají živé vzorce a přepočtou se, "
+            "až soubor otevřeš a uložíš v Excelu - tady zůstávají neaktuální.",
+        )
 
     # ------------------------------------------------------------------
     # Helpers

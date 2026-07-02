@@ -142,3 +142,29 @@ unless the product owner explicitly reopens that question later.
 computes nothing), the implementation language is a free choice, not a shared-code constraint.
 Python (reusing this project's existing openpyxl familiarity from `tools/`) is the lowest-friction
 default; a full Electron/web-stack app is not necessary for what V1 actually needs to do.
+
+## IMPLEMENTED: Distribution Client V2 — local Import/Planning/Publish execution
+
+Product owner explicitly asked for the app to run Import/Planning/Publish itself, not just browse
+results - a real change to the "V1 never writes to the workbook, never contains business logic"
+boundary above. Before building anything, this was flagged as requiring one of two mechanisms,
+each a genuine reversal of a previously-hard project constraint: Microsoft Graph API (reverses "no
+external API/no online sync") or the app reimplementing the engine logic itself (reverses "sole
+source of truth"). Product owner chose the reimplementation path, knowingly, after seeing both
+costs stated plainly. See `docs/ARCHITECTURE.md` section 22 for the full design, the
+`tools/sim/compare_engines.py` verification methodology, and what's explicitly still manual (this
+equivalence check is not yet a CI gate - re-running it after any `office-scripts/` business-rule
+change is a discipline, not automated).
+
+**Implementation**: `desktop_client/engines/` (Python port of `core.ts` +
+`ImportEngine.ts`/`PlanningEngine.ts`/`PublishEngine.ts`, verified equivalent to the real
+TypeScript engines on real production data + edge cases) + `desktop_client/xlsx_engine_io.py`
+(openpyxl bridge, writes only `POS_MASTER`/`MANAGER_PLAN`/`MANAGER_PLAN_PUBLISHED`/
+`PLAN_LIFECYCLE`, always backs up first) + a new "Lokální spuštění enginů" panel in
+`distribution_client.py` with per-run confirmation. Excel/Office Scripts remain the authoritative
+implementation for the real weekly workflow; this is a second, tested implementation for the
+desktop app's convenience.
+
+**Follow-up not yet done**: wire `tools/sim/compare_engines.py` into an automated check (CI or a
+pre-commit-style local gate) so a future change to `office-scripts/`'s planning logic without a
+matching `desktop_client/engines/` update fails loudly instead of silently drifting.

@@ -827,3 +827,75 @@ noise (per product owner: "příliš nejednoznačné"). `core.ts`'s `findPublish
 pattern as `computeVolumeTrend()`), and verified end-to-end via `tools/sim/run_e2e.ts` with a
 4-POS synthetic scenario (one closed, one reassigned, one unchanged, one never-planned) - all four
 produced exactly the expected alert (or correctly stayed silent for the unchanged one).
+
+## 22. Desktop Client local engine execution (deliberate exception to "sole source of truth")
+
+**Context**: after Distribution Client V1 (view/export only, section above/`docs/BACKLOG.md`)
+shipped, the product owner asked for the app to also be able to run Import/Planning/Publish
+itself, not just browse already-published results. This was flagged before implementation as a
+genuine reversal of two things stated as hard constraints repeatedly throughout the project:
+"no external APIs, no online sync" and "FieldForceOptimizer remains the sole source of truth for
+all planning business logic." Two concrete mechanisms were laid out - (A) Microsoft Graph API
+remote-executing the real Office Scripts (requires Azure AD app registration, OAuth consent, a
+live internet connection every run - a genuine reversal of "no external API/no online sync"), or
+(B) the desktop app directly reimplementing the engine logic against the `.xlsx` file via
+openpyxl (a genuine reversal of "sole source of truth," since the logic then exists twice with no
+shared-source guarantee). The product owner chose **(B)**, explicitly, after being shown both
+costs.
+
+**What actually changed**: `desktop_client/engines/` is a from-scratch Python port of
+`office-scripts/shared/core.ts` (`core_logic.py`, `dates_logic.py` - same function names, same
+call order, same tie-breaking as the TypeScript source) plus adapter code line-for-line translated
+from `office-scripts/ImportEngine.ts` / `PlanningEngine.ts` / `PublishEngine.ts`
+(`import_engine.py` / `planning_engine.py` / `publish_engine.py`). `mock_workbook.py` mirrors
+`tools/sim/mockWorkbook.ts`'s class-shaped Range API on purpose, rather than a more "Pythonic"
+dict API, specifically to keep each `main()` port a close, low-risk translation instead of a
+redesign - the translation itself was treated as the highest-risk part of this change.
+`js_compat.py` centralizes the handful of JS-coercion quirks that would otherwise be silent
+correctness bugs if naively "Pythonified" (`Number(x)` vs `Number(x)||0`, `array[-1]` meaning
+`undefined` in JS vs "last element" in Python, `toLocaleDateString("cs-CZ")`'s exact
+`"D. M. YYYY"` format - verified against a live `node -e` run, not assumed).
+
+**Why this is trustworthy rather than just "a second implementation and hope for the best"**:
+`tools/check_sync.py`'s byte-identical-source guarantee only works within TypeScript, so it cannot
+cover this. The replacement is `tools/sim/compare_engines.py`, a behavioral equivalence check: it
+diffs two `final_state.json` dumps (`POS_MASTER`/`MANAGER_PLAN`/`MANAGER_PLAN_PUBLISHED`/
+`PLAN_LIFECYCLE`) produced by running the identical seed JSON through (1) the real
+`office-scripts/*.ts` engines via `tools/sim/run_e2e.ts` and (2) the new Python port via
+`desktop_client/engines/run_pipeline.py`, ignoring row order and per-run timestamp columns.
+Verified equivalent on:
+- the full real production dataset (11,605 POS, `workbook/FieldForceOptimizer_V11_scaffold.xlsx`
+  via `tools/sim/xlsx_to_json.py`) - 4,847 planned visits across 27 technicians, 1,215 published
+  for week 31, byte-for-byte identical row sets on both sides;
+- a second consecutive run on top of that state (simulates publishing the next week) - exercises
+  `lockedWeeks`/`committedByTech` carry-over logic, still equivalent;
+- a synthetic edge-case seed (`tools/sim/make_edge_seed.py`) exercising `FORCE_EXCLUDE`,
+  `FORCE_INCLUDE` bypassing Filters, `managerOverrideTechnician` reassignment, and
+  `CAPACITY_OVERRIDE` - still equivalent, and manually spot-checked that each override actually
+  took effect (not just that both sides agreed, in case both were wrong the same way).
+- `desktop_client/engines/test_core_logic.py` additionally gives a fast, Node-free regression net
+  (25 assertions) for the core scoring/selection functions specifically, independent of the
+  cross-language check.
+
+**Blast radius, deliberately minimized**: `xlsx_engine_io.py` opens the real `.xlsx` file with
+openpyxl and reads only the sheets the engines need; when writing results back it touches *only*
+`POS_MASTER`/`MANAGER_PLAN`/`MANAGER_PLAN_PUBLISHED`/`PLAN_LIFECYCLE` (`ENGINE_OUTPUT_SHEETS`,
+enforced by an assertion) - every other sheet, including any live formulas (`TECHNICIAN_PLAN`,
+`DASHBOARD`, `HOME`), is never opened for writing at all. A timestamped backup copy of the whole
+file is made before every write. The GUI (`distribution_client.py`'s "Lokální spuštění enginů"
+panel) requires an explicit per-run confirmation dialog naming the exact risk (writes to disk
+outside Excel, close the file in Excel first, formula-driven sheets go stale until reopened/saved
+in real Excel) - this is not a silent background action. Verified end-to-end through the actual
+GUI code path (not just the engine functions directly) via a headless Xvfb run driving
+`DistributionClientApp._run_local_engine` against a real copy of the scaffold workbook, confirming
+the resulting `.xlsx` file matches the same row counts as the cross-language check.
+
+**What did NOT change**: Excel/Office Scripts remain the authoritative, continuously-used
+implementation for the real weekly workflow - this Python port is a second, independently-tested
+implementation of the same rules for the desktop app's convenience, not a replacement, and nothing
+about the Office Scripts themselves changed. If the two ever drift (a future business-rule change
+made in `core.ts` without a matching change in `core_logic.py`), `compare_engines.py` is the
+mechanism that would catch it - it is not yet wired into CI, so re-running it after any planning
+business-rule change in `office-scripts/` is a manual discipline, not an automated gate. Flagged
+here rather than silently assumed to stay in sync forever, consistent with every other
+simplification tracked in this document.
