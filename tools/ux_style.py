@@ -1010,6 +1010,63 @@ def find_tech_column_letter(pos_master_header_row):
     return "O"
 
 
+def enhance_pos_master(wb, max_rows=20000):
+    """POS_MASTER is the planner's working registry, not a report - a
+    manager scanning it needs to spot "which POS need my attention" without
+    reading every row. Three visual cues, all pure presentation over fields
+    engines already compute (no new business logic, no new field):
+      - status badge (Active=green, Closed=grey)
+      - neglected-risk highlight on weeksSinceLastVisit, using the SAME
+        NEGLECTED_AFTER_WEEKS threshold AdvisorEngine.ts already uses for
+        its own NEGLECT_RISK alert - one threshold, read from CONTROL, not
+        a second hardcoded copy of the number
+      - manual-override highlight (managerOverrideType non-blank) so an
+        exception a manager set weeks ago doesn't silently get forgotten
+    Plus AutoFilter, since a registry the user can't filter isn't usable as
+    a working screen."""
+    if "POS_MASTER" not in wb.sheetnames:
+        return
+    ws = wb["POS_MASTER"]
+    header = [c.value for c in ws[1]]
+    col = lambda name: get_column_letter(header.index(name) + 1) if name in header else None
+
+    last_col = get_column_letter(ws.max_column or 39)
+    ws.auto_filter.ref = f"A1:{last_col}{max_rows}"
+
+    status_col = col("status")
+    if status_col:
+        ws.conditional_formatting.add(
+            f"{status_col}2:{status_col}{max_rows}",
+            FormulaRule(formula=[f'{status_col}2="Active"'], font=Font(color="375623", bold=True)),
+        )
+        ws.conditional_formatting.add(
+            f"{status_col}2:{status_col}{max_rows}",
+            FormulaRule(formula=[f'{status_col}2="Closed"'], font=Font(color="808080")),
+        )
+
+    weeks_col = col("weeksSinceLastVisit")
+    if weeks_col:
+        threshold_formula = 'IFERROR(VLOOKUP("NEGLECTED_AFTER_WEEKS",CONTROL!$A:$B,2,FALSE),26)'
+        ws.conditional_formatting.add(
+            f"{weeks_col}2:{weeks_col}{max_rows}",
+            FormulaRule(
+                formula=[f'AND({weeks_col}2<>"",{weeks_col}2>={threshold_formula})'],
+                fill=PatternFill("solid", fgColor=WARNING_FILL),
+            ),
+        )
+
+    override_col = col("managerOverrideType")
+    if override_col:
+        ws.conditional_formatting.add(
+            f"{override_col}2:{override_col}{max_rows}",
+            FormulaRule(
+                formula=[f'{override_col}2<>""'],
+                fill=PatternFill("solid", fgColor="E2D4F0"),
+                font=Font(bold=True),
+            ),
+        )
+
+
 def apply_all(wb, control_rows):
     """Single entry point called by scaffold_workbook.py after all sheets
     and data are populated."""
@@ -1035,6 +1092,7 @@ def apply_all(wb, control_rows):
         build_dashboard_template(wb)
     if "POS_MASTER" in wb.sheetnames:
         apply_banded_rows(wb["POS_MASTER"], 2, 500, wb["POS_MASTER"].max_column or 39)
+        enhance_pos_master(wb)
 
     for sheet_name in list(wb.sheetnames):
         ws = wb[sheet_name]
