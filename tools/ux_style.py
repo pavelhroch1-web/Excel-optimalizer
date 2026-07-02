@@ -90,7 +90,7 @@ HIDDEN_SHEETS = {
     "CONTROL", "MARKET_RULES", "TERMINAL_RULES", "CATEGORY_RULES",
     "CADENCE_RULES", "PARETO_GROUPS", "SCORE_PROFILES", "ADVISOR_RULES",
     "CAPACITY_OVERRIDE", "COMPLIANCE_LOG", "ADVISOR_LOG",
-    "VISIT_HISTORY_ACTUAL", "VISIT_HISTORY",
+    "VISIT_HISTORY_ACTUAL", "VISIT_HISTORY", "PLANNING_HORIZON_RULES",
 }
 
 # Sheets an engine writes to programmatically - never real-protected, see
@@ -112,6 +112,7 @@ EDITABLE_COLUMNS = {
     "CADENCE_RULES": ["scope", "matchValue", "minGapWeeks", "maxIntervalWeeks", "intervalType",
                        "guaranteeType", "dedupBy", "campaignChangeOverride", "priority", "active",
                        "validFrom", "validTo", "notes"],
+    "PLANNING_HORIZON_RULES": ["appliesFromWeek", "appliesToWeek", "horizonWeeks", "reason", "active", "notes"],
     "PARETO_GROUPS": ["scope", "boundaryType", "boundaryValue", "active", "notes"],
     "SCORE_PROFILES": ["weight", "notes"],
     "ADVISOR_RULES": ["ruleId", "type", "condition", "threshold", "severity", "messageTemplate", "active"],

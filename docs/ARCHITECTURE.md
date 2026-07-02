@@ -607,3 +607,46 @@ sheet). Publishing a plan is the one step that commits technicians to something,
 exactly the kind of "workflow behavior change" worth a manager's active decision rather than a
 silent default - trivial to flip (add one more "Run script" step) if the product owner wants full
 automation including Publish.
+
+## 18. Planning Cycle Advisor - data model readiness (not implemented)
+
+Product owner asked explicitly for the *architecture* to be ready for a future feature - "the
+system tells me when it's the right time to prepare the next plan," with a dynamic horizon (4 weeks
+most of the year, 6-8 around Christmas/vacations) instead of a hardcoded constant - while equally
+explicitly saying this does not need to be fully built yet. Two things landed this round in service
+of that, both inert until an engine is told to read them:
+
+1. **`PLANNING_HORIZON_RULES`** (new hidden config table, `tools/scaffold_workbook.py`) -
+   `ruleId, appliesFromWeek, appliesToWeek, horizonWeeks, reason, active, notes`. Seeded with two
+   `active: "NO"` rows (a `DEFAULT` mirroring today's implicit 4-week behavior, and an illustrative
+   `SEZONA_VANOCE` row) - exactly the same "seed inactive, confirm later" pattern already used for
+   GECO/CORN in `CADENCE_RULES` before their scope was confirmed. `PlanningEngine.ts` does not read
+   this table - `CONTROL.CAMPAIGN_LENGTH` is unchanged and remains the only thing it reads today.
+2. **`ReportingEngine.ts` "PLANNING READINESS" section** - surfaces the *facts* a manager uses to
+   judge this manually right now: the latest Published/Active week and its real end-of-week date
+   (via the already-approved `isoMonday()`), days remaining until that date, the latest Draft week
+   in `MANAGER_PLAN`, and the resulting "Draft runway" (how many weeks of Draft already exist beyond
+   what's committed). Deliberately a *signal*, not a *recommendation* - it does not say "plan now."
+   One real bug caught before it shipped: the first draft of this section compared
+   `PLAN_LIFECYCLE.week` against a real calendar ISO week computed from `MANAGER_PLAN.DATE` -
+   silently comparing two different numbering systems, since `PLAN_LIFECYCLE.week` is actually the
+   same campaign-relative counter as `MANAGER_PLAN`'s `WEEK` column (confirmed by reading
+   `PublishEngine.ts`, which writes it directly from that column). Fixed to compare like with like;
+   caught via a synthetic end-to-end run through `tools/sim/run_e2e.ts`, not by inspection alone.
+
+**Open business questions, not decided here** (needed before an actual "PlanningCycleAdvisor" gets
+built, listed so they're ready to answer rather than rediscovered later):
+
+- What exactly triggers a horizon change - specific week ranges (as the config table shape assumes),
+  a rolling "days until a named holiday" calculation, or something driven by historical visit-
+  completion velocity slowing down?
+- Is the horizon a manual config table an ops person edits once a year (simple, matches the existing
+  CADENCE_RULES/PARETO_GROUPS pattern), or should the system infer it from `VISIT_HISTORY_ACTUAL`
+  trends automatically (more "smart," but a real algorithm to design and validate against real
+  seasons of data before trusting it)?
+- Does "recommend when to start planning" mean advisory only (a DASHBOARD/HOME callout a manager
+  reads and acts on), or should it eventually gate/trigger the Power Automate flow from section 15d
+  automatically?
+
+None of these need an answer today - the data model changes above do not commit to any of them,
+and can accommodate whichever answer comes later without a schema change.

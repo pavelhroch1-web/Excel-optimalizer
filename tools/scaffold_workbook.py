@@ -106,6 +106,31 @@ def main(ref_path, out_path):
         ],
     )
 
+    # PLANNING_HORIZON_RULES (data-model placeholder, NOT yet read by any
+    # engine - product owner asked the data model to be ready for a future
+    # "when should the next plan be prepared" advisor before the decision
+    # logic itself is designed/approved. Today PlanningEngine.ts still uses
+    # CONTROL.CAMPAIGN_LENGTH as a flat constant, unchanged. This table lets
+    # a future PlanningCycleAdvisor read a seasonal override (e.g. "start
+    # planning 8 weeks ahead in the weeks around Christmas") as config
+    # instead of a code change, mirroring how CADENCE_RULES/PARETO_GROUPS
+    # were seeded inactive before their logic existed. See
+    # docs/ARCHITECTURE.md section 18 for the full design and the open
+    # business question (how "vhodna chvile" gets defined) still pending
+    # product-owner confirmation before any engine reads this table.
+    write_table(
+        dst_wb, "PLANNING_HORIZON_RULES",
+        ["ruleId", "appliesFromWeek", "appliesToWeek", "horizonWeeks", "reason", "active", "notes"],
+        [
+            ["DEFAULT", "", "", 4, "Standard rok", "NO",
+             "Placeholder mirroring today's implicit CONTROL.CAMPAIGN_LENGTH behaviour - "
+             "not yet read by any engine. Not activating changes nothing."],
+            ["SEZONA_VANOCE", 47, 52, 8, "Vanoce a konec roku - delsi priprava", "NO",
+             "TODO: exact week range and horizon value are illustrative, not confirmed - "
+             "needs product-owner sign-off before this table is ever read by an engine."],
+        ],
+    )
+
     # PARETO_GROUPS
     write_table(
         dst_wb, "PARETO_GROUPS",

@@ -190,6 +190,10 @@ function main(workbook: ExcelScript.Workbook) {
     const key = tech + "|" + year + "|" + week;
     return overrideMap[key] !== undefined ? overrideMap[key] : workDaysCount * targetVisitsPerDay;
   }
+
+  function weeksBetween(week1: number, year1: number, week2: number, year2: number): number {
+    return week2 - week1 + (year2 - year1) * 52;
+  }
   // SYNC-BLOCK-END: core.ts (reporting)
 
   // ==========================================================================
@@ -487,6 +491,87 @@ function main(workbook: ExcelScript.Workbook) {
     }
   } else {
     row("(MANAGER_PLAN is empty - run Planning Engine first)");
+  }
+  blank();
+
+  // ==========================================================================
+  // PLANNING READINESS (raw signals only - NOT a recommendation. Product
+  // owner asked for a future "kdy je vhodne pripravit dalsi plan" advisor,
+  // explicitly as a data-model/architecture readiness step, not a decision
+  // to implement yet - see docs/ARCHITECTURE.md section 18 and the new,
+  // still-inactive PLANNING_HORIZON_RULES table. This section surfaces the
+  // facts a manager would use to decide that manually today: how far the
+  // committed (Published/Active) plan reaches, how much Draft runway exists
+  // beyond it, and how many days remain. It does not say "plan now" - that
+  // judgment call, and how a seasonal exception gets defined, is still open.
+  // ==========================================================================
+
+  section("PLANNING READINESS (signály, ne doporučení)");
+  const planLifecycle = readTable("PLAN_LIFECYCLE");
+  if (planLifecycle.length >= 2 || managerPlan.length >= 2) {
+    // Both PLAN_LIFECYCLE.week and MANAGER_PLAN.WEEK (column A) use the same
+    // PlanningEngine campaign-relative counter (PublishEngine.ts writes
+    // PLAN_LIFECYCLE.week directly from a MANAGER_PLAN row's WEEK value) -
+    // comparing them via weeksBetween() only makes sense if BOTH sides use
+    // that same counter. Deliberately NOT using isoWeekNumber(DATE) here for
+    // the Draft side (unlike Technician Workload above) - that would mix a
+    // real calendar week against a campaign-relative one, silently producing
+    // a meaningless comparison. PLAN_LIFECYCLE.year is also a flat
+    // CONTROL.YEAR setting, not per-row (see PublishEngine.ts) - read the
+    // same setting here for the Draft side so both years agree too.
+    let controlMapForYear: { [key: string]: string } = {};
+    for (let i = 1; i < controlRows.length; i++) {
+      if (controlRows[i][0]) {
+        controlMapForYear[String(controlRows[i][0])] = String(controlRows[i][1]);
+      }
+    }
+    const projectYear = controlMapForYear["YEAR"] ? Number(controlMapForYear["YEAR"]) : new Date().getFullYear();
+
+    let latestCommitted = { week: 0, year: 0 };
+    for (let i = 1; i < planLifecycle.length; i++) {
+      const r = planLifecycle[i];
+      const status = String(r[2]);
+      if (status != "Published" && status != "Active") {
+        continue;
+      }
+      const week = Number(r[1]);
+      const year = Number(r[0]);
+      if (year > latestCommitted.year || (year == latestCommitted.year && week > latestCommitted.week)) {
+        latestCommitted = { week, year };
+      }
+    }
+
+    let latestDraft = { week: 0, year: projectYear };
+    for (let i = 1; i < managerPlan.length; i++) {
+      const week = Number(managerPlan[i][0]);
+      if (!isNaN(week) && week > latestDraft.week) {
+        latestDraft = { week, year: projectYear };
+      }
+    }
+
+    if (latestCommitted.week > 0) {
+      const endOfWeek = new Date(isoMonday(latestCommitted.year, latestCommitted.week));
+      endOfWeek.setDate(endOfWeek.getDate() + 6);
+      const today = new Date();
+      const daysRemaining = Math.round((endOfWeek.getTime() - today.getTime()) / (24 * 3600 * 1000));
+      row("Poslední publikovaný/aktivní týden", latestCommitted.year + " / " + latestCommitted.week);
+      row("Konec tohoto týdne", endOfWeek.toISOString().slice(0, 10));
+      row("Dní do konce publikovaného plánu", daysRemaining);
+    } else {
+      row("(zatím žádný publikovaný týden - spusť Publish Engine)");
+    }
+
+    if (latestDraft.week > 0) {
+      row("Poslední naplánovaný (Draft) týden", latestDraft.year + " / " + latestDraft.week);
+      if (latestCommitted.week > 0) {
+        row(
+          "Draft runway (kolik týdnů dopředu je Draft nad rámec publikovaného)",
+          weeksBetween(latestCommitted.week, latestCommitted.year, latestDraft.week, latestDraft.year)
+        );
+      }
+    }
+  } else {
+    row("(PLAN_LIFECYCLE i MANAGER_PLAN jsou prázdné - spusť Planning Engine)");
   }
   blank();
 
