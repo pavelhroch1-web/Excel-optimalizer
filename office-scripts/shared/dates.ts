@@ -3,6 +3,7 @@
 // Public-holiday calculation is pure date math (fixed dates + Easter algorithm) -
 // no external calendar/API dependency, matches the "no external data sources" constraint.
 
+// SYNC-BLOCK-START: dates.ts
 function isoMonday(year: number, week: number): Date {
   let d = new Date(year, 0, 4);
   let day = d.getDay();
@@ -69,3 +70,4 @@ function workDays(year: number, week: number): { day: string; date: Date }[] {
   }
   return result;
 }
+// SYNC-BLOCK-END: dates.ts

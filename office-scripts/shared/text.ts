@@ -3,6 +3,7 @@
 // (see office-scripts/README.md). Kept here as the single source of truth to diff against.
 // Ported unchanged from V10.5.5 - confirmed stays-as-is in ARCHITECTURE.md Phase 0 review.
 
+// SYNC-BLOCK-START: text.ts
 function norm(v: string): string {
   return v
     .toUpperCase()
@@ -10,3 +11,4 @@ function norm(v: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .trim();
 }
+// SYNC-BLOCK-END: text.ts

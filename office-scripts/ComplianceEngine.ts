@@ -46,7 +46,7 @@
 // ============================================================================
 
 function main(workbook: ExcelScript.Workbook) {
-  // ---- SHARED: text.ts ----
+  // SYNC-BLOCK-START: text.ts
   function norm(v: string): string {
     return v
       .toUpperCase()
@@ -54,12 +54,13 @@ function main(workbook: ExcelScript.Workbook) {
       .replace(/[\u0300-\u036f]/g, "")
       .trim();
   }
+  // SYNC-BLOCK-END: text.ts
 
-  // ---- SHARED: core.ts (isoWeekNumber / weeksBetween / determineComplianceStatus) ----
+  // SYNC-BLOCK-START: core.ts (compliance)
   function isoWeekNumber(date: Date): { week: number; year: number } {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    const dayNum = (d.getUTCDay() + 6) % 7;
-    d.setUTCDate(d.getUTCDate() - dayNum + 3);
+    const dayNum = (d.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+    d.setUTCDate(d.getUTCDate() - dayNum + 3); // shift to nearest Thursday
     const isoYear = d.getUTCFullYear();
     const firstThursday = new Date(Date.UTC(isoYear, 0, 4));
     const firstDayNum = (firstThursday.getUTCDay() + 6) % 7;
@@ -70,6 +71,13 @@ function main(workbook: ExcelScript.Workbook) {
   function weeksBetween(week1: number, year1: number, week2: number, year2: number): number {
     return week2 - week1 + (year2 - year1) * 52;
   }
+
+  type ComplianceStatus =
+    | "Splneno_vcas"
+    | "Splneno_pozde"
+    | "Nesplneno"
+    | "Pending";
+
   function determineComplianceStatus(
     plannedWeek: number,
     plannedYear: number,
@@ -77,10 +85,13 @@ function main(workbook: ExcelScript.Workbook) {
     lateCutoffWeeks: number,
     latestKnownWeek: number,
     latestKnownYear: number
-  ): string {
+  ): ComplianceStatus {
     if (actualWeeks.length === 0) {
       const elapsed = weeksBetween(plannedWeek, plannedYear, latestKnownWeek, latestKnownYear);
-      return elapsed > lateCutoffWeeks ? "Nesplneno" : "Pending";
+      if (elapsed > lateCutoffWeeks) {
+        return "Nesplneno";
+      }
+      return "Pending";
     }
     const earliest = actualWeeks.reduce((min, w) =>
       weeksBetween(plannedWeek, plannedYear, w.week, w.year) <
@@ -89,8 +100,13 @@ function main(workbook: ExcelScript.Workbook) {
         : min
     );
     const delta = weeksBetween(plannedWeek, plannedYear, earliest.week, earliest.year);
-    return delta <= 0 ? "Splneno_vcas" : "Splneno_pozde";
+    if (delta <= 0) {
+      return "Splneno_vcas";
+    }
+    return "Splneno_pozde"; // late is still late even beyond lateCutoffWeeks -
+    // it happened, so it is not "Nesplneno" (which means it never happened)
   }
+  // SYNC-BLOCK-END: core.ts (compliance)
 
   // ==========================================================================
   // LOAD SHEETS

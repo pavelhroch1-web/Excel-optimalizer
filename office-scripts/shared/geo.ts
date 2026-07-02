@@ -3,8 +3,10 @@
 // Flat-earth approximation (111 km/degree latitude, ~72 km/degree longitude at
 // Czech latitudes ~50N). Good enough at this scale; no need for haversine.
 
+// SYNC-BLOCK-START: geo.ts
 function distanceKm(ax: number, ay: number, bx: number, by: number): number {
   const dx = (ax - bx) * 111;
   const dy = (ay - by) * 72;
   return Math.sqrt(dx * dx + dy * dy);
 }
+// SYNC-BLOCK-END: geo.ts

@@ -19,7 +19,7 @@
 // ============================================================================
 
 function main(workbook: ExcelScript.Workbook) {
-  // ---- SHARED: text.ts ----
+  // SYNC-BLOCK-START: text.ts
   function norm(v: string): string {
     return v
       .toUpperCase()
@@ -27,11 +27,15 @@ function main(workbook: ExcelScript.Workbook) {
       .replace(/[\u0300-\u036f]/g, "")
       .trim();
   }
+  // SYNC-BLOCK-END: text.ts
 
-  // ---- SHARED: columns.ts ----
+  // SYNC-BLOCK-START: columns.ts
   function buildHeaderIndex(headerRow: (string | number | boolean)[]): string[] {
     return headerRow.map((x) => norm(String(x)));
   }
+
+  // Exact match after normalization (diacritics/case-insensitive). Use for fields
+  // where the header text is stable and you want to fail loudly on a rename.
   function exactCol(headers: string[], name: string): number {
     const n = norm(name);
     for (let i = 0; i < headers.length; i++) {
@@ -41,6 +45,12 @@ function main(workbook: ExcelScript.Workbook) {
     }
     return -1;
   }
+
+  // Substring match after normalization. Use only for fields that may have
+  // slightly different header text across export versions (e.g. "TECH" inside
+  // "TECHNIK"). Prefer exactCol wherever the header text is otherwise stable -
+  // substring matching is intentionally used sparingly (V10.5.5 used it only for
+  // TECH and PTT columns).
   function col(headers: string[], name: string): number {
     const n = norm(name);
     for (let i = 0; i < headers.length; i++) {
@@ -50,6 +60,7 @@ function main(workbook: ExcelScript.Workbook) {
     }
     return -1;
   }
+  // SYNC-BLOCK-END: columns.ts
 
   // ==========================================================================
   // LOAD SHEETS
@@ -256,7 +267,7 @@ function main(workbook: ExcelScript.Workbook) {
   for (const posId of Object.keys(existingByPos)) {
     if (!posIdsInRawData[posId]) {
       const row = masterExisting[
-        masterExisting.findIndex((r) => String(r[mIdx("posId")]) === posId)
+        masterExisting.findIndex((r: (string | number | boolean)[]) => String(r[mIdx("posId")]) === posId)
       ];
       outRows.push(row as (string | number)[]);
     }

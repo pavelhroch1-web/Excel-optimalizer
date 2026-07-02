@@ -3,6 +3,7 @@
 // Dynamic column mapping: import sheets don't need a fixed column order, only a
 // header row whose text is recognizable. Requires norm() from text.ts.
 
+// SYNC-BLOCK-START: columns.ts
 function buildHeaderIndex(headerRow: (string | number | boolean)[]): string[] {
   return headerRow.map((x) => norm(String(x)));
 }
@@ -33,3 +34,4 @@ function col(headers: string[], name: string): number {
   }
   return -1;
 }
+// SYNC-BLOCK-END: columns.ts
