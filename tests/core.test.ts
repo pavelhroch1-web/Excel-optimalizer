@@ -22,6 +22,7 @@ import {
   computeFailureRateByGroup,
   latestByKey,
   advanceLifecycleStatus,
+  computeVolumeTrend,
 } from "../office-scripts/shared/core";
 
 let passed = 0;
@@ -525,6 +526,53 @@ test("Active stays Active while visits are still pending", () => {
 });
 test("Active never regresses to Published even if mondayHasPassed is somehow false (monotonic - time doesn't run backward, found by exhaustive case enumeration)", () => {
   assert.strictEqual(advanceLifecycleStatus("Active", false, true), "Active");
+});
+
+// ==========================================================================
+console.log("computeVolumeTrend()");
+// ==========================================================================
+
+function weeks(counts: number[], startYear = 2026, startWeek = 1) {
+  return counts.map((count, i) => ({ year: startYear, week: startWeek + i, count }));
+}
+
+test("not enough history yet returns null (correct 'stay silent', not an error)", () => {
+  assert.strictEqual(computeVolumeTrend(weeks([10, 10, 10]), 4, 4, 25), null);
+});
+test("baseline average of zero returns null (ratio against zero is meaningless)", () => {
+  assert.strictEqual(computeVolumeTrend(weeks([0, 0, 0, 0, 10, 10, 10, 10]), 4, 4, 25), null);
+});
+test("stable volume is not flagged significant", () => {
+  const signal = computeVolumeTrend(weeks([10, 10, 10, 10, 10, 10, 10, 10]), 4, 4, 25);
+  assert.strictEqual(signal!.significant, false);
+  assert.strictEqual(signal!.ratioPercent, 100);
+});
+test("a large increase is flagged significant with the correct ratio", () => {
+  const signal = computeVolumeTrend(weeks([10, 10, 10, 10, 20, 20, 20, 20]), 4, 4, 25);
+  assert.strictEqual(signal!.trailingAvg, 20);
+  assert.strictEqual(signal!.baselineAvg, 10);
+  assert.strictEqual(signal!.ratioPercent, 200);
+  assert.strictEqual(signal!.significant, true);
+});
+test("a large decrease is flagged significant too (not just increases)", () => {
+  const signal = computeVolumeTrend(weeks([20, 20, 20, 20, 10, 10, 10, 10]), 4, 4, 25);
+  assert.strictEqual(signal!.ratioPercent, 50);
+  assert.strictEqual(signal!.significant, true);
+});
+test("a small deviation under the threshold is not flagged", () => {
+  const signal = computeVolumeTrend(weeks([10, 10, 10, 10, 11, 11, 11, 11]), 4, 4, 25);
+  assert.strictEqual(signal!.significant, false);
+});
+test("unsorted input is sorted internally before windowing", () => {
+  const shuffled = [
+    { year: 2026, week: 3, count: 20 },
+    { year: 2026, week: 1, count: 10 },
+    { year: 2026, week: 4, count: 20 },
+    { year: 2026, week: 2, count: 10 },
+  ];
+  const signal = computeVolumeTrend(shuffled, 2, 2, 25);
+  assert.strictEqual(signal!.baselineAvg, 10);
+  assert.strictEqual(signal!.trailingAvg, 20);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

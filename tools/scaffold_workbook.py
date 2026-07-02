@@ -58,6 +58,9 @@ def main(ref_path, out_path):
     control_ws.append(["ADVISOR_TREND_WINDOW_WEEKS", 4, "Proposed default: how many recent weeks of COMPLIANCE_LOG feed the technician/region overload alerts. Tune on real data."])
     control_ws.append(["ADVISOR_OVERLOAD_WARNING_RATE_PERCENT", 20, "Proposed default (not a confirmed business rule): technician/region Nesplneno rate over the trend window that triggers a WARNING. Tune on real data."])
     control_ws.append(["ADVISOR_OVERLOAD_CRITICAL_RATE_PERCENT", 35, "Proposed default (not a confirmed business rule): technician/region Nesplneno rate over the trend window that triggers a CRITICAL alert. Tune on real data."])
+    control_ws.append(["ADVISOR_VOLUME_TRAILING_WEEKS", 8, "Planning Cycle Advisor v1 (deterministic, informational only - docs/ARCHITECTURE.md section 19): how many of the most recent weeks in VISIT_HISTORY_ACTUAL count as the 'trailing' period for the volume trend signal."])
+    control_ws.append(["ADVISOR_VOLUME_BASELINE_WEEKS", 8, "Planning Cycle Advisor v1: how many weeks immediately before the trailing period form the 'baseline' the trailing period is compared against. Needs TRAILING+BASELINE weeks of history before this signal can fire at all - with under a year of SalesApp history, expect it to stay silent (correct, not a bug)."])
+    control_ws.append(["ADVISOR_VOLUME_THRESHOLD_PERCENT", 25, "Planning Cycle Advisor v1: trailing-vs-baseline deviation (%) that triggers a VOLUME_TREND_SIGNAL alert. Proposed default, not a confirmed business rule - tune once a real season of history exists."])
 
     # CATEGORY_RULES: copy reference rows + add explicit confirmed default row
     cat_ws = src_wb["CATEGORY_RULES"]

@@ -650,3 +650,73 @@ built, listed so they're ready to answer rather than rediscovered later):
 
 None of these need an answer today - the data model changes above do not commit to any of them,
 and can accommodate whichever answer comes later without a schema change.
+
+## 19. Planning Cycle Advisor v1 - a swappable Recommendation Layer
+
+Product owner's answer to the open questions in section 18: horizon rules should be a *combination*
+- configurable defaults (already have that: `PLANNING_HORIZON_RULES`) plus the system suggesting/
+adjusting them from real history - informational only for now (no auto-publish, no auto-planning,
+final decisions stay human), and explicitly asked for the architecture to allow swapping in a real
+predictive/ML model later **without changing the business logic or data model**.
+
+### 19a. The swappable contract
+
+The key design decision is the *shape* of `computeVolumeTrend()` (`office-scripts/shared/core.ts`):
+
+```ts
+function computeVolumeTrend(
+  weeklyVolumes: { week: number; year: number; count: number }[],
+  trailingWindow: number,
+  baselineWindow: number,
+  thresholdPercent: number
+): { trailingAvg: number; baselineAvg: number; ratioPercent: number; significant: boolean } | null
+```
+
+It takes **plain historical counts in** and returns **a plain signal out** - no dependency on
+`ExcelScript.Workbook`, on `VISIT_HISTORY_ACTUAL`'s exact column layout, or on AdvisorEngine.ts
+itself. `main()` in AdvisorEngine.ts is the only place that (a) reads `VISIT_HISTORY_ACTUAL` into
+that plain shape and (b) turns the returned signal into an `ADVISOR_LOG` row. That boundary is
+deliberate: a future, smarter implementation - a seasonal decomposition model, a regression against
+holiday calendars, an actual ML model - only has to honor the same input/output shape (or a
+superset of it) to slot in behind that exact call site. Neither `ADVISOR_LOG`'s schema, nor
+`AdvisorEngine.ts`'s "diagnostic only, human decides" contract, nor any other engine, would need to
+change. This is the same pattern already proven for the deterministic rule engines themselves
+(`categoryRule`, `determineComplianceStatus`, etc.) - `core.ts` functions are pure, and the
+Office-Scripts-vs-`tools/sim/mockWorkbook.ts` split already demonstrates the wrapper/logic
+separation works for swapping *runtimes*; this extends the same idea to swapping *the algorithm
+behind one specific signal*.
+
+### 19b. v1 is deliberately dumb, on purpose
+
+`computeVolumeTrend()` is a moving-average comparison - two averages and a ratio. No seasonality
+model, no trend line, no confidence interval. This is intentional for a first version: it is fully
+explainable (a manager can recompute it by hand from `VISIT_HISTORY_ACTUAL`), needs no training
+data or tuning beyond three `CONTROL` numbers (`ADVISOR_VOLUME_TRAILING_WEEKS`,
+`ADVISOR_VOLUME_BASELINE_WEEKS`, `ADVISOR_VOLUME_THRESHOLD_PERCENT` - all proposed defaults, all
+config not code), and correctly stays silent (returns `null`, no alert) until there is enough
+history to compare - with a fresh workbook or under ~16 weeks of SalesApp history that's *most*
+installs today, and that's the correct behavior, not a bug to fix.
+
+Wired into `AdvisorEngine.ts` as a fourth alert type, `VOLUME_TREND_SIGNAL`, severity `"INFO"`
+(new tier - distinct from the existing `WARNING`/`CRITICAL` used by `NEGLECT_RISK`/
+`TECHNICIAN_OVERLOAD`/`REGIONAL_UNDERPERFORMANCE`, since this alert states a fact for a human to
+interpret rather than flagging a threshold breach). The message states the measured deviation and
+explicitly says no action is being suggested - "Objem realizovanych navstev za posledni N tydnu je
+X% vyssi/nizsi... Informativni signal, zadna akce neni automaticky navrzena."
+
+Verified via `tests/core.test.ts` (7 new tests: not-enough-history, zero-baseline, stable/increase/
+decrease/near-threshold cases, unsorted-input handling - 71/71 total now) and via a synthetic
+20-week history through `tools/sim/run_e2e.ts` (a deliberate 5→12 visits/week step produced exactly
+the expected "70% vyssi" alert, hand-verified against the raw averages).
+
+### 19c. What this is not (yet)
+
+This is one narrow signal (national visit volume vs. its own recent history) - not yet the full
+vision from the product owner's request: per-POS visit history/frequency informing cadence
+suggestions, forward-looking technician capacity forecasts, or a seasonal `PLANNING_HORIZON_RULES`
+auto-suggestion. Those are the natural next increments once real history accumulates (the product
+owner's own framing - "čím více historie, tím lepší doporučení"), and each one should follow the
+same pattern established here: a pure, testable `core.ts` function with a swappable signature,
+wired into the existing diagnostic-only `AdvisorEngine.ts`/`ADVISOR_LOG` pattern, informational
+only, config-driven thresholds - not hardcoded into the deterministic planning/compliance rules
+that remain frozen.

@@ -477,3 +477,62 @@ export function advanceLifecycleStatus(
   }
   return mondayHasPassed ? "Active" : "Published";
 }
+
+// ============================================================================
+// PLANNING CYCLE ADVISOR (docs/ARCHITECTURE.md section 19) - v1 is a
+// deterministic moving-average heuristic, deliberately NOT a predictive
+// model. The point of this function's signature (plain historical counts
+// in, a plain signal out - no dependency on any specific sheet, engine, or
+// even on what "week" means to the caller) is that a future statistical or
+// ML-based recommender can be swapped in behind the exact same call site in
+// AdvisorEngine.ts without changing the data model or any other engine -
+// see the architecture doc for the full reasoning. Advisory only: it never
+// writes a plan, only a signal a human reads in ADVISOR_LOG.
+// ============================================================================
+
+export interface WeeklyVolume {
+  week: number;
+  year: number;
+  count: number;
+}
+
+export interface VolumeTrendSignal {
+  trailingAvg: number;
+  baselineAvg: number;
+  ratioPercent: number; // trailingAvg / baselineAvg * 100, rounded to 1 decimal
+  significant: boolean;
+}
+
+// Compares the average weekly visit count over the most recent
+// `trailingWindow` weeks against the `baselineWindow` weeks immediately
+// before that. Returns null when there isn't yet enough history to compare
+// (expected and correct during the first weeks of use, not an error state -
+// callers should treat null as "stay silent", not as a failure) or when the
+// baseline average is zero (a ratio against zero is meaningless).
+export function computeVolumeTrend(
+  weeklyVolumes: WeeklyVolume[],
+  trailingWindow: number,
+  baselineWindow: number,
+  thresholdPercent: number
+): VolumeTrendSignal | null {
+  const sorted = [...weeklyVolumes].sort((a, b) =>
+    a.year != b.year ? a.year - b.year : a.week - b.week
+  );
+  if (sorted.length < trailingWindow + baselineWindow) {
+    return null;
+  }
+  const trailing = sorted.slice(sorted.length - trailingWindow);
+  const baseline = sorted.slice(
+    sorted.length - trailingWindow - baselineWindow,
+    sorted.length - trailingWindow
+  );
+  const avg = (rows: WeeklyVolume[]) => rows.reduce((sum, r) => sum + r.count, 0) / rows.length;
+  const trailingAvg = avg(trailing);
+  const baselineAvg = avg(baseline);
+  if (baselineAvg === 0) {
+    return null;
+  }
+  const ratioPercent = Math.round((trailingAvg / baselineAvg) * 1000) / 10;
+  const significant = Math.abs(ratioPercent - 100) >= thresholdPercent;
+  return { trailingAvg, baselineAvg, ratioPercent, significant };
+}

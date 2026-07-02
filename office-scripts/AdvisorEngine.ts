@@ -23,10 +23,19 @@
 //     proposed WARNING/CRITICAL rate thresholds.
 //   - REGIONAL_UNDERPERFORMANCE: same metric, grouped by POS_MASTER.area
 //     (OBLAST) instead of technician.
+//   - VOLUME_TREND_SIGNAL (Planning Cycle Advisor v1 - docs/ARCHITECTURE.md
+//     section 19): compares the average weekly realized-visit count over
+//     the trailing ADVISOR_VOLUME_TRAILING_WEEKS weeks of VISIT_HISTORY_ACTUAL
+//     against the ADVISOR_VOLUME_BASELINE_WEEKS weeks before that. A
+//     deterministic moving-average heuristic, NOT a predictive model -
+//     informational only (severity "INFO"), never suggests a specific
+//     action, just flags that recent volume has moved meaningfully. Stays
+//     silent (produces zero alerts of this type) until there is enough
+//     history - correct behavior for a new workbook, not a bug.
 //   All threshold VALUES below are proposed defaults, not confirmed business
 //   rules - see the CONTROL rows added by scaffold_workbook.py, each with an
 //   explicit "proposed default, tune on real data" note. The MECHANISM
-//   (config-driven, no hardcoded alert types beyond these three) is the
+//   (config-driven, no hardcoded alert types beyond these four) is the
 //   confirmed, tested part.
 //
 // NOT IN THIS VERSION (see docs/BACKLOG.md):
@@ -112,6 +121,47 @@ function main(workbook: ExcelScript.Workbook) {
     }
     return Object.values(latest);
   }
+
+  interface WeeklyVolume {
+    week: number;
+    year: number;
+    count: number;
+  }
+
+  interface VolumeTrendSignal {
+    trailingAvg: number;
+    baselineAvg: number;
+    ratioPercent: number; // trailingAvg / baselineAvg * 100, rounded to 1 decimal
+    significant: boolean;
+  }
+
+  function computeVolumeTrend(
+    weeklyVolumes: WeeklyVolume[],
+    trailingWindow: number,
+    baselineWindow: number,
+    thresholdPercent: number
+  ): VolumeTrendSignal | null {
+    const sorted = [...weeklyVolumes].sort((a, b) =>
+      a.year != b.year ? a.year - b.year : a.week - b.week
+    );
+    if (sorted.length < trailingWindow + baselineWindow) {
+      return null;
+    }
+    const trailing = sorted.slice(sorted.length - trailingWindow);
+    const baseline = sorted.slice(
+      sorted.length - trailingWindow - baselineWindow,
+      sorted.length - trailingWindow
+    );
+    const avg = (rows: WeeklyVolume[]) => rows.reduce((sum, r) => sum + r.count, 0) / rows.length;
+    const trailingAvg = avg(trailing);
+    const baselineAvg = avg(baseline);
+    if (baselineAvg === 0) {
+      return null;
+    }
+    const ratioPercent = Math.round((trailingAvg / baselineAvg) * 1000) / 10;
+    const significant = Math.abs(ratioPercent - 100) >= thresholdPercent;
+    return { trailingAvg, baselineAvg, ratioPercent, significant };
+  }
   // SYNC-BLOCK-END: core.ts (advisor)
 
   // ==========================================================================
@@ -143,6 +193,9 @@ function main(workbook: ExcelScript.Workbook) {
   const TREND_WINDOW = setting("ADVISOR_TREND_WINDOW_WEEKS", 4);
   const OVERLOAD_WARNING_RATE = setting("ADVISOR_OVERLOAD_WARNING_RATE_PERCENT", 20) / 100;
   const OVERLOAD_CRITICAL_RATE = setting("ADVISOR_OVERLOAD_CRITICAL_RATE_PERCENT", 35) / 100;
+  const VOLUME_TRAILING_WEEKS = setting("ADVISOR_VOLUME_TRAILING_WEEKS", 8);
+  const VOLUME_BASELINE_WEEKS = setting("ADVISOR_VOLUME_BASELINE_WEEKS", 8);
+  const VOLUME_THRESHOLD_PERCENT = setting("ADVISOR_VOLUME_THRESHOLD_PERCENT", 25);
 
   if (posMaster.length < 2) {
     console.log("Advisor Engine: POS_MASTER is empty - run Import Engine first.");
@@ -289,6 +342,57 @@ function main(workbook: ExcelScript.Workbook) {
   }
 
   // ==========================================================================
+  // VOLUME_TREND_SIGNAL (Planning Cycle Advisor v1 - see file header and
+  // docs/ARCHITECTURE.md section 19). Reads VISIT_HISTORY_ACTUAL directly
+  // (real calendar week/year - isoWeekNumber() at import time, unlike
+  // MANAGER_PLAN/PLAN_LIFECYCLE's campaign-relative counter - see
+  // ReportingEngine.ts's PLANNING READINESS section for that distinction),
+  // so this signal is meaningful regardless of how many campaign cycles
+  // have run. Deliberately informational only: severity "INFO", message
+  // states the fact, never recommends a specific action.
+  // ==========================================================================
+
+  const visitHistoryActual = readTable("VISIT_HISTORY_ACTUAL");
+  if (visitHistoryActual.length >= 2) {
+    const vHeaders = (visitHistoryActual[0] as string[]).map((h) => String(h));
+    const vidx = (name: string) => vHeaders.indexOf(name);
+    let countsByWeek: { [key: string]: WeeklyVolume } = {};
+    for (let i = 1; i < visitHistoryActual.length; i++) {
+      const r = visitHistoryActual[i];
+      const week = Number(r[vidx("week")]);
+      const year = Number(r[vidx("year")]);
+      if (!week || !year) {
+        continue;
+      }
+      const key = year + "|" + week;
+      if (!countsByWeek[key]) {
+        countsByWeek[key] = { week, year, count: 0 };
+      }
+      countsByWeek[key].count++;
+    }
+    const signal = computeVolumeTrend(
+      Object.values(countsByWeek),
+      VOLUME_TRAILING_WEEKS,
+      VOLUME_BASELINE_WEEKS,
+      VOLUME_THRESHOLD_PERCENT
+    );
+    if (signal && signal.significant) {
+      const direction = signal.ratioPercent > 100 ? "vyssi" : "nizsi";
+      alertRows.push([
+        "VOLUME_TREND_SIGNAL", "INFO", "NETWORK", "ALL",
+        "Objem realizovanych navstev za posledni " + VOLUME_TRAILING_WEEKS + " tydny je " +
+          Math.abs(Math.round(signal.ratioPercent - 100)) + "% " + direction +
+          " nez v predchozich " + VOLUME_BASELINE_WEEKS + " tydnech (" +
+          Math.round(signal.trailingAvg * 10) / 10 + " vs " + Math.round(signal.baselineAvg * 10) / 10 +
+          " navstev/tyden v prumeru). Informativni signal, zadna akce neni automaticky navrzena.",
+        now,
+      ]);
+    }
+  } else {
+    console.log("Advisor Engine: VISIT_HISTORY_ACTUAL is empty - skipping VOLUME_TREND_SIGNAL (run Compliance Engine after a SalesApp import first).");
+  }
+
+  // ==========================================================================
   // WRITE ADVISOR_LOG (append-only - each run's alerts are a new snapshot,
   // old alerts stay for trend history rather than being overwritten)
   // ==========================================================================
@@ -304,6 +408,7 @@ function main(workbook: ExcelScript.Workbook) {
     "Advisor Engine: " + alertRows.length + " alerts written (" +
       alertRows.filter((r) => r[0] == "NEGLECT_RISK").length + " neglect risk, " +
       alertRows.filter((r) => r[0] == "TECHNICIAN_OVERLOAD").length + " technician overload, " +
-      alertRows.filter((r) => r[0] == "REGIONAL_UNDERPERFORMANCE").length + " regional underperformance)."
+      alertRows.filter((r) => r[0] == "REGIONAL_UNDERPERFORMANCE").length + " regional underperformance, " +
+      alertRows.filter((r) => r[0] == "VOLUME_TREND_SIGNAL").length + " volume trend signal)."
   );
 }
