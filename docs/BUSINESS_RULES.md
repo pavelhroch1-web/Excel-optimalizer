@@ -118,11 +118,15 @@ STATUS: ★ OPEN — `boundaryType` and `scope` not yet defined; IDT is 46% of t
 (5,342 of 11,605), so this threshold materially shapes the whole plan and should not be guessed
 
 **RULE: Pareto (highest business goal)**
-CONDITION: same PARETO_GROUPS mechanism, top tier = network-wide "strongest outlets"
+CONDITION: same PARETO_GROUPS mechanism, top tier = "strongest outlets"
 ACTION: feeds Business Score as a component and feeds Advisor Engine neglect-risk alerts with a
 tighter tolerance than standard POS
-STATUS: ★ OPEN — same boundaryType/scope question as above; may reuse the same tier definition as
-KA/IDT or be a separate, broader tier — needs your decision
+STATUS: CONFIRMED for V11 phase 1 — **preserve V10.5.5's actual behaviour: scope = PER_TECHNICIAN**
+(relative top 20% within each technician's own portfolio), not global/regional. `scope` is a
+config field on PARETO_GROUPS (`PER_TECHNICIAN | GLOBAL | PER_REGION | PER_MARKET`) specifically so
+this can change later without code changes — but the field starts set to `PER_TECHNICIAN` and this
+is not being reopened as a business decision right now. `boundaryType`/`boundaryValue` for
+KA/IDT/global tiers remain ★ OPEN, deferred to when Planning Engine scoring is built.
 
 ## 5. Business Value (PPT)
 
@@ -152,6 +156,26 @@ CONDITION: any campaign (Gems, Sportka, Losy, Eurojackpot, seasonal campaigns, f
 ACTION: Business Engine reads campaign identity, window and PRIORITY purely from ACTIVITY_PLAN;
 no campaign name may ever appear in engine code
 STATUS: CONFIRMED
+
+## 6a. GPS bonus overflow (corrected spec — deferred implementation)
+
+**RULE: Deliberate small capacity overflow for very close POS**
+CONDITION: `GPS_EXTRA_ENABLED = true` AND a non-selected POS lies within `GPS_EXTRA_RADIUS_METERS`
+(default proposed 300m) of an already-selected POS for that technician/week
+ACTION: Route/Geo Engine may add it even though weekly capacity is already met, up to
+`GPS_EXTRA_MAX_VISITS` (default proposed 5) extra visits total for that technician/week. Each such
+visit is tagged with reason `GPS BONUS` (distinct from `NEARBY`), so it is visibly a deliberate
+business decision, never mistaken for a planning error.
+CONFIG SOURCE: `GPS_EXTRA_ENABLED`, `GPS_EXTRA_RADIUS_METERS`, `GPS_EXTRA_MAX_VISITS` (CONTROL)
+CORRECTION: earlier turn proposed simply capping selection at capacity to fix the V10.5.5
+`addNearby()` defect (BUSINESS_RULES.md §15a). Product owner corrected this: the *original*
+uncapped-add intent was right (a 41st visit 120m away is worth doing rather than a whole extra
+trip next week) — what must be fixed is that overflow visits should never be silently lost
+(the actual V10.5.5 defect), not that overflow should be disallowed. The fix is: bound the overflow
+explicitly and configurably, tag it clearly, and make sure every added POS is actually placed in
+a day slot (no more silent loss) — not eliminate the overflow behaviour itself.
+STATUS: CONFIRMED (spec); **implementation deferred to Route/Geo Engine build (not part of the
+bottom-up infrastructure phase)**
 
 ## 7. GPS / Weekly composition
 
