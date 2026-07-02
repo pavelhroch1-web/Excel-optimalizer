@@ -87,34 +87,54 @@ they aren't lost.
   per-CADENCE_RULES-row parameter if different POS groups need different bonus radii. Not
   needed until there's a concrete case for it.
 
-## Approved, deferred until core is stable: Distribution Client (formerly "Weekly Distribution Helper")
-Product owner approved this architecture direction twice, refining scope the second time - this
-entry supersedes the original PDF-only version. Explicitly deprioritized until
-FieldForceOptimizer's own core workflow is considered done. Recorded in full so the design isn't
-rediscovered/re-litigated later.
+## Approved, deferred until core is stable: Distribution Client desktop app
+Product owner approved this architecture direction three times, expanding scope each time from a
+narrow export utility into a small standalone desktop application. This entry (formerly "Weekly
+Distribution Helper") supersedes both earlier versions. Explicitly deprioritized until
+FieldForceOptimizer's own core workflow is finished, tested, and stable in real production use -
+only then does work on this begin. Recorded in full so the design isn't rediscovered/re-litigated
+later.
 
-**Core principle (non-negotiable, restated by product owner): FieldForceOptimizer remains the
-single source of truth for all planning business logic. This tool is a client over its published
-results - nothing more.** It must never contain cadence/scoring/compliance/capacity logic, never
-recompute anything, never write back to the workbook.
+**Core principle (non-negotiable, restated by product owner three times now): FieldForceOptimizer
+remains the single source of truth for all planning business logic - all planning, compliance,
+recommendations, and publication stay in Excel. This app is a client over its already-published
+results - nothing more.** It must never plan, optimize, compute compliance, read
+`SALESAPP_IMPORT`/any import-stage sheet, or write anything back to the workbook.
 
-**V1 scope, exactly as specified:**
-- User picks an Excel workbook (local file or on OneDrive - a file path, not a live connection).
-- Tool reads the already-published `TECHNICIAN_PLAN` from that workbook.
-- One click generates a separate **Excel file per technician** (not PDF - product owner's refined
-  choice), each containing only that technician's rows.
-- Filename convention: `<Prijmeni>_<Rok>_W<Tyden>.xlsx` (e.g. `Novák_2026_W32.xlsx`).
-- User picks the destination folder; tool writes all files there in one pass.
-- Explicitly MUST NOT: read `SALESAPP_IMPORT` or any import-stage sheet, generate or influence any
-  plan, recompute anything, or write anything back to the source workbook. Pure read of
-  `TECHNICIAN_PLAN`'s already-published values, split-by-technician, save-as-new-file. Nothing else.
+**V1 scope, a small desktop app, not just a script:**
+- Open a workbook - local file or on OneDrive (a file path on a synced folder, not a live
+  connection/API - OneDrive-synced files are ordinary local files from the app's point of view).
+- Show a list of technicians and each one's weekly plan on screen (read-only view of the
+  already-published `TECHNICIAN_PLAN`).
+- One click: generate a separate **Excel file per technician**, named `<Prijmeni>_<Rok>_W<Tyden>.xlsx`
+  (e.g. `Novák_2026_W32.xlsx`), saved to a folder the user picks.
+- Optionally send the generated file by email or Teams - see feasibility note below before
+  committing to a specific mechanism.
+
+**Feasibility check (answered when the product owner asked "is this even realistic"):**
+- Opening a workbook (local or OneDrive-synced) and reading `TECHNICIAN_PLAN`, showing it on
+  screen, and splitting it into per-technician `.xlsx` files: straightforward, low risk. Same
+  openpyxl-style file access this project's own `tools/scaffold_workbook.py`/`tools/ux_style.py`
+  already do today, just packaged as an app instead of a build script.
+- Email: feasible via local automation of an already-installed desktop mail client (e.g. driving
+  Outlook via its local COM/scripting interface on Windows) - this is automating a local
+  application the user already has, not calling an external API, so it does not conflict with the
+  "no API to SalesApp / no online sync" constraint.
+- Teams: the one genuinely open question - there is no realistic way to send a Teams message
+  purely locally without some form of Microsoft Graph API call, which would be a new kind of
+  integration this project has deliberately avoided everywhere else. Options when this is actually
+  built: (a) treat Graph API as a narrow, explicitly-scoped exception for outbound sending only (no
+  data ever flows back in), (b) skip Teams and rely on "open the file, attach it yourself" as the
+  first-version fallback, or (c) skip Teams entirely and rely on email/manual distribution. Not
+  deciding this now - flagged so it's a conscious choice made at implementation time, not
+  discovered as a blocker mid-build.
 
 **Later, optional, only after V1 is proven useful** (product owner's own framing - "může přidat",
-not "bude mít"): search/filter within the tool, print support, additional export formats, a
-history view of past exports. All still pure presentation over already-published data - none of
-these change the "no business logic, ever" boundary above.
+not "bude mít"): search/filter within the app, print support, additional export formats, a history
+view of past exports. All still pure presentation over already-published data - none of these
+change the "no business logic, ever" boundary above.
 
-**Technically low-risk when the time comes:** `tools/scaffold_workbook.py`/`tools/ux_style.py`
-already open and read/write this exact workbook via openpyxl with no Excel installation required -
-splitting `TECHNICIAN_PLAN`'s rows by technician into separate `.xlsx` files via the same library
-is a small, well-understood step, not a new capability this project would need to invent.
+**Tech stack note for when this starts:** since the app never shares logic with `core.ts` (it
+computes nothing), the implementation language is a free choice, not a shared-code constraint.
+Python (reusing this project's existing openpyxl familiarity from `tools/`) is the lowest-friction
+default; a full Electron/web-stack app is not necessary for what V1 actually needs to do.
