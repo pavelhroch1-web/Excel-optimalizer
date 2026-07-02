@@ -181,10 +181,11 @@ LOG_SHEETS = {"COMPLIANCE_LOG", "ADVISOR_LOG", "VISIT_HISTORY_ACTUAL", "VISIT_HI
 # against VISIT_HISTORY_ACTUAL on every run, and ImportEngine.ts upserts
 # POS_MASTER by posId), it just wasn't visible/discoverable before.
 IMPORT_HUB_GUIDANCE = {
-    "RAW_DATA": (
-        "Sem vlož export POS dat (PPT zadání). Můžeš vkládat i více exportů za sebou "
-        "(přidávej pod poslední řádek, nepřepisuj) - Import Engine sloučí vše podle POS_ID."
-    ),
+    # RAW_DATA is NOT here deliberately - unlike the other staging sheets it
+    # has a legacy instruction row already at row 1 (see
+    # fix_raw_data_layout()), rewritten in place as a visible banner instead
+    # of a hover-only comment, so a second overlapping comment would be
+    # redundant noise on the same cell.
     "POS_STATUS_IMPORT": (
         "Sem vlož export stavu POS (aktivní/uzavřené). Stejná struktura pokaždé - "
         "lze vkládat opakovaně, Import Engine vždy aktualizuje POS_MASTER podle POS_ID."
@@ -263,6 +264,7 @@ def build_import_hub(wb):
     ws["A3"].fill = PatternFill("solid", fgColor=NAVY)
     ws["A3"].alignment = Alignment(horizontal="left", vertical="center", indent=2)
     ws.row_dimensions[3].height = 20
+    ws.freeze_panes = "A4"  # banner stays visible while scrolling through the 5 steps
 
     r = 5
 
@@ -279,8 +281,26 @@ def build_import_hub(wb):
         ws.cell(r, 2, f"Co se stane po importu: {after}").font = NOTE_FONT
         r += 1
         if target_sheet:
+            # RAW_DATA has one extra non-data row at the top (a legacy
+            # instruction line inherited from the source workbook, ABOVE its
+            # real header - see fix_raw_data_layout()) - COUNTA needs -2
+            # there, not -1, to actually count data rows and not off-by-one
+            # undercount by exactly one row every time.
+            header_rows = 2 if target_sheet == "RAW_DATA" else 1
             ws.cell(r, 2, "Řádků nyní:").font = Font(size=9, color="595959")
-            ws.cell(r, 3, f'=COUNTA({target_sheet}!A:A)-1').font = Font(bold=True, size=13, color=NAVY)
+            count_cell = ws.cell(r, 3, f'=COUNTA({target_sheet}!A:A)-{header_rows}')
+            count_cell.font = Font(bold=True, size=13, color=NAVY)
+            status_cell = ws.cell(r, 4, f'=IF(C{r}>0,"✅ Data v systému","⏳ Čeká na vložení")')
+            status_cell.font = Font(bold=True, size=9)
+            status_cell.alignment = Alignment(horizontal="left")
+            ws.conditional_formatting.add(
+                status_cell.coordinate,
+                FormulaRule(formula=[f'LEFT({status_cell.coordinate},1)="✅"'], font=Font(color="375623", bold=True)),
+            )
+            ws.conditional_formatting.add(
+                status_cell.coordinate,
+                FormulaRule(formula=[f'LEFT({status_cell.coordinate},1)="⏳"'], font=Font(color="BF8F00", bold=True)),
+            )
             _nav_button(ws, f"F{r}", "Vložit / otevřít →", target_sheet, color=color)
         elif extra_note:
             ws.merge_cells(f"B{r}:G{r}")
@@ -352,6 +372,56 @@ def build_import_hub(wb):
 
     _nav_button(ws, f"A{r}", "← Zpět na HOME", "HOME", color="404040")
     return ws
+
+
+def fix_raw_data_layout(ws, max_rows=500):
+    """RAW_DATA is copied verbatim from the legacy V10.5.5 workbook, which
+    has a quirk none of the other reference sheets share: row 1 is a stray
+    instruction sentence ("Sem vloz export POS"), and the REAL column header
+    (CISLO TERMINALU, POS, MARKET, ...) is row 2. ImportEngine.ts already
+    knows this (reads raw[1] as the header row, data from raw[2] onward -
+    see its own "RAW_DATA COLUMN MAPPING" comment) - this is a confirmed,
+    intentional, working data contract, NOT something to "fix" by deleting
+    the row (that would be a business-logic-adjacent change to a working
+    positional read).
+
+    What WAS actually broken: every generic styling helper in this module
+    assumes row 1 is the header, so before this function existed, the
+    styling was inverted - the stray instruction sentence got the big navy
+    header treatment, and the REAL header row got the pale "this is
+    editable data" wash, making the actual column names look like ordinary
+    data. Found during a full production review by comparing this sheet
+    against the source workbook, not by inspection of the styled workbook
+    alone - the mis-styling looked plausible until compared to row 2's
+    actual content."""
+    # Row 1: a light instruction banner, not a heavy header bar - restyled
+    # with a friendlier sentence (ImportEngine.ts never reads this text, so
+    # changing it carries no data risk).
+    ws["A1"] = "Vlož export POS dat sem (od řádku 3) - lze vkládat i více exportů za sebou"
+    ws["A1"].font = Font(italic=True, size=10, color="595959")
+    ws["A1"].fill = PatternFill("solid", fgColor=IMPORT_FILL)
+    ws.row_dimensions[1].height = 18
+    if ws["A1"].comment:
+        ws["A1"].comment = None  # redundant with the rewritten instruction text above
+
+    # Row 2: the REAL header - gets the real header treatment.
+    for cell in ws[2]:
+        if cell.value in (None, ""):
+            continue
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.row_dimensions[2].height = 28
+
+    # Data wash starts at row 3, not row 2.
+    capped_max_row = min(ws.max_row, max_rows)
+    for row in ws.iter_rows(min_row=3, max_row=max(capped_max_row, 3), max_col=ws.max_column or 1):
+        for cell in row:
+            cell.fill = PatternFill("solid", fgColor=IMPORT_FILL)
+
+    last_col = get_column_letter(ws.max_column or 16)
+    ws.auto_filter.ref = f"A2:{last_col}{max(ws.max_row, 2)}"
+    ws.freeze_panes = "A3"
 
 
 def color_editable_columns(ws, sheet_name, max_rows=500):
@@ -504,6 +574,7 @@ def build_home(wb, real_control_values):
     ws["A3"].fill = PatternFill("solid", fgColor=NAVY)
     ws["A3"].alignment = Alignment(horizontal="left", vertical="center", indent=2)
     ws.row_dimensions[3].height = 20
+    ws.freeze_panes = "A4"  # banner stays visible while scrolling through the pipeline/legend below
 
     # ---- Pipeline stages: each row's status (col G) is a LIVE formula that
     # reads the actual sheet the stage produces/consumes, not a static
@@ -964,10 +1035,10 @@ def build_dashboard_template(wb):
 
     ws.merge_cells("A1:F1")
     ws["A1"] = "DASHBOARD"
-    ws["A1"].font = Font(bold=True, size=18, color=WHITE)
+    ws["A1"].font = Font(bold=True, size=20, color=WHITE)  # matches IMPORT_HUB's banner size - HOME (26) is the only intentionally-larger one, as the primary entry point
     ws["A1"].fill = PatternFill("solid", fgColor=NAVY)
     ws["A1"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
-    ws.row_dimensions[1].height = 32
+    ws.row_dimensions[1].height = 30
 
     tile_specs = [
         ("B3", "Aktivní POS", "375623"),
@@ -1207,9 +1278,21 @@ def apply_all(wb, control_rows):
             color_editable_columns(ws, sheet_name)
             add_dropdowns(ws, sheet_name)
             continue
+        if sheet_name == "RAW_DATA":
+            # RAW_DATA's real header is row 2, not row 1 - see
+            # fix_raw_data_layout()'s docstring. Handled entirely there
+            # instead of the generic row-1-is-header helpers.
+            fix_raw_data_layout(ws)
+            continue
         style_header_row(ws)
         color_editable_columns(ws, sheet_name)
         add_dropdowns(ws, sheet_name)
+        if sheet_name in IMPORT_UTILITY_SHEETS:
+            # POS_STATUS_IMPORT/SALESAPP_IMPORT (RAW_DATA handled separately
+            # above) - found missing during a full production review: every
+            # other working screen had AutoFilter, these two didn't.
+            last_col = get_column_letter(ws.max_column or 16)
+            ws.auto_filter.ref = f"A1:{last_col}{max(ws.max_row, 2)}"
 
     for sheet_name in list(wb.sheetnames):
         protect_config_sheet(wb[sheet_name], sheet_name)
