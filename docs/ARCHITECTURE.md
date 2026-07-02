@@ -167,14 +167,16 @@ principle.
 | `mandatoryPodnik()` | **REFAKTORUJE SE** | Becomes one CADENCE_RULES entry (HARD, explicit-list scope); street+city dedup-by-best-PTT preserved as documented behaviour, not silently dropped |
 | PREMIUM top-20% (`groups[tech]` relative ranking) | **REFAKTORUJE SE — scope decision pending** | Mechanism kept, but PER_TECHNICIAN vs GLOBAL/PER_REGION scope is an open decision (BUSINESS_RULES.md §4) before finalizing PARETO_GROUPS |
 | `campaignChangeSoon()` | **REFAKTORUJE SE** | Kept as the seed of Campaign Economics, extended from single-week reorder to full rolling-horizon combine logic |
-| `addNearby()` (GPS EXTRA) | **REFAKTORUJE SE** | Core idea (over-capacity nearby bonus) preserved; capacity-overflow defect (BUSINESS_RULES.md §15a) fixed so selection never exceeds physical day slots |
-| `geoDays()` | **REFAKTORUJE SE** | Becomes the geo-clustering step of Route/Geo Engine; extended to buffer-pool-then-cluster (candidate pool 1.3×) rather than single-pass anchor+nearest |
+| `addNearby()` (GPS EXTRA) | **REFAKTORUJE SE — fix approved** | Core idea (over-capacity nearby bonus) preserved; capacity-overflow defect fixed so selection never exceeds physical day slots (confirmed by product owner) |
+| `geoDays()` | **REFAKTORUJE SE** | Becomes the geo-clustering step of Route/Geo Engine; extended to buffer-pool-then-cluster |
+| `CANDIDATE_POOL=1.3` (CONTROL setting) | **CORRECTION — dead config, not existing behaviour** | Earlier review incorrectly claimed this setting was already wired into GPS selection. Re-checked: `setting("CANDIDATE_POOL", ...)` is never called anywhere in the script. The buffer-pool-then-cluster mechanism for V11 is therefore **NOVĚ VZNIKÁ**, not a refactor of working code — it reuses the *name* of an unused config field, nothing more |
+| `ACTIVITY_PLAN.PRIORITY` / `.OVERRIDE_GAP` columns | **DEAD IN CODE — needs decision** | Both columns exist in the sheet but `activity[i][4]`/`[5]` are never read; only TYPE/ACTIVITY/START_WEEK/END_WEEK are used. Open question for product owner: were these an unfinished feature to complete, or should V11 design campaign priority/gap-override independently? |
 | `selectWeekPOS()` | **REFAKTORUJE SE** | Splits across Candidate Engine (eligibility) + Decision Engine (selection under capacity) instead of one function doing both |
 | `katCols[1]` positional KATEGORIZACE lookup | **ZAHAZUJE SE** | Fragility, not a business rule — replaced with `exactCol("KATEGORIZACE")` |
 | Single `main()` doing everything | **ZAHAZUJE SE** | Replaced by the five-engine pipeline (§4/§5); no behaviour lost, only structure |
 | GECO / CORN handling | **NOVĚ VZNIKÁ** | Did not exist in V10.5.5 at all |
 | Advisor Engine (all alert types) | **NOVĚ VZNIKÁ** | No equivalent in V10.5.5 |
-| Compliance Engine (plan vs. SalesApp actuals) | **NOVĚ VZNIKÁ** | V10.5.5 writes VISIT_HISTORY but never compares it back against what was planned |
+| Compliance Engine (plan vs. SalesApp actuals) | **NOVĚ VZNIKÁ — critical, not cosmetic** | V10.5.5 does not import SalesApp at all. `VISIT_HISTORY` is populated from the script's own generated `output`, i.e. it records what was *planned*, not what actually happened. Gap calculations (`lastVisit`) therefore drift from reality over time with no correction mechanism — Compliance Engine closes a real, currently-missing feedback loop, not just an enhancement |
 | POS_MASTER as persistent master record | **NOVĚ VZNIKÁ** | V10.5.5 recomputes everything from RAW_DATA each run; no persistent derived state |
 | SEASONAL_STRATEGY / SCORE_PROFILES | **NOVĚ VZNIKÁ** | Score today is one fixed formula, not swappable |
 | CAPACITY_OVERRIDE (dynamic capacity) | **NOVĚ VZNIKÁ** | V10.5.5 capacity is purely `workDays() × TARGET_DAY`, no manual override table |

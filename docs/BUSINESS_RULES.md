@@ -350,6 +350,31 @@ STATUS: CONFIRMED
 - PPT/PTT confirmed as a single field, embedded directly in RAW_DATA (`col("PTT")` fuzzy-matches
   the `PTT` header) — no separate PPT import exists in the current script.
 
+## 15b. Decisions confirmed by product owner (this round)
+
+1. `addNearby()` capacity-overflow defect — confirmed as a real bug, fix approved: GPS-extra
+   additions must respect weekly capacity, never silently discard POS.
+2. Positional `KATEGORIZACE` column lookup — confirmed to replace with exact-name lookup, to
+   minimize sensitivity to future export changes.
+3. GECO and CORN — confirmed as purely new V11 mechanisms; no V10.5.5 behaviour to preserve.
+4. CORE — confirmed to remain an **evolution** of the existing score-based mechanism (huge
+   additive weight, not a hard capacity reservation), reimplemented as a configurable
+   SCORE_PROFILES weight rather than a magic constant, not redesigned as a new concept.
+
+## 15c. Corrections to earlier design-session claims (found during deeper re-review)
+
+- The V11 GPS "buffer pool" design (select `capacity × multiplier`, then geo-cluster) was
+  earlier justified by claiming V10.5.5 already does this via `CANDIDATE_POOL=1.3`. **That claim
+  was wrong** — the setting exists in CONTROL but is never read by any code. The mechanism is a
+  new design for V11, not a preserved one; still recommended, but on its own merits.
+- `ACTIVITY_PLAN.PRIORITY` was earlier claimed to already work ("campaigns as a general concept
+  already function"). It does not — the column is dead in the current code. ★ OPEN: was this an
+  intentionally unfinished feature, or should priority/gap-override be designed fresh for V11?
+- VISIT_HISTORY does not currently reflect real-world visits at all — it is the script's own
+  planned output written back as if it were history, with no SalesApp import feeding it. This
+  elevates Compliance Engine from "nice addition" to "closes a real, currently-missing feedback
+  loop" — gap-based scoring today silently drifts from reality with no correction.
+
 ## 15. Summary of ★ OPEN items blocking full sign-off
 
 1. GECO scope + guarantee type
