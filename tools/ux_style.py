@@ -288,11 +288,14 @@ def _nav_button(ws, cell_ref, label, target_sheet, color=NAVY, width=None):
 
 
 def build_home(wb, real_control_values):
-    """A real app home screen, not a README sheet: status strip, big
-    numbered workflow cards with one-click navigation, a quick-nav button
-    row, and the color legend inline (not appended at the bottom in small
-    print) - built for someone opening this workbook for the first time to
-    understand what to do within 30 seconds."""
+    """A real app hub, not a README sheet: a live pipeline status strip
+    (each stage checks the actual workbook state - Import/Plan/Rozpis/
+    Publikace/Vyhodnocení/Dashboard - and shows Hotovo/Chybí with a
+    one-click link), a single "co dělat dál" callout that always points at
+    the first incomplete stage, KPI numbers, quick nav and the legend -
+    built for someone opening this workbook for the first time to
+    understand within 30 seconds where things stand and what to do next,
+    without reading any instructions first."""
     for old_name in ("START_HERE", "HOME"):
         if old_name in wb.sheetnames:
             del wb[old_name]
@@ -317,9 +320,113 @@ def build_home(wb, real_control_values):
     ws["A3"].alignment = Alignment(horizontal="left", vertical="center", indent=2)
     ws.row_dimensions[3].height = 20
 
+    # ---- Pipeline stages: each row's status (col G) is a LIVE formula that
+    # reads the actual sheet the stage produces/consumes, not a static
+    # instruction. Row numbers are fixed here so the "DALŠÍ KROK" callout
+    # above can reference them even though it's written first. ----
+    PIPE_FIRST_ROW = 10
+    stages = [
+        # (num, name, description, status formula, target sheet or None, color)
+        (
+            "1", "IMPORT DAT", "Nahraj export POS a SalesApp",
+            '=IF(COUNTA(POS_MASTER!A:A)>1,"✅ Hotovo","❌ Chybí")',
+            "RAW_DATA", "2E75B6",
+        ),
+        (
+            "2", "PLÁN KAMPANÍ", "Nastav kampaně v ACTIVITY_PLAN",
+            '=IF(COUNTA(ACTIVITY_PLAN!A:A)>1,"✅ Hotovo","❌ Chybí")',
+            "ACTIVITY_PLAN", "BF8F00",
+        ),
+        (
+            "3", "ROZPIS TECHNIKŮ", "Planning Engine vytvoří rozpis",
+            '=IF(COUNTA(MANAGER_PLAN!A:A)>1,"✅ Hotovo","❌ Chybí")',
+            "TECHNICIAN_PLAN", "375623",
+        ),
+        (
+            "4", "PUBLIKACE", "Publish Engine odešle plán technikům",
+            '=IF(COUNTIF(PLAN_LIFECYCLE!C:C,"Published")+COUNTIF(PLAN_LIFECYCLE!C:C,"Active")>0,"✅ Hotovo","❌ Chybí")',
+            None, "BF8F00",
+        ),
+        (
+            "5", "VYHODNOCENÍ", "Compliance + Advisor Engine porovná realitu s plánem",
+            '=IF(COUNTA(COMPLIANCE_LOG!A:A)>1,"✅ Hotovo","❌ Chybí")',
+            "DASHBOARD", "375623",
+        ),
+        (
+            "6", "DASHBOARD", "Sleduj plnění, KPI a upozornění",
+            '=IF(COUNTA(DASHBOARD!A5:A500)>0,"✅ Aktivní","⏳ Čeká na první běh")',
+            "DASHBOARD", "375623",
+        ),
+    ]
+    status_cells = [f"G{PIPE_FIRST_ROW + i}" for i in range(len(stages))]
+    step_labels = [
+        "1) Vlož export POS a SalesApp do RAW_DATA / POS_STATUS_IMPORT / SALESAPP_IMPORT a spusť Import Engine",
+        "2) Vytvoř nebo prodluž kampaň v ACTIVITY_PLAN",
+        "3) Spusť Planning Engine - vytvoří rozpis technikům",
+        "4) Publikuj plán (Publish Engine)",
+        "5) Spusť Compliance a Advisor Engine - vyhodnotí skutečné návštěvy proti plánu",
+    ]
+
+    # ---- "DALŠÍ KROK" callout: one live sentence, always the first
+    # incomplete pipeline stage - this is the answer to "what do I do now",
+    # not a checklist the user has to read themselves. ----
+    r = 5
+    ws.cell(r, 1, "DALŠÍ KROK").font = SECTION_FONT
+    r += 1
+    ws.merge_cells(f"A{r}:H{r+1}")
+    next_step_cell = ws.cell(r, 1)
+    ifs_args = []
+    for cell_ref, label in zip(status_cells, step_labels):
+        ifs_args.append(f'{cell_ref}="❌ Chybí"')
+        ifs_args.append(f'"{label}"')
+    next_step_cell.value = "=IFS(" + ",".join(ifs_args) + ',TRUE,"✅ Vše hotovo pro tento týden - sleduj plnění na DASHBOARD")'
+    next_step_cell.font = Font(bold=True, size=13, color=NAVY)
+    next_step_cell.fill = PatternFill("solid", fgColor="FFF2CC")
+    next_step_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1, wrap_text=True)
+    ws.row_dimensions[r].height = 20
+    ws.row_dimensions[r + 1].height = 20
+    ws.conditional_formatting.add(
+        next_step_cell.coordinate,
+        FormulaRule(formula=[f'LEFT({next_step_cell.coordinate},1)="✅"'], fill=PatternFill("solid", fgColor="E2EFDA")),
+    )
+    r += 3
+
+    # ---- Pipeline status strip ----
+    ws.cell(r, 1, "STAV PROCESU").font = TITLE_FONT
+    r += 1
+    assert r == PIPE_FIRST_ROW, "PIPE_FIRST_ROW must match the row this loop actually starts at"
+    green_fill = PatternFill("solid", fgColor="E2EFDA")
+    red_fill = PatternFill("solid", fgColor="FCE4D6")
+    for num, name, desc, status_formula, target, color in stages:
+        ws.cell(r, 1, num).font = Font(bold=True, size=16, color=WHITE)
+        ws.cell(r, 1).fill = PatternFill("solid", fgColor=color)
+        ws.cell(r, 1).alignment = Alignment(horizontal="center", vertical="center")
+        ws.merge_cells(f"B{r}:E{r}")
+        ws.cell(r, 2, f"{name} — {desc}").font = Font(size=11)
+        ws.cell(r, 2).alignment = Alignment(vertical="center")
+        status_cell = ws.cell(r, 7, status_formula)
+        status_cell.font = Font(bold=True, size=11)
+        status_cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.conditional_formatting.add(
+            status_cell.coordinate,
+            FormulaRule(formula=[f'LEFT({status_cell.coordinate},1)="✅"'], fill=green_fill),
+        )
+        ws.conditional_formatting.add(
+            status_cell.coordinate,
+            FormulaRule(formula=[f'LEFT({status_cell.coordinate},1)="❌"'], fill=red_fill),
+        )
+        if target:
+            _nav_button(ws, f"H{r}", "Otevřít →", target, color=color)
+        else:
+            ws.cell(r, 8, "⚙ Automatizace")
+            ws.cell(r, 8).font = Font(italic=True, size=10, color="808080")
+            ws.cell(r, 8).alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[r].height = 26
+        r += 1
+    r += 1
+
     # ---- Status strip (live formulas, campaign week from CONTROL, POS
     # count from POS_MASTER - stays accurate without any manual update) ----
-    r = 5
     ws.cell(r, 1, "TENTO TÝDEN").font = SECTION_FONT
     r += 1
     strip = [
@@ -333,37 +440,6 @@ def build_home(wb, real_control_values):
         ws[f"{col}{r+1}"] = formula
         ws[f"{col}{r+1}"].font = Font(bold=True, size=20, color=NAVY)
     r += 3
-
-    # ---- Workflow cards ----
-    ws.cell(r, 1, "CO DĚLAT TENTO TÝDEN").font = TITLE_FONT
-    r += 1
-    # target=None -> this step is a script action (Automate pane), not a
-    # sheet to navigate to; shown as a plain label instead of a self-linking
-    # (and therefore confusing) button.
-    steps = [
-        ("1", "Vlož nový export POS a SalesApp", "RAW_DATA", "2E75B6"),
-        ("2", "Spusť Import → Planning Engine", None, "2E75B6"),
-        ("3", "Zkontroluj a uprav rozpis technikům", "TECHNICIAN_PLAN", "375623"),
-        ("4", "Uprav konkrétní POS ručně, pokud je třeba", "POS_MASTER", "7030A0"),
-        ("5", "Publikuj týden (PublishEngine)", None, "BF8F00"),
-        ("6", "Sleduj plnění a upozornění", "DASHBOARD", "375623"),
-    ]
-    for num, text, target, color in steps:
-        ws.cell(r, 1, num).font = Font(bold=True, size=16, color=WHITE)
-        ws.cell(r, 1).fill = PatternFill("solid", fgColor=color)
-        ws.cell(r, 1).alignment = Alignment(horizontal="center", vertical="center")
-        ws.merge_cells(f"B{r}:F{r}")
-        ws.cell(r, 2, text).font = Font(size=12)
-        ws.cell(r, 2).alignment = Alignment(vertical="center")
-        if target:
-            _nav_button(ws, f"G{r}", "Otevřít →", target, color=color)
-        else:
-            ws.cell(r, 7, "⚙ Automatizace")
-            ws.cell(r, 7).font = Font(italic=True, size=10, color="808080")
-            ws.cell(r, 7).alignment = Alignment(horizontal="center", vertical="center")
-        ws.row_dimensions[r].height = 26
-        r += 1
-    r += 1
 
     # ---- Quick navigation ----
     ws.cell(r, 1, "RYCHLÁ NAVIGACE").font = TITLE_FONT
