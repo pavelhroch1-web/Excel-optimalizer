@@ -455,6 +455,24 @@ test("multiple failure statuses can be counted together", () => {
 test("empty input returns empty output, no crash", () => {
   assert.deepStrictEqual(computeFailureRateByGroup([], ["Nesplneno"]), []);
 });
+test("regression: undeduped repeated evaluations of the same visit dilute the rate - this is why callers must dedupe with latestByKey first (real bug found in AdvisorEngine.ts via end-to-end simulation)", () => {
+  // Same visit evaluated twice (Pending, then later Nesplneno) without dedup:
+  const undeduped = [
+    { group: "Novak", status: "Pending" },
+    { group: "Novak", status: "Nesplneno" },
+  ];
+  const wrongRate = computeFailureRateByGroup(undeduped, ["Nesplneno"])[0].rate;
+  assert.ok(Math.abs(wrongRate - 0.5) < 1e-9, "undeduped input understates the true 100% failure rate");
+
+  // Correct usage: dedupe to the latest evaluation per subject first.
+  const timestamped = [
+    { key: "Novak|POS1", timestamp: "2026-08-01T00:00:00Z", group: "Novak", status: "Pending" },
+    { key: "Novak|POS1", timestamp: "2026-08-08T00:00:00Z", group: "Novak", status: "Nesplneno" },
+  ];
+  const deduped = latestByKey(timestamped);
+  const correctRate = computeFailureRateByGroup(deduped, ["Nesplneno"])[0].rate;
+  assert.strictEqual(correctRate, 1);
+});
 
 // ==========================================================================
 console.log("latestByKey()");

@@ -383,6 +383,15 @@ export interface GroupFailureRate {
 // section 13) - same shape, different grouping key, so one implementation.
 // Rows with an empty group are skipped (e.g. "Navic_evidovano" rows with no
 // resolved technician - see ComplianceEngine.ts file header).
+//
+// CALLER RESPONSIBILITY: this function counts every row it is given. If the
+// source is an append-only log re-evaluated on every engine run (like
+// COMPLIANCE_LOG), the caller MUST dedupe to one row per logical subject
+// first (see latestByKey below) - otherwise re-running the upstream engine
+// repeatedly dilutes the computed rate. This exact bug shipped once in
+// AdvisorEngine.ts (found via end-to-end simulation, not unit tests, since
+// it only appears after the same week is evaluated more than once) - see
+// docs/ARCHITECTURE.md Phase 6 notes.
 export function computeFailureRateByGroup(
   rows: ComplianceOutcome[],
   failureStatuses: string[]

@@ -205,7 +205,12 @@ function main(workbook: ExcelScript.Workbook) {
       row(key, counts[key]);
     }
   } else {
-    row("(ADVISOR_LOG is empty - run Advisor Engine first)");
+    // Note this message is ambiguous by design: an empty ADVISOR_LOG means
+    // either "Advisor Engine has never run" or "it ran and found zero
+    // alerts" - the two are indistinguishable from this sheet alone (found
+    // during end-to-end simulation). Not worth a dedicated "last run" marker
+    // for this alone; worth revisiting if it causes real confusion.
+    row("(no alerts on record - run Advisor Engine if you have not yet)");
   }
 
   // ==========================================================================

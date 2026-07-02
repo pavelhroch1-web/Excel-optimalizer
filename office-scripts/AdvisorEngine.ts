@@ -98,6 +98,20 @@ function main(workbook: ExcelScript.Workbook) {
       rate: byGroup[group].failed / byGroup[group].total,
     }));
   }
+  interface TimestampedRow {
+    key: string;
+    timestamp: string; // ISO string, lexicographically comparable
+  }
+
+  function latestByKey<T extends TimestampedRow>(rows: T[]): T[] {
+    let latest: { [key: string]: T } = {};
+    for (const row of rows) {
+      if (!latest[row.key] || row.timestamp > latest[row.key].timestamp) {
+        latest[row.key] = row;
+      }
+    }
+    return Object.values(latest);
+  }
   // SYNC-BLOCK-END: core.ts (advisor)
 
   // ==========================================================================
@@ -188,34 +202,62 @@ function main(workbook: ExcelScript.Workbook) {
     const cHeaders = (complianceLog[0] as string[]).map((h) => String(h));
     const cidx = (name: string) => cHeaders.indexOf(name);
 
+    // COMPLIANCE_LOG is append-only - Compliance Engine re-evaluates every
+    // published planned visit on every run, so the same (posId, week, year)
+    // can have several rows over time (e.g. Pending, then later Nesplneno).
+    // Without deduping to the newest evaluation first, repeated weekly
+    // Compliance Engine runs would progressively dilute these rates (each
+    // re-run adds another row for the same visit), silently making
+    // TECHNICIAN_OVERLOAD/REGIONAL_UNDERPERFORMANCE *less* sensitive over
+    // time - the exact opposite of what an overload alert should do. Found
+    // during end-to-end simulation against real data (tools/sim/), not
+    // caught by unit tests alone since it only manifests after Compliance
+    // Engine runs more than once for the same week.
+    interface DedupRow extends TimestampedRow {
+      week: number;
+      year: number;
+      status: string;
+      tech: string;
+      posId: string;
+    }
+    let rawRows: DedupRow[] = [];
+    for (let i = 1; i < complianceLog.length; i++) {
+      const row = complianceLog[i];
+      const posId = String(row[cidx("posId")]);
+      const week = Number(row[cidx("plannedWeek")]);
+      const year = Number(row[cidx("plannedYear")]);
+      rawRows.push({
+        key: posId + "|" + week + "|" + year,
+        timestamp: String(row[cidx("evaluatedAt")]),
+        week,
+        year,
+        status: String(row[cidx("status")]),
+        tech: String(row[cidx("technician")]),
+        posId,
+      });
+    }
+    const dedupedRows = latestByKey(rawRows);
+
     let latestWeek = 0;
     let latestYear = 0;
-    for (let i = 1; i < complianceLog.length; i++) {
-      const w = Number(complianceLog[i][cidx("plannedWeek")]);
-      const y = Number(complianceLog[i][cidx("plannedYear")]);
-      if (y > latestYear || (y == latestYear && w > latestWeek)) {
-        latestWeek = w;
-        latestYear = y;
+    for (const r of dedupedRows) {
+      if (r.year > latestYear || (r.year == latestYear && r.week > latestWeek)) {
+        latestWeek = r.week;
+        latestYear = r.year;
       }
     }
 
     let techRows: ComplianceOutcome[] = [];
     let regionRows: ComplianceOutcome[] = [];
-    for (let i = 1; i < complianceLog.length; i++) {
-      const row = complianceLog[i];
-      const w = Number(row[cidx("plannedWeek")]);
-      const y = Number(row[cidx("plannedYear")]);
+    for (const r of dedupedRows) {
       // weeksBetween-equivalent inline (52-week approximation, same
       // documented simplification as core.ts's weeksBetween)
-      const withinWindow = latestWeek - w + (latestYear - y) * 52 < TREND_WINDOW;
+      const withinWindow = latestWeek - r.week + (latestYear - r.year) * 52 < TREND_WINDOW;
       if (!withinWindow) {
         continue;
       }
-      const status = String(row[cidx("status")]);
-      const tech = String(row[cidx("technician")]);
-      const posId = String(row[cidx("posId")]);
-      techRows.push({ group: tech, status });
-      regionRows.push({ group: posArea[posId] || "", status });
+      techRows.push({ group: r.tech, status: r.status });
+      regionRows.push({ group: posArea[r.posId] || "", status: r.status });
     }
 
     const techRates = computeFailureRateByGroup(techRows, ["Nesplneno"]);

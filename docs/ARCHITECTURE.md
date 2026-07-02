@@ -251,6 +251,30 @@ principle.
   including a monotonic-time edge case found by exhaustive case enumeration during review: once
   a week reaches Active it must never regress to Published).
 
+## 13b. End-to-end verification (Phase 6 follow-up)
+
+Built `tools/sim/` - a harness that compiles and runs the real engine source
+files against a mock `ExcelScript.Workbook` seeded from real production data
+(`RAW_DATA`: 11,605 POS, 27 technicians), chaining engines exactly as a
+manager would in Excel: Import -> Planning -> Publish -> Compliance ->
+Advisor -> Reporting. Confirmed:
+- The full pipeline runs cleanly end-to-end from a fresh workbook with no
+  manual intervention, including graceful no-op handling at every stage
+  when upstream data (e.g. SalesApp) isn't present yet.
+- Output matches known real V10.5.5 production output for a spot-checked
+  row (POS 81902616 / Myslivec Jan / week 31 / PPT 369174.88).
+- Multi-run simulation (two sequential Compliance Engine runs, one week
+  apart) confirmed Plan Lifecycle correctly advances Published -> Closed
+  once all planned visits resolve, and caught a real bug: **AdvisorEngine.ts
+  computed technician/region failure rates from undeduplicated
+  COMPLIANCE_LOG rows**, which would have silently diluted overload
+  detection more with every weekly Compliance Engine run in real operation.
+  Fixed (dedupe via `latestByKey` before rate calculation, matching
+  `ReportingEngine.ts`'s existing correct pattern) and covered by a
+  regression test. This is exactly the class of bug unit tests of
+  individually-correct pure functions cannot catch - it only appears when
+  multiple runs are chained, which is what `tools/sim/` is for.
+
 ## 14. Next step
 
 Implementation begins engine-by-engine per the migration plan (§12), starting with Phase 0 once
