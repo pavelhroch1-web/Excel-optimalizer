@@ -16,6 +16,26 @@ Workbook (`FieldForceOptimizer_V11_scaffold.xlsx` nebo jeho aktuální kopie)
 musí být uložený na OneDrive/SharePoint a otevřený v **Excelu na webu**
 (office.com), ne v desktopové aplikaci — Office Scripts běží jen tam.
 
+## Jednorázové nastavení: tlačítko pro každý skript (doporučeno, ~2 min/skript)
+
+Bez tohohle musíš pokaždé jít do Automatizace, najít skript a dát Spustit.
+S tlačítkem stačí jeden klik přímo v listu. Udělej to jednou, pro každý
+skript zvlášť:
+
+1. Automatizace → otevři konkrétní skript (např. "Import Engine").
+2. V horní liště editoru skriptu najdi **"..."** (tři tečky) nebo přímo
+   ikonu **"Přidat tlačítko"** (Add button), obvykle vedle tlačítka
+   "Spustit".
+3. Klikni na ni — Excel vloží do aktuálně otevřeného listu tlačítko
+   navázané na tenhle skript. Přesuň ho třeba do `IMPORT_HUB`, vedle
+   popisu příslušného kroku.
+4. Zopakuj pro `PlanningEngine.ts`, `PublishEngine.ts` (a později
+   `ComplianceEngine.ts`, `AdvisorEngine.ts`, `ReportingEngine.ts`).
+
+Tohle nejde předpřipravit v souboru zvenčí (je to servisní vazba, kterou
+umí vytvořit jen Excel Online interaktivně), ale jde to udělat jen jednou
+— tlačítko zůstává v listu napořád.
+
 ## Týdenní rituál, krok za krokem
 
 ### 1. Import dat o POS/terminálech (NENÍ SalesApp — to přijde až v kroku 5)
