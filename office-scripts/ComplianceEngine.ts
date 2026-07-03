@@ -9,10 +9,16 @@
 //   - Parses SalesApp: UID, Date, State, Store UID, Executor (all unambiguous,
 //     explicitly-named columns - see the file header note on what was
 //     deliberately NOT attempted).
-//   - Realized visit = State in {Completed, Finalized} (~99.7% of rows in the
-//     real export; Suspended/InProgress excluded as not-yet-completed - a
-//     stated assumption, not a guess about column meaning, flagged for
-//     correction if wrong).
+//   - Realized visit = State in {Completed, Finalized} AND the
+//     "Ucel navstevy - Technik - MCHD - Nabeh kampane" column = "Ano" -
+//     confirmed by product owner: a Completed/Finalized SalesApp row for any
+//     OTHER visit purpose (restocking, lottery ticket pickup, etc.) is real
+//     but is not evidence a planned campaign visit happened, and is ignored
+//     entirely - not matched to a plan, not logged as Navic_evidovano either
+//     (explicit product-owner instruction: "ignorovat uplne"). The State
+//     filter alone (~99.7% of rows in the real export; Suspended/InProgress
+//     excluded as not-yet-completed) is still applied first - a Finalized
+//     campaign-purpose row is what counts, both conditions together.
 //   - Appends to VISIT_HISTORY_ACTUAL, deduplicated by SalesApp UID (safe to
 //     re-import overlapping weekly exports).
 //   - Matches actual visits to MANAGER_PLAN rows by POS + week (Store UID =
@@ -33,13 +39,16 @@
 //
 // DELIBERATELY NOT IN THIS VERSION (see docs/BUSINESS_RULES.md and the
 // conversation record for why):
-//   - Which LOS/LOT campaign/product a visit serviced. The SalesApp export
-//     has no reliable structured column for this (checked all 37 columns -
-//     campaign names only appear in inconsistent free-text notes). A
-//     candidate design (derive it from ACTIVITY_PLAN's week-based schedule
-//     crossed with the "Nabeh kampane" Ano/Ne signal) is proposed but NOT
-//     implemented pending product-owner confirmation, since it is a business
-//     interpretation of ambiguous data, not a technical detail.
+//   - WHICH specific LOS/LOT campaign/product a visit serviced - this version
+//     only knows THAT a visit was a campaign visit (the "Nabeh kampane" = Ano
+//     signal, confirmed and implemented above), not which LOS/LOT was
+//     serviced. The SalesApp export has no reliable structured column for
+//     that finer breakdown (checked all 37 columns - campaign names only
+//     appear in inconsistent free-text notes). A candidate design (derive it
+//     from ACTIVITY_PLAN's week-based schedule crossed with the same "Nabeh
+//     kampane" signal) is proposed but NOT implemented pending product-owner
+//     confirmation, since it is a further business interpretation of
+//     ambiguous data, not a technical detail.
 //   - "Navic evidovano" (extra visit) attribution to a specific technician -
 //     logged with the raw SalesApp Executor string as-is, not resolved to a
 //     POS_MASTER technician identity.
@@ -266,6 +275,17 @@ function main(workbook: ExcelScript.Workbook) {
   const cState = saIdx("STATE");
   const cStoreUID = saIdx("STORE UID");
   const cExecutor = saIdx("EXECUTOR");
+  // "Ucel navstevy - Technik - MCHD - Nabeh kampane" (Ano/blank) - the only
+  // structured signal in SalesApp for "this specific visit serviced the
+  // campaign", confirmed by product owner. Matched by stripping ALL
+  // whitespace from both sides instead of exact equality, since the real
+  // export's header has an irregular double space ("navstevy -  Technik")
+  // that would break a naive exact match if a future export normalizes it
+  // to a single space.
+  const noSpace = (v: string) => v.replace(/\s+/g, "");
+  const cCampaignPurpose = saHeaders.findIndex(
+    (h) => noSpace(h).includes("MCHD") && noSpace(h).includes("NABEHKAMPANE")
+  );
 
   const knownUids = new Set<string>();
   for (let i = 1; i < visitHistoryActual.length; i++) {
@@ -301,9 +321,23 @@ function main(workbook: ExcelScript.Workbook) {
       continue;
     }
     const { week, year } = isoWeekNumber(date);
+    // latestKnownWeek/Year (the "now" proxy - see determineComplianceStatus's
+    // file-header comment) is updated from every realized (Completed/
+    // Finalized) row regardless of visit purpose, so a week with no campaign
+    // visits at all still advances "now" correctly - only which visits count
+    // toward compliance below is purpose-gated, not the freshness clock.
     if (year > latestYear || (year == latestYear && week > latestWeek)) {
       latestWeek = week;
       latestYear = year;
+    }
+    // Only a "MCHD - Nabeh kampane" = Ano row is a realized CAMPAIGN visit -
+    // confirmed by product owner. A Completed/Finalized visit for any other
+    // purpose (restocking, lottery ticket pickup, etc.) is a real SalesApp
+    // event but not evidence the planned campaign visit happened, and is not
+    // logged at all here - not as a compliance match, not as Navic_evidovano
+    // (confirmed: "ignorovat uplne", not "pocitat jako Navic_evidovano").
+    if (cCampaignPurpose == -1 || norm(String(row[cCampaignPurpose])) != "ANO") {
+      continue;
     }
     newVisits.push({
       posId: String(row[cStoreUID]),

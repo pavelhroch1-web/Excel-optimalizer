@@ -247,12 +247,20 @@ def main(ref_path, out_path):
 
     # SALESAPP_IMPORT (staging - paste the weekly SalesApp export here; header
     # row matches the real export format so column-name lookup in
-    # ComplianceEngine.ts works regardless of export column order/extras)
+    # ComplianceEngine.ts works regardless of export column order/extras.
+    # "Ucel navstevy - Technik - MCHD - Nabeh kampane" (Ano/blank) is included
+    # deliberately, not just the identity columns: ComplianceEngine.ts only
+    # counts a Completed/Finalized row as a realized CAMPAIGN visit when this
+    # column is Ano - confirmed by product owner. Column order/extras beyond
+    # what's listed here don't matter (paste the full real export as-is), but
+    # this specific column must be present with this name for compliance
+    # matching to work at all.)
     write_table(
         dst_wb, "SALESAPP_IMPORT",
         ["UID", "Date", "State", "Started at", "Finished at", "Real duration (h)",
          "Chain UID", "Chain", "Store UID", "Store", "Store address",
-         "Agency region", "Executor UID", "Executor"],
+         "Agency region", "Executor UID", "Executor",
+         "Účel návštevy -  Technik - MCHD - Náběh kampaně"],
         [],
     )
 

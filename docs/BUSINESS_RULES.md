@@ -324,17 +324,33 @@ workbook has no live clock). This is bookkeeping needed to implement the four na
 correctly, not a fifth business outcome exposed to the manager.
 STATUS: CONFIRMED (implementation necessity)
 
-**RULE: Campaign/product attribution per visit — BLOCKED on input data**
-The SalesApp export was checked column-by-column (37 columns) for a structured field naming which
+**RULE: "Was this a campaign visit at all" — CONFIRMED and implemented**
+A SalesApp row counts as a realized campaign visit for compliance purposes ONLY when its
+`Účel návštevy -  Technik - MCHD - Náběh kampaně` column is `Ano`, in addition to `State` being
+Completed/Finalized. A Completed/Finalized row for any other visit purpose (restocking, lottery
+ticket pickup, etc.) is real but is not evidence a planned campaign visit happened — it is ignored
+entirely: not matched to `MANAGER_PLAN_PUBLISHED`, not logged as `Navic_evidovano` either
+(explicit product-owner instruction: "ignorovat úplně", not "počítat jako Navic_evidovano").
+Implemented in `ComplianceEngine.ts`'s SalesApp-parsing loop (matched by stripping whitespace from
+the header name, since the real export's header has an irregular double space). Verified against a
+real uploaded SalesApp export (7690 Completed/Finalized rows, 3316 of them `Nabeh kampane = Ano`)
+via `tools/sim/run_e2e.ts` — `ComplianceEngine.ts` produced exactly 3316 realized visits, matching
+an independent count computed directly from the source file.
+STATUS: CONFIRMED (product owner, 2026-07-03)
+
+**RULE: WHICH specific LOS/LOT campaign/product a visit serviced — still BLOCKED on input data**
+The rule above confirms only THAT a visit was a campaign visit, not WHICH LOS/LOT it serviced. The
+SalesApp export was checked column-by-column (37 columns) for a structured field naming which
 LOS/LOT campaign a visit serviced. None exists — campaign names appear only in inconsistent free-
 text notes (`OZ - Ostatní (do textu)`, `Technik/OZ - Poznámka`), which cannot be parsed reliably
 without guessing. Proposed (not implemented) robust alternative: derive the serviced campaign from
-`ACTIVITY_PLAN`'s week-based schedule, crossed with the `Nabeh kampane` (Ano/Ne) signal — i.e. "a
-Nabeh-kampane=Ano visit in week W serviced whatever LOS/LOT was active per ACTIVITY_PLAN in week
-W." This is a business interpretation of ambiguous data, not a technical detail — needs explicit
-product-owner sign-off before implementing.
+`ACTIVITY_PLAN`'s week-based schedule, crossed with the same `Nabeh kampane` (Ano/Ne) signal —
+i.e. "a Nabeh-kampane=Ano visit in week W serviced whatever LOS/LOT was active per ACTIVITY_PLAN in
+week W." This is a further business interpretation of ambiguous data, not a technical detail —
+needs explicit product-owner sign-off before implementing.
 STATUS: ★ OPEN — blocks per-POS LOS/LOT compliance breakdown specifically; does NOT block basic
-plan-vs-actual compliance (Splneno/pozde/Nesplneno/Navic), which only needs POS+week matching.
+plan-vs-actual compliance (Splneno/pozde/Nesplneno/Navic), which now correctly uses the
+Nabeh-kampane=Ano gating above for POS+week matching.
 
 **RULE: Compliance aggregation**
 ACTION: rolled up by week, month, per technician, and network-wide; feeds Advisor Engine trend

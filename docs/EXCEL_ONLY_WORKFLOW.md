@@ -18,10 +18,14 @@ musí být uložený na OneDrive/SharePoint a otevřený v **Excelu na webu**
 
 ## Týdenní rituál, krok za krokem
 
-### 1. Import dat ze SalesApp
+### 1. Import dat o POS/terminálech (NENÍ SalesApp — to přijde až v kroku 5)
 
-1. Vlož čerstvý export ze SalesApp do listu `RAW_DATA` (přepiš celý obsah,
-   včetně hlavičkového řádku na řádku 2).
+`RAW_DATA` je export **seznamu POS/terminálů** (odjinud, ne ze SalesApp) —
+GPS, kategorie, přiřazený technik atd. SalesApp export (návštěvy) sem
+nepatří, ten jde až do `SALESAPP_IMPORT` v kroku 5.
+
+1. Vlož čerstvý export POS/terminálů do listu `RAW_DATA` (přepiš celý
+   obsah, včetně hlavičkového řádku na řádku 2).
 2. Pokud máš seznam uzavřených/otevřených POS, vlož ho do
    `POS_STATUS_IMPORT`.
 3. Karta **Automatizace** (Automate) → otevři/vytvoř skript → vlož **celý**
@@ -64,8 +68,16 @@ jedním kliknutím — v čistě-Excelové variantě ji děláš takhle.
 
 ### 5. Vyhodnocení skutečných návštěv (další cyklus)
 
-1. Nový export ze SalesApp → list `SALESAPP_IMPORT`.
-2. Automatizace → `office-scripts/ComplianceEngine.ts` → Spustit. Porovná
+1. Nový export **návštěv ze SalesApp** (soubor typu "Visit Data", jeden
+   řádek = jedna návštěva) → list `SALESAPP_IMPORT`, přepiš od řádku 1
+   (hlavička je na řádku 1 zde, ne na řádku 2 jako u RAW_DATA). Vlož ho
+   celý, včetně sloupce **"Účel návštevy - Technik - MCHD - Náběh
+   kampaně"** — bez něj Compliance Engine nepozná, které návštěvy se
+   počítají jako splněná kampaňová návštěva.
+2. Automatizace → `office-scripts/ComplianceEngine.ts` → Spustit. Počítá
+   jako splněnou návštěvu jen řádek se stavem Completed/Finalized **a**
+   "MCHD - Náběh kampaně" = Ano — jiné návštěvy (zásobování, stahování
+   losů…) se ignorují úplně, i když v SalesApp reálně proběhly. Porovná
    se jen proti `MANAGER_PLAN_PUBLISHED` (nikdy proti Draft), posune
    `PLAN_LIFECYCLE` (Published → Active → Closed), doplní `POS_MASTER`.
 3. Automatizace → `office-scripts/AdvisorEngine.ts` → Spustit — diagnostická
