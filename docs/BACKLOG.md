@@ -8,16 +8,24 @@ they aren't lost.
   PlanningEngine.ts keeps every Published/Active/Closed week forever (by
   design - locked weeks must never be silently dropped), but nothing ever
   removes old Closed weeks either. At ~1200 rows/week this reaches tens of
-  thousands of rows within a year. Directly affects TECHNICIAN_PLAN's live
-  formula view (tools/ux_style.py build_technician_plan), which uses a
-  static 3000-row cap - fine today, will eventually need either a much
-  higher cap or (better) an actual archival strategy for MANAGER_PLAN
-  itself, consistent with the same open question already flagged for
-  VISIT_HISTORY/SCORE_LOG in docs/ARCHITECTURE.md section 11.
-- TECHNICIAN_PLAN shows the full Draft+Published picture (everything
-  currently in MANAGER_PLAN). Once the archival strategy above exists, it
-  should probably also gain a "only show this week + N upcoming" filter so
-  it doesn't slowly fill with irrelevant historical rows - not needed yet
+  thousands of rows within a year. TECHNICIAN_PLAN (redesigned 2026-07-06
+  as TOUR PLAN - a per-technician, whole-campaign FILTER() view, not a
+  flat mirror) reads the FULL MANAGER_PLAN range on every FILTER() call
+  regardless of how large it gets, so this growth still matters for that
+  sheet's formula performance even though the visible row cap (260,
+  sized for one technician's one campaign) is no longer the constraint it
+  used to be - will eventually need an actual archival strategy for
+  MANAGER_PLAN itself, consistent with the same open question already
+  flagged for VISIT_HISTORY/SCORE_LOG in docs/ARCHITECTURE.md section 11.
+- TECHNICIAN_PLAN (TOUR PLAN) shows every week currently in MANAGER_PLAN
+  for the selected technician (Draft included) - correct today since
+  PlanningEngine.ts only ever keeps one campaign's worth of upcoming
+  Draft/Published/Active weeks live, but once the archival strategy above
+  exists and MANAGER_PLAN could carry multiple campaigns' worth of
+  history, this view would need an explicit "current campaign only"
+  bound (e.g. WEEK BETWEEN CONTROL.CAMPAIGN_START_WEEK AND
+  CAMPAIGN_START_WEEK+CAMPAIGN_LENGTH-1) rather than "everything for this
+  technician" - not needed yet
   since MANAGER_PLAN itself doesn't grow that large in normal short-term use.
 
 ## Advisor Engine follow-ups (not blocking, tracked for later)

@@ -70,21 +70,24 @@ nepatří, ten jde až do `SALESAPP_IMPORT` v kroku 5.
 2. Publikuje se vždy jen **nejbližší** Draft týden (ne všechny najednou).
    Zkontroluj `PLAN_LIFECYCLE` — daný týden má teď status `Published`.
 
-### 4. Rozeslání publikovaného týdne technikům (ruční, bez appky)
+### 4. Rozeslání TOUR PLANu technikům (list `TECHNICIAN_PLAN`)
 
-List `TECHNICIAN_PLAN` má živé vzorce a AutoFilter na sloupci `TECHNIK`:
+List `TECHNICIAN_PLAN` je od 2026-07-06 filtrovaný pohled (dropdown výběr
+technika), ne syrová tabulka — žádné ruční AutoFilter/copy-paste. Zobrazí
+rovnou celou aktuální kampaň (všechny týdny v `MANAGER_PLAN`, seskupené po
+týdnech), přesně to, co se technikovi reálně posílá cca jednou za kampaň:
 
-1. Otevři `TECHNICIAN_PLAN` (přepočet vzorců proběhne automaticky, jsi v
-   Excelu).
-2. AutoFilter → vyber jednoho technika.
-3. Vyber viditelné řádky → zkopíruj → vlož do nového sešitu (jen hodnoty),
-   nebo File → Print → vyber rozsah → Export do PDF.
-4. Pojmenuj soubor stejnou konvencí jako appka:
-   `<Technik>_<Rok>_W<Tyden>.xlsx` (nebo `.pdf`), např. `Novak_2026_W32.pdf`.
-5. Zopakuj pro každého technika, nebo pošli screenshot/PDF podle zvyklostí.
+1. Otevři `TECHNICIAN_PLAN`.
+2. V dropdownu "TECHNIK" vyber technika — trasa na celou kampaň se hned
+   zobrazí (živé vzorce, žádné čekání na engine).
+3. File → Print, nebo File → Export → Vytvořit PDF/XPS dokument. Tiskové
+   nastavení (na šířku, přizpůsobit šířce stránky, opakovat záhlaví) je
+   už přednastavené.
+4. Zopakuj pro každého technika (přepni dropdown, znovu Print/Export).
 
 Tohle je přesně ta ruční práce, kterou `desktop_client/` (V1, export) dělá
-jedním kliknutím — v čistě-Excelové variantě ji děláš takhle.
+jedním kliknutím — v čistě-Excelové variantě je teď stejně rychlá (jeden
+dropdown + Print), bez appky.
 
 ### 5. Vyhodnocení skutečných návštěv (další cyklus)
 

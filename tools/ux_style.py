@@ -130,7 +130,7 @@ ENGINE_WRITABLE = {
 # filter dropdowns and PERFORMANCE's Table sort/filter were being silently
 # disabled by real Excel sheet protection, defeating the entire point of
 # building them as native, interactive Excel elements.
-INTERACTIVE_DASHBOARD_SHEETS = {"TECHNICIAN_SCORECARD", "PERFORMANCE", "WEEK_DASHBOARD"}
+INTERACTIVE_DASHBOARD_SHEETS = {"TECHNICIAN_SCORECARD", "PERFORMANCE", "WEEK_DASHBOARD", "TECHNICIAN_PLAN"}
 
 # Per-sheet: which columns (by header name) are meant for manual editing.
 # Everything else on that sheet is shown as system/read-only styling.
@@ -1532,114 +1532,191 @@ def redesign_activity_plan(wb, tech_column_letter):
     ws.freeze_panes = "C2"
 
 
-def build_technician_plan(wb, n_rows=3000, pos_master_notes_col="AK"):
-    """This is exactly what a technician gets - almost nothing else. No
-    internal category code, no POS_AREA, no system REASON tag: just what's
-    needed to go do the visit, in print/export order (TYDEN/week number is
-    included - product owner confirmed it's important for them, 2026-07-03
-    - unlike the other omissions above, which stay deliberately excluded).
-    Pure
-    live-formula view (no engine change): stays in sync automatically
+def build_technician_plan(wb, n_rows=260, pos_master_notes_col="AK", pos_master_last_visit_col="X"):
+    """TOUR PLAN: the document actually sent to a technician roughly once
+    per campaign (~4 weeks) - pick a technician, see their ENTIRE campaign
+    route (every week currently in MANAGER_PLAN, Draft included, grouped by
+    week) in one place, ready to print or export to PDF. Excel's native
+    Print/Export-to-PDF always operates on the sheet's current state, and
+    the current state IS already that technician's whole campaign once the
+    one dropdown is set - so "select technician, then File > Print" is the
+    entire delivery workflow (product owner, 2026-07-06: this replaces the
+    weekly manual AutoFilter+copy-paste process documented in
+    docs/EXCEL_ONLY_WORKFLOW.md step 4, and must show the full campaign a
+    technician is actually sent, not a single week at a time).
+
+    This is a VIEW over what PlanningEngine.ts already decided, not a
+    second planning pass - the planning logic (PPT/cadence/scoring/GPS
+    clustering) already ran and is baked into MANAGER_PLAN's rows; nothing
+    here re-derives it. The one piece of decision-relevant HISTORY this
+    view adds beyond MANAGER_PLAN's own columns is POSLEDNÍ NÁVŠTĚVA (POS_MASTER.lastRealVisitDate)
+    - "when were you last actually here" - product owner's explicit pick
+    among several candidate context fields (2026-07-06), the others
+    (PPT, a human-readable REASON, per-POS compliance) deliberately not
+    added this round.
+
+    No internal category code, no POS_AREA, no system REASON tag beyond
+    that (TYDEN/week number is included - product owner confirmed it's
+    important for them, 2026-07-03).
+
+    Pure live-formula view (no engine change): stays in sync automatically
     whenever Planning Engine regenerates MANAGER_PLAN, including Draft
-    weeks, so the manager sees the full upcoming picture, not just what's
-    already Published.
+    weeks, so a technician's plan is visible even before publish.
+
+    DESIGN: a single hidden FILTER() spill (column R) pulls every matching
+    technician row straight out of MANAGER_PLAN (A:Q, sorted by WEEK then
+    DATE) in one pass; the visible columns are then simple per-row
+    INDEX(spill, row, col) lookups plus the same light transforms the
+    previous flat view already had (DEN Czech translation, ČÍSLO
+    TERMINÁLU/POZNÁMKA/POSLEDNÍ NÁVŠTĚVA lookups into POS_MASTER, AKTIVITA
+    = LOS+LOT concat) - not a second per-column FILTER(), which would have
+    needed FILTER() to wrap a transform expression (SWITCH/VLOOKUP) rather
+    than a plain range; this two-stage shape keeps every visible formula
+    simple and independently correct-or-blank via IFERROR, rather than one
+    large nested expression.
 
     MANAGER_PLAN column layout this reads from (fixed, see
     scaffold_workbook.py): A=WEEK, B=DATE, C=DAY, D=TECHNICIAN, E=POS,
     F=KATEGORIE, G=NAZEV_PROVOZOVNY, H=ULICE, I=CISLO, J=MESTO, K=OBLAST,
     L=POS_AREA, M=PPT, N=LOS_ACTIVITY, O=LOT_ACTIVITY, P=REASON, Q=GPS_GROUP.
-    AKTIVITA combines N+O (a POS can carry both a LOS and a LOT campaign in
-    the same week). POZNÁMKA is NOT column P (REASON is an internal
-    cadence-engine tag, e.g. "CORE cadence due" - not something a
-    technician needs) - it's a live lookup of POS_MASTER.plannerNotes, the
-    actual manager-written note for that POS.
 
-    n_rows=3000 note: PlanningEngine.ts keeps every Published/Active/Closed
-    week in MANAGER_PLAN forever (never trims old weeks), so this static
-    row cap (~2.5 weeks of typical volume at ~1200 rows/week) is a real
-    limitation once the workbook has been in weekly use for a while, not
-    just a formatting choice - flagged in docs/BACKLOG.md as a follow-up
-    (either raise the cap, or - better - give MANAGER_PLAN an actual
-    archival strategy, which was already a known future need for exactly
-    this reason)."""
+    n_rows=200 note: bounded to comfortably cover one technician's WHOLE
+    campaign (CAMPAIGN_LENGTH weeks, default 4, times VISITS_PER_WEEK
+    default capacity plus GPS-bonus headroom - well under 200 in practice).
+    Print area is sized to n_rows, not to the actual match count (openpyxl
+    can't know that at build time) - a technician with fewer visits prints
+    some trailing blank-but-bordered rows rather than a perfectly trimmed
+    page; a known, accepted imperfection, not a silent gap."""
+    TP = "MANAGER_PLAN"
     if "TECHNICIAN_PLAN" in wb.sheetnames:
         del wb["TECHNICIAN_PLAN"]
     ws = wb.create_sheet("TECHNICIAN_PLAN")
+    ws.sheet_view.showGridLines = False
+    for col in "CDEFGHIJKLMN":
+        ws.column_dimensions[col].width = 14
+    ws.column_dimensions["C"].width = 8
+    build_nav_rail(ws, "TECHNICIAN_PLAN")
 
-    headers = [
-        "TYDEN", "DATUM", "DEN", "TECHNIK", "POS", "ČÍSLO TERMINÁLU", "NÁZEV PROVOZOVNY",
-        "ULICE", "MĚSTO", "OBLAST", "AKTIVITA", "POZNÁMKA",
-    ]
-    for i, h in enumerate(headers):
-        ws.cell(1, i + 1, h)
-
-    formulas = [
-        lambda r: f'=IF(MANAGER_PLAN!E{r}="","",MANAGER_PLAN!A{r})',  # TYDEN
-        lambda r: f'=IF($E{r}="","",MANAGER_PLAN!B{r})',  # DATUM
-        # DEN: dates.ts's workDays() names Monday-Friday as MON/TUE/WED/THU/FRI
-        # (English abbreviations, fine for an internal sheet like MANAGER_PLAN)
-        # - translated to Czech here since this sheet is what a technician
-        # actually reads. SWITCH falls back to the raw value for anything
-        # unexpected rather than showing blank, so a format change upstream
-        # fails loud, not silent.
-        lambda r: (
-            f'=IF($E{r}="","",SWITCH(MANAGER_PLAN!C{r},'
-            f'"MON","Pondělí","TUE","Úterý","WED","Středa","THU","Čtvrtek","FRI","Pátek",'
-            f'MANAGER_PLAN!C{r}))'
-        ),  # DEN
-        lambda r: f'=IF(MANAGER_PLAN!E{r}="","",MANAGER_PLAN!D{r})',  # TECHNIK
-        lambda r: f'=IF(MANAGER_PLAN!E{r}="","",MANAGER_PLAN!E{r})',  # POS
-        # ČÍSLO TERMINÁLU: live lookup of POS_MASTER.terminalId (column B) -
-        # product owner asked for the terminal number alongside the week
-        # number, 2026-07-03. NOTE: POS_MASTER currently stores exactly one
-        # terminalId per POS row - if a POS genuinely has 2 terminals (product
-        # owner confirmed this can happen), ImportEngine.ts's current
-        # one-RAW_DATA-row-per-POS_MASTER-row upsert doesn't yet represent
-        # that (flagged in docs/BACKLOG.md as a follow-up, not silently
-        # assumed away); this lookup shows whichever terminal that POS's
-        # single POS_MASTER row currently has.
-        lambda r: (
-            f'=IF($E{r}="","",IFERROR(VLOOKUP($E{r},POS_MASTER!$A:$B,2,FALSE),""))'
-        ),  # CISLO TERMINALU
-        lambda r: f'=IF($E{r}="","",MANAGER_PLAN!G{r})',  # NAZEV PROVOZOVNY
-        lambda r: f'=IF($E{r}="","",TRIM(MANAGER_PLAN!H{r}&" "&MANAGER_PLAN!I{r}))',  # ULICE (+ CISLO)
-        lambda r: f'=IF($E{r}="","",MANAGER_PLAN!J{r})',  # MESTO
-        lambda r: f'=IF($E{r}="","",MANAGER_PLAN!K{r})',  # OBLAST
-        lambda r: (
-            f'=IF($E{r}="","",TRIM(IF(MANAGER_PLAN!N{r}<>"","LOS: "&MANAGER_PLAN!N{r}&" ","")'
-            f'&IF(MANAGER_PLAN!O{r}<>"","LOT: "&MANAGER_PLAN!O{r},"")))'
-        ),  # AKTIVITA
-        lambda r: (
-            f'=IF($E{r}="","",IFERROR(VLOOKUP($E{r},POS_MASTER!$A:${pos_master_notes_col},'
-            f'{pos_master_notes_col_index(pos_master_notes_col)},FALSE),""))'
-        ),  # POZNAMKA (manager note from POS_MASTER, not the internal REASON tag)
-    ]
-    for r in range(2, n_rows + 1):
-        for i, formula_fn in enumerate(formulas):
-            ws.cell(r, i + 1, formula_fn(r))
-
-    for i, h in enumerate(headers):
-        width = 8 if h == "TYDEN" else 12 if h in ("DATUM", "DEN", "TECHNIK", "POS", "ČÍSLO TERMINÁLU") else 20
-        ws.column_dimensions[get_column_letter(i + 1)].width = width
-
-    ws.auto_filter.ref = f"A1:L{n_rows}"
-    apply_banded_rows(ws, 2, n_rows, len(headers))
-    # Highlight today's visits - the one row (or handful, one per technician)
-    # a technician actually needs when they open this sheet on the day
-    # itself, so they don't have to filter/scroll to find it.
-    ws.conditional_formatting.add(
-        f"A2:L{n_rows}",
-        FormulaRule(formula=["$B2=TODAY()"], fill=PatternFill("solid", fgColor="FFF2A6")),
+    build_dashboard_banner(
+        ws, "TOUR PLAN", "Vyber technika - celá kampaň, seskupená po týdnech, připravená k tisku nebo exportu do PDF",
+        col_start="C", col_end="N",
     )
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = "C4"
 
-    # Print-ready: this sheet is explicitly meant to be printed/exported per
-    # technician, not just viewed on screen.
+    # ==========================================================================
+    # HIDDEN FORMULA PLUMBING (columns R:S) - never shown to the user.
+    # ==========================================================================
+    HEADER_ROW = 8
+    DATA_FIRST_ROW = HEADER_ROW + 1
+    DATA_LAST_ROW = DATA_FIRST_ROW + n_rows - 1
+    ws["S1"] = "technici"
+    ws["S2"] = f'=IFERROR(SORT(UNIQUE(FILTER({TP}!$D$2:$D$3001,{TP}!$D$2:$D$3001<>""))),"Zatím žádná data")'
+    dashboard_ui.define_named_range(ws, "TourTechnicianList", "TECHNICIAN_PLAN!$S$2#")
+    # Raw matching MANAGER_PLAN rows (A:Q, all 17 columns) for the WHOLE
+    # campaign, sorted by WEEK then DATE - the single source every visible
+    # column below reads from.
+    ws[f"R{DATA_FIRST_ROW}"] = (
+        f'=IFERROR(SORT(FILTER({TP}!$A$2:$Q$3001,{TP}!$D$2:$D$3001=$D$5),{{1,2}},{{1,1}}),'
+        f'"Zatím žádné návštěvy pro tento výběr")'
+    )
+    for col in "RS":
+        ws.column_dimensions[col].hidden = True
+
+    # ==========================================================================
+    # FILTER BAR
+    # ==========================================================================
+    build_filter_bar_background(ws, 5, "C", "N")
+    build_filter_dropdown(ws, "C5", "TECHNIK", "D5:F5", "=TourTechnicianList",
+                           default_formula='=IFERROR(INDEX(TourTechnicianList,1),"")')
+    ws.merge_cells("G5:N5")
+    ws["G5"] = f'="Počet návštěv v kampani: "&IFERROR(ROWS($R${DATA_FIRST_ROW}#),0)'
+    ws["G5"].font = Font(italic=True, size=10, color="595959")
+    ws["G5"].alignment = Alignment(vertical="center", horizontal="right", indent=1)
+
+    # ==========================================================================
+    # VISIBLE TABLE - simple per-row lookups into the hidden spill above.
+    # ==========================================================================
+    headers = [
+        "TYDEN", "DATUM", "DEN", "POS", "ČÍSLO TERMINÁLU", "NÁZEV PROVOZOVNY",
+        "ULICE", "MĚSTO", "OBLAST", "AKTIVITA", "POSLEDNÍ NÁVŠTĚVA", "POZNÁMKA",
+    ]
+    for i, h in enumerate(headers):
+        col = get_column_letter(i + 3)  # starts at C
+        ws[f"{col}{HEADER_ROW}"] = h
+    for cell in ws[f"C{HEADER_ROW}:N{HEADER_ROW}"][0]:
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.row_dimensions[HEADER_ROW].height = 26
+
+    def staged(row, col_num):
+        return f'INDEX($R${DATA_FIRST_ROW}#,{row - DATA_FIRST_ROW + 1},{col_num})'
+
+    for r in range(DATA_FIRST_ROW, DATA_LAST_ROW + 1):
+        pos_cell = f"F{r}"
+        ws[f"C{r}"] = f'=IFERROR({staged(r, 1)},"")'   # TYDEN
+        ws[f"D{r}"] = f'=IFERROR({staged(r, 2)},"")'   # DATUM
+        ws[f"E{r}"] = (  # DEN - same MON->Pondělí translation as before
+            f'=IFERROR(SWITCH({staged(r, 3)},'
+            f'"MON","Pondělí","TUE","Úterý","WED","Středa","THU","Čtvrtek","FRI","Pátek",'
+            f'{staged(r, 3)}),"")'
+        )
+        ws[f"F{r}"] = f'=IFERROR({staged(r, 5)},"")'   # POS
+        ws[f"G{r}"] = (  # CISLO TERMINALU - see build_technician_plan docstring re: single-terminal-per-POS limitation
+            f'=IF({pos_cell}="","",IFERROR(VLOOKUP({pos_cell},POS_MASTER!$A:$B,2,FALSE),""))'
+        )
+        ws[f"H{r}"] = f'=IFERROR({staged(r, 7)},"")'   # NAZEV PROVOZOVNY
+        ws[f"I{r}"] = f'=IFERROR(TRIM({staged(r, 8)}&" "&{staged(r, 9)}),"")'  # ULICE (+ CISLO)
+        ws[f"J{r}"] = f'=IFERROR({staged(r, 10)},"")'  # MESTO
+        ws[f"K{r}"] = f'=IFERROR({staged(r, 11)},"")'  # OBLAST
+        ws[f"L{r}"] = (  # AKTIVITA = LOS + LOT concat
+            f'=IFERROR(TRIM(IF({staged(r, 14)}<>"","LOS: "&{staged(r, 14)}&" ","")'
+            f'&IF({staged(r, 15)}<>"","LOT: "&{staged(r, 15)},"")),"")'
+        )
+        ws[f"M{r}"] = (  # POSLEDNI NAVSTEVA - POS_MASTER.lastRealVisitDate, the one history field
+            f'=IF({pos_cell}="","",IFERROR(VLOOKUP({pos_cell},POS_MASTER!$A:${pos_master_last_visit_col},'
+            f'{pos_master_notes_col_index(pos_master_last_visit_col)},FALSE),"–"))'
+        )
+        ws[f"N{r}"] = (  # POZNAMKA - manager note from POS_MASTER, not the internal REASON tag
+            f'=IF({pos_cell}="","",IFERROR(VLOOKUP({pos_cell},POS_MASTER!$A:${pos_master_notes_col},'
+            f'{pos_master_notes_col_index(pos_master_notes_col)},FALSE),""))'
+        )
+        for col in "CDEFGHIJKLMN":
+            ws[f"{col}{r}"].border = CARD_BORDER
+
+    # ==========================================================================
+    # PRINT SETUP - "select technician, then File > Print / Export to PDF"
+    # is the one-click deliverable this was built for.
+    # ==========================================================================
+    ws.print_area = f"C1:N{DATA_LAST_ROW}"
+    ws.print_title_rows = f"{HEADER_ROW}:{HEADER_ROW}"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     ws.sheet_properties.pageSetUpPr.fitToPage = True
-    ws.print_title_rows = "1:1"
+    ws.print_options.gridLines = False
+
+    # Highlight today's visits - the one row (or handful) a technician
+    # actually needs when they open this sheet on the day itself, so they
+    # don't have to scroll through the whole campaign to find it.
+    ws.conditional_formatting.add(
+        f"C{DATA_FIRST_ROW}:N{DATA_LAST_ROW}",
+        FormulaRule(formula=[f"$D{DATA_FIRST_ROW}=TODAY()"], fill=PatternFill("solid", fgColor="FFF2A6")),
+    )
+    # Week-boundary cue: a bold top border whenever TYDEN changes from the
+    # row above - visually groups the whole-campaign list into per-week
+    # blocks without needing actual inserted rows (which a formula view
+    # can't do), per the product owner's "seskupený po týdnech" request
+    # (2026-07-06). Formula is anchored to the range's top-left cell with
+    # relative row references; Excel re-anchors it per row automatically.
+    week_start_side = Side(style="medium", color=NAVY)
+    ws.conditional_formatting.add(
+        f"C{DATA_FIRST_ROW + 1}:N{DATA_LAST_ROW}",
+        FormulaRule(
+            formula=[f'AND($C{DATA_FIRST_ROW + 1}<>"",$C{DATA_FIRST_ROW + 1}<>$C{DATA_FIRST_ROW})'],
+            border=Border(top=week_start_side),
+        ),
+    )
     return ws
 
 
@@ -1932,8 +2009,7 @@ def apply_all(wb, control_rows):
         if ws.max_row == 0 or ws.max_column == 0:
             continue
         if sheet_name == "TECHNICIAN_PLAN":
-            style_header_row(ws)  # header only - fill/dropdowns don't apply, it's a formula view
-            continue
+            continue  # build_technician_plan already fully styled it (TOUR PLAN)
         if sheet_name == "DASHBOARD":
             continue  # build_dashboard_template already fully styled it
         if sheet_name == "TECHNICIAN_SCORECARD":
