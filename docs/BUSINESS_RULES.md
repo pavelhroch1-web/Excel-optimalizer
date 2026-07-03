@@ -37,11 +37,19 @@ PRIORITY: Filters are gates, evaluated before any scoring — an excluded POS ne
 CONFIG SOURCE: TERMINAL_RULES, CATEGORY_RULES (with explicit default row — see §9), MARKET_RULES
 STATUS: CONFIRMED
 
-**RULE: New POS without history**
-CONDITION: `lastRealVisitDate IS NULL`
-ACTION: POS is an eligible candidate immediately; priority determined by other rules (Cadence,
-Pareto, PPT), not automatically boosted or suppressed
-STATUS: CONFIRMED
+**RULE: New POS without history = installed = visited today**
+CONDITION: a POS appears in RAW_DATA for the first time (no prior `POS_MASTER` row at all)
+ACTION: `ImportEngine.ts` sets `lastRealVisitDate` = import date, `lastRealVisitWeek` = import
+week, `weeksSinceLastVisit` = 0 - confirmed by product owner (2026-07-03): "jakmile se POS založí…
+oni to tam rovnou instalují, takže ten datum poslední návštěvy je když ho založíš" (installation
+counts as the first visit). Superseded the earlier version of this rule (`lastRealVisitDate IS
+NULL` for a new POS, left blank for Compliance Engine to fill later) - a brand-new POS is still an
+eligible candidate immediately either way, but now starts its cadence clock from install date
+instead of appearing to have "no history" (which read as more urgent/neglected than it actually
+is). An ALREADY-KNOWN POS keeps whatever `lastRealVisitDate`/`Week`/`weeksSinceLastVisit` it
+already has - `ImportEngine.ts` never touches these for existing POS; only `ComplianceEngine.ts`
+updates them once real SalesApp visit data exists.
+STATUS: CONFIRMED (product owner, 2026-07-03)
 
 **RULE: Closed POS**
 CONDITION: `status = Closed` — set SOLELY by absence from the current week's RAW_DATA import

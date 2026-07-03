@@ -185,6 +185,9 @@ function main(workbook: ExcelScript.Workbook) {
     closedSinceWeek: string | number;
     closedSinceYear: string | number;
     status: string;
+    lastRealVisitDate: string | number | Date;
+    lastRealVisitWeek: string | number;
+    weeksSinceLastVisit: string | number;
   }
   let existingByPos: { [pos: string]: ExistingManualFields } = {};
   for (let i = 1; i < masterExisting.length; i++) {
@@ -201,6 +204,13 @@ function main(workbook: ExcelScript.Workbook) {
       closedSinceWeek: row[mIdx("closedSinceWeek")] ?? "",
       closedSinceYear: row[mIdx("closedSinceYear")] ?? "",
       status: String(row[mIdx("status")] ?? "Active"),
+      // Preserved as-is once a POS exists - Compliance Engine owns these
+      // fields from here on (see ComplianceEngine.ts "UPDATE POS_MASTER
+      // last-visit fields"). Only a brand-new POS (no existing row at all)
+      // gets a default below.
+      lastRealVisitDate: (row[mIdx("lastRealVisitDate")] as string | number | Date) ?? "",
+      lastRealVisitWeek: row[mIdx("lastRealVisitWeek")] ?? "",
+      weeksSinceLastVisit: row[mIdx("weeksSinceLastVisit")] ?? "",
     };
   }
 
@@ -210,7 +220,7 @@ function main(workbook: ExcelScript.Workbook) {
 
   const now = new Date().toISOString();
   const posIdsInRawData: { [pos: string]: boolean } = {};
-  let outRows: (string | number)[][] = [];
+  let outRows: (string | number | Date)[][] = [];
 
   for (let i = 2; i < raw.length; i++) {
     const r = raw[i];
@@ -228,6 +238,17 @@ function main(workbook: ExcelScript.Workbook) {
     const posStatus = "Active";
     const closedSinceWeek: string | number = "";
     const closedSinceYear: string | number = "";
+
+    // lastRealVisitDate/Week/weeksSinceLastVisit: a brand-new POS (never
+    // seen in POS_MASTER before) is installed the day it's imported, and
+    // product owner confirmed that installation counts as the first visit
+    // - so it starts at "visited today" (weeksSinceLastVisit = 0), not
+    // unknown/blank. An already-known POS keeps whatever value it already
+    // has untouched - only Compliance Engine updates these once a POS has
+    // a real visit history (see ComplianceEngine.ts).
+    const lastRealVisitDate = existing ? existing.lastRealVisitDate : today;
+    const lastRealVisitWeek = existing ? existing.lastRealVisitWeek : todayWeek;
+    const weeksSinceLastVisit = existing ? existing.weeksSinceLastVisit : 0;
 
     outRows.push([
       posId, // posId
@@ -250,7 +271,7 @@ function main(workbook: ExcelScript.Workbook) {
       closedSinceWeek, // closedSinceWeek
       closedSinceYear, // closedSinceYear
       "", "", "", "", // currentLos/currentLot/targetLos/targetLot - Planning Engine fills these
-      "", "", "", "", 0, // visit facts - Compliance Engine fills these
+      lastRealVisitDate, lastRealVisitWeek, "", weeksSinceLastVisit, 0, // visit facts - lastPlannedVisitDate/visitCountThisCampaign still Compliance Engine's
       "", // businessScore - Business Engine fills this
       "", "", "", "", // plannerStatus/assignedWeek/assignedDay/gpsGroup - Decision/Route Engine
       existing ? existing.managerOverrideType : "", // NEVER overwritten

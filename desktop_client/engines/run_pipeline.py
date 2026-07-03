@@ -11,11 +11,18 @@ Usage: python3 -m desktop_client.engines.run_pipeline <seed.json> [pipeline] [ou
 """
 from __future__ import annotations
 
+import datetime
 import json
 import sys
 
 from . import import_engine, planning_engine, publish_engine
 from .mock_workbook import MockWorkbook
+
+
+def _json_default(v):
+    if isinstance(v, (datetime.datetime, datetime.date)):
+        return v.isoformat()
+    raise TypeError(f"Object of type {type(v)} is not JSON serializable")
 
 ENGINES = {
     "import": import_engine.run,
@@ -52,7 +59,7 @@ def main() -> None:
         print(line)
 
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(final_state, f, ensure_ascii=False)
+        json.dump(final_state, f, ensure_ascii=False, default=_json_default)
     print(f"\nFinal state written to {out_path}")
     print("\n--- Row counts per sheet ---")
     for sheet, rows in final_state.items():

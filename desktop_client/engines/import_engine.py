@@ -76,6 +76,9 @@ def run(workbook: MockWorkbook) -> str:
             continue
         closed_week_val = _at(row, m_idx("closedSinceWeek"))
         closed_year_val = _at(row, m_idx("closedSinceYear"))
+        last_visit_date_val = _at(row, m_idx("lastRealVisitDate"))
+        last_visit_week_val = _at(row, m_idx("lastRealVisitWeek"))
+        weeks_since_val = _at(row, m_idx("weeksSinceLastVisit"))
         existing_by_pos[pos_id] = {
             "managerOverrideType": _s(_at(row, m_idx("managerOverrideType")) or ""),
             "managerOverridePriority": _s(_at(row, m_idx("managerOverridePriority")) or ""),
@@ -84,6 +87,11 @@ def run(workbook: MockWorkbook) -> str:
             "closedSinceWeek": closed_week_val if closed_week_val is not None else "",
             "closedSinceYear": closed_year_val if closed_year_val is not None else "",
             "status": _s(_at(row, m_idx("status")) or "Active") or "Active",
+            # Preserved as-is once a POS exists - Compliance Engine owns these
+            # fields from here on. Only a brand-new POS gets a default below.
+            "lastRealVisitDate": last_visit_date_val if last_visit_date_val is not None else "",
+            "lastRealVisitWeek": last_visit_week_val if last_visit_week_val is not None else "",
+            "weeksSinceLastVisit": weeks_since_val if weeks_since_val is not None else "",
         }
 
     now = iso_now()
@@ -106,6 +114,16 @@ def run(workbook: MockWorkbook) -> str:
         closed_since_week = ""
         closed_since_year = ""
 
+        # lastRealVisitDate/Week/weeksSinceLastVisit: a brand-new POS is
+        # installed the day it's imported, and that installation counts as
+        # the first visit (product owner) - starts at "visited today"
+        # (weeksSinceLastVisit=0), not unknown/blank. An already-known POS
+        # keeps its existing value untouched - only Compliance Engine
+        # updates these once a POS has real visit history.
+        last_real_visit_date = existing["lastRealVisitDate"] if existing else datetime.date.today()
+        last_real_visit_week = existing["lastRealVisitWeek"] if existing else today_week
+        weeks_since_last_visit = existing["weeksSinceLastVisit"] if existing else 0
+
         out_rows.append([
             pos_id,
             _s(_at(r, c_termid)),
@@ -127,7 +145,7 @@ def run(workbook: MockWorkbook) -> str:
             closed_since_week,
             closed_since_year,
             "", "", "", "",
-            "", "", "", "", 0,
+            last_real_visit_date, last_real_visit_week, "", weeks_since_last_visit, 0,
             "",
             "", "", "", "",
             existing["managerOverrideType"] if existing else "",
