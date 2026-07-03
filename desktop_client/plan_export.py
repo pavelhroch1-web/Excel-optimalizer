@@ -12,6 +12,7 @@ no write-back to the source workbook.
 
 import os
 import re
+import unicodedata
 from datetime import date, datetime
 
 import openpyxl
@@ -26,9 +27,15 @@ _UNSAFE_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]')
 
 
 def sanitize_filename_part(text: str) -> str:
-    """Makes a technician name safe to use as a filename component. Pure
-    string cleanup - not a business rule, just filesystem safety."""
-    cleaned = _UNSAFE_FILENAME_CHARS.sub("_", text).strip()
+    """Makes a technician name safe to use as a filename component:
+    strips diacritics (product owner: "bez diakritiky" - some destination
+    systems/printers mangle accented filenames) and any characters unsafe
+    in Windows/macOS/Linux filenames. Case is preserved - only the accents
+    are stripped, e.g. "Novák" -> "Novak", not "NOVAK"."""
+    no_diacritics = "".join(
+        c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn"
+    )
+    cleaned = _UNSAFE_FILENAME_CHARS.sub("_", no_diacritics).strip()
     return cleaned or "technik"
 
 
@@ -71,11 +78,20 @@ def read_technician_plan(workbook_path: str):
 
 
 def week_year_label(rows: list) -> str:
-    """Derives the "<Rok>_W<Tyden>" part of the filename from the earliest
-    DATUM among a technician's rows, using ISO-8601 week numbering
-    (Python's date.isocalendar() - the same ISO week definition
-    office-scripts/shared/core.ts's isoWeekNumber() uses, so a filename
-    generated here means the same week as anywhere else in the system).
+    """Derives the week-range part of the filename covering EVERY week
+    present in a technician's rows, not just the earliest one - product
+    owner: TECHNICIAN_PLAN shows the full Draft+Published picture, so a
+    technician's export can legitimately span several weeks (e.g. W31-W34),
+    and a filename naming only W31 would be misleading about what's
+    actually inside the file. Uses ISO-8601 week numbering (Python's
+    date.isocalendar() - the same definition office-scripts/shared/core.ts's
+    isoWeekNumber() uses).
+
+    - Single week -> "2026_W31"
+    - Contiguous run, same year -> "2026_W31-W34"
+    - Non-contiguous and/or crossing an ISO year boundary -> every distinct
+      (year, week) joined by "+", e.g. "2026W52+2027W01", so the filename
+      never silently overstates coverage it doesn't have.
     Falls back to today's week if no valid date is found (should not
     normally happen for a real published plan)."""
     dates = []
@@ -85,9 +101,22 @@ def week_year_label(rows: list) -> str:
             dates.append(v.date())
         elif isinstance(v, date):
             dates.append(v)
-    reference = min(dates) if dates else date.today()
-    iso_year, iso_week, _ = reference.isocalendar()
-    return f"{iso_year}_W{iso_week:02d}"
+    if not dates:
+        dates = [date.today()]
+
+    weeks = sorted({d.isocalendar()[:2] for d in dates})  # [(year, week), ...]
+
+    if len(weeks) == 1:
+        year, week = weeks[0]
+        return f"{year}_W{week:02d}"
+
+    same_year = len({y for y, _ in weeks}) == 1
+    contiguous = all(weeks[i][1] == weeks[i - 1][1] + 1 for i in range(1, len(weeks)))
+    if same_year and contiguous:
+        year = weeks[0][0]
+        return f"{year}_W{weeks[0][1]:02d}-W{weeks[-1][1]:02d}"
+
+    return "+".join(f"{y}W{w:02d}" for y, w in weeks)
 
 
 def export_technician_file(headers: list, technician: str, rows: list, output_dir: str) -> str:

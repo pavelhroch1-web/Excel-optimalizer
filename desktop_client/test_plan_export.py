@@ -36,20 +36,30 @@ print("sanitize_filename_part()")
 # ==============================================================================
 
 def _sanitize_removes_unsafe_chars():
-    assert pe.sanitize_filename_part("Novák/Jan") == "Novák_Jan"
+    assert pe.sanitize_filename_part("Novak/Jan") == "Novak_Jan"
 
 
 def _sanitize_strips_whitespace():
-    assert pe.sanitize_filename_part("  Novák  ") == "Novák"
+    assert pe.sanitize_filename_part("  Novak  ") == "Novak"
 
 
 def _sanitize_blank_name_falls_back():
     assert pe.sanitize_filename_part("   ") == "technik"
 
 
+def _sanitize_strips_diacritics():
+    assert pe.sanitize_filename_part("Novák Dvořák Malý") == "Novak Dvorak Maly"
+
+
+def _sanitize_preserves_case():
+    assert pe.sanitize_filename_part("ŘEHOŘ") == "REHOR"
+
+
 test("removes filesystem-unsafe characters", _sanitize_removes_unsafe_chars)
 test("strips surrounding whitespace", _sanitize_strips_whitespace)
 test("falls back to a placeholder for an empty/blank name", _sanitize_blank_name_falls_back)
+test("strips diacritics", _sanitize_strips_diacritics)
+test("diacritic stripping preserves original case", _sanitize_preserves_case)
 
 
 # ==============================================================================
@@ -61,7 +71,7 @@ def _week_year_ordinary():
     assert label == "2026_W31", label
 
 
-def _week_year_multiple_dates_uses_earliest():
+def _week_year_multiple_dates_same_week():
     label = pe.week_year_label([{"DATUM": datetime(2026, 7, 28)}, {"DATUM": datetime(2026, 7, 27)}])
     assert label == "2026_W31", label
 
@@ -76,10 +86,36 @@ def _week_year_plain_date_object():
     assert label == "2026_W31", label
 
 
+def _week_year_contiguous_range():
+    # weeks 31 (27.7.) through 34 (17.8.2026), no gaps - a technician's
+    # Draft+Published rows can legitimately span the whole campaign, not
+    # just one week.
+    label = pe.week_year_label([
+        {"DATUM": date(2026, 8, 17)},  # week 34
+        {"DATUM": date(2026, 7, 27)},  # week 31
+        {"DATUM": date(2026, 8, 3)},   # week 32
+        {"DATUM": date(2026, 8, 10)},  # week 33
+    ])
+    assert label == "2026_W31-W34", label
+
+
+def _week_year_noncontiguous_weeks():
+    label = pe.week_year_label([{"DATUM": date(2026, 7, 27)}, {"DATUM": date(2026, 8, 17)}])  # W31, W34, gap
+    assert label == "2026W31+2026W34", label
+
+
+def _week_year_crosses_iso_year_boundary():
+    label = pe.week_year_label([{"DATUM": date(2026, 12, 28)}, {"DATUM": date(2027, 1, 4)}])  # W53/2026, W01/2027
+    assert label == "2026W53+2027W01", label
+
+
 test("ordinary date -> correct ISO week/year", _week_year_ordinary)
-test("uses the earliest date when a technician has several rows", _week_year_multiple_dates_uses_earliest)
+test("multiple dates within the same week collapse to one week label", _week_year_multiple_dates_same_week)
 test("ISO week 53 boundary matches office-scripts/shared/core.ts's isoWeekNumber()", _week_year_iso53_boundary)
 test("accepts a plain date object, not just datetime", _week_year_plain_date_object)
+test("contiguous multi-week span -> W31-W34 range", _week_year_contiguous_range)
+test("non-contiguous weeks -> explicit list, not a misleading range", _week_year_noncontiguous_weeks)
+test("weeks crossing an ISO year boundary -> explicit per-week year", _week_year_crosses_iso_year_boundary)
 
 
 # ==============================================================================

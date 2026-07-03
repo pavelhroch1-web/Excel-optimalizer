@@ -985,7 +985,7 @@ def build_technician_plan(wb, n_rows=3000, pos_master_notes_col="AK"):
     ws = wb.create_sheet("TECHNICIAN_PLAN")
 
     headers = [
-        "TYDEN", "DATUM", "DEN", "TECHNIK", "POS", "NÁZEV PROVOZOVNY",
+        "TYDEN", "DATUM", "DEN", "TECHNIK", "POS", "ČÍSLO TERMINÁLU", "NÁZEV PROVOZOVNY",
         "ULICE", "MĚSTO", "OBLAST", "AKTIVITA", "POZNÁMKA",
     ]
     for i, h in enumerate(headers):
@@ -1007,6 +1007,18 @@ def build_technician_plan(wb, n_rows=3000, pos_master_notes_col="AK"):
         ),  # DEN
         lambda r: f'=IF(MANAGER_PLAN!E{r}="","",MANAGER_PLAN!D{r})',  # TECHNIK
         lambda r: f'=IF(MANAGER_PLAN!E{r}="","",MANAGER_PLAN!E{r})',  # POS
+        # ČÍSLO TERMINÁLU: live lookup of POS_MASTER.terminalId (column B) -
+        # product owner asked for the terminal number alongside the week
+        # number, 2026-07-03. NOTE: POS_MASTER currently stores exactly one
+        # terminalId per POS row - if a POS genuinely has 2 terminals (product
+        # owner confirmed this can happen), ImportEngine.ts's current
+        # one-RAW_DATA-row-per-POS_MASTER-row upsert doesn't yet represent
+        # that (flagged in docs/BACKLOG.md as a follow-up, not silently
+        # assumed away); this lookup shows whichever terminal that POS's
+        # single POS_MASTER row currently has.
+        lambda r: (
+            f'=IF($E{r}="","",IFERROR(VLOOKUP($E{r},POS_MASTER!$A:$B,2,FALSE),""))'
+        ),  # CISLO TERMINALU
         lambda r: f'=IF($E{r}="","",MANAGER_PLAN!G{r})',  # NAZEV PROVOZOVNY
         lambda r: f'=IF($E{r}="","",TRIM(MANAGER_PLAN!H{r}&" "&MANAGER_PLAN!I{r}))',  # ULICE (+ CISLO)
         lambda r: f'=IF($E{r}="","",MANAGER_PLAN!J{r})',  # MESTO
@@ -1025,16 +1037,16 @@ def build_technician_plan(wb, n_rows=3000, pos_master_notes_col="AK"):
             ws.cell(r, i + 1, formula_fn(r))
 
     for i, h in enumerate(headers):
-        width = 8 if h == "TYDEN" else 12 if h in ("DATUM", "DEN", "TECHNIK", "POS") else 20
+        width = 8 if h == "TYDEN" else 12 if h in ("DATUM", "DEN", "TECHNIK", "POS", "ČÍSLO TERMINÁLU") else 20
         ws.column_dimensions[get_column_letter(i + 1)].width = width
 
-    ws.auto_filter.ref = f"A1:K{n_rows}"
+    ws.auto_filter.ref = f"A1:L{n_rows}"
     apply_banded_rows(ws, 2, n_rows, len(headers))
     # Highlight today's visits - the one row (or handful, one per technician)
     # a technician actually needs when they open this sheet on the day
     # itself, so they don't have to filter/scroll to find it.
     ws.conditional_formatting.add(
-        f"A2:K{n_rows}",
+        f"A2:L{n_rows}",
         FormulaRule(formula=["$B2=TODAY()"], fill=PatternFill("solid", fgColor="FFF2A6")),
     )
     ws.freeze_panes = "A2"
