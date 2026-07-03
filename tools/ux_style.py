@@ -322,19 +322,12 @@ def build_import_hub(wb, pos_master_tech_col="O"):
     )
     step_card(
         2, "PPT zadání kampaní (export POS dat)",
-        "Export POS dat od zákazníka (PPT zadání) - stejná struktura každý týden",
+        "Export POS dat od zákazníka (PPT zadání) - stejná struktura každý týden, VŽDY kompletní seznam všech POS",
         "RAW_DATA",
-        "Import Engine sloučí podle POS_ID; provozovny se stejnou adresou (CORN/9PODNIK) zůstávají jeden fyzický POS. Ruční poznámky u POS se nepřepíší.",
+        "Import Engine sloučí podle POS_ID; provozovny se stejnou adresou (CORN/9PODNIK) zůstávají jeden fyzický POS. Ruční poznámky u POS se nepřepíší. POS, který v tomto exportu chybí, se automaticky označí jako Closed - žádný zvláštní krok navíc není potřeba.",
         "2E75B6",
         extra_note=None,
     )
-    ws.merge_cells(f"B{r}:G{r}")
-    ws.cell(r, 2, "Volitelně: export stavu POS (aktivní/uzavřené) patří do listu POS_STATUS_IMPORT").font = NOTE_FONT
-    r += 1
-    ws.cell(r, 2, "Řádků nyní:").font = Font(size=9, color="595959")
-    ws.cell(r, 3, '=COUNTA(POS_STATUS_IMPORT!A:A)-1').font = Font(bold=True, size=11, color=NAVY)
-    _nav_button(ws, f"F{r}", "Otevřít →", "POS_STATUS_IMPORT", color="2E75B6")
-    r += 2
 
     step_card(
         3, "Spusť Import Engine",

@@ -234,6 +234,25 @@ def geo_days(items: list[POSItem], days: list[WorkDay]) -> list[PlacedVisit]:
     return result
 
 
+def iso_week_number(d: "__import__('datetime').date") -> tuple[int, int]:
+    """Port of core.ts's isoWeekNumber() (Monday-start ISO-8601 weeks, week
+    containing the year's first Thursday is week 1). Takes a naive
+    datetime.date (or datetime.datetime, only the date part is used),
+    matching core.ts's use of calendar Y/M/D only, no timezone."""
+    import datetime as _dt
+
+    if isinstance(d, _dt.datetime):
+        d = d.date()
+    day_num = d.isoweekday() - 1  # Mon=0..Sun=6, matches JS's (getUTCDay()+6)%7
+    thursday = d + _dt.timedelta(days=-day_num + 3)
+    iso_year = thursday.year
+    first_thursday_raw = _dt.date(iso_year, 1, 4)
+    first_day_num = first_thursday_raw.isoweekday() - 1
+    first_thursday = first_thursday_raw + _dt.timedelta(days=-first_day_num + 3)
+    week = 1 + round((thursday - first_thursday).days / 7)
+    return week, iso_year
+
+
 def resolve_capacity(
     override_map: dict[str, float], tech: str, year: int, week: int, work_days_count: int, target_visits_per_day: float
 ) -> float:

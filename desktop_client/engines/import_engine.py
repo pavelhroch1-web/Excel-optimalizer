@@ -7,7 +7,9 @@ verified (tools/sim/compare_engines.py).
 """
 from __future__ import annotations
 
-from .core_logic import norm, iso_now
+import datetime
+
+from .core_logic import norm, iso_now, iso_week_number
 from .js_compat import at as _at, s as _s, num as _num
 from .mock_workbook import MockWorkbook
 
@@ -36,10 +38,6 @@ def run(workbook: MockWorkbook) -> str:
     raw_ws = workbook.get_worksheet("RAW_DATA")
     raw = raw_ws.get_used_range().get_values()
 
-    status_ws = workbook.get_worksheet("POS_STATUS_IMPORT")
-    status_range = status_ws.get_used_range()
-    status = status_range.get_values() if status_range else [["POS", "ACTIVE"]]
-
     master_ws = workbook.get_worksheet("POS_MASTER")
     master_range = master_ws.get_used_range()
     master_existing = master_range.get_values() if master_range else []
@@ -63,11 +61,7 @@ def run(workbook: MockWorkbook) -> str:
     c_y = _exact_col(headers, "Y")
     c_termid = _exact_col(headers, "CISLO TERMINALU")
 
-    status_by_pos: dict[str, bool] = {}
-    for i in range(1, len(status)):
-        pos = _s(status[i][0])
-        if pos:
-            status_by_pos[pos] = _num(status[i][1]) == 1
+    today_week, today_year = iso_week_number(datetime.date.today())
 
     master_headers: list[str] = [str(h) for h in master_existing[0]] if master_existing else []
 
@@ -105,17 +99,12 @@ def run(workbook: MockWorkbook) -> str:
 
         existing = existing_by_pos.get(pos_id)
 
-        pos_status = existing["status"] if existing else "Active"
-        closed_since_week = existing["closedSinceWeek"] if existing else ""
-        closed_since_year = existing["closedSinceYear"] if existing else ""
-        if pos_id in status_by_pos:
-            is_active = status_by_pos[pos_id]
-            if is_active and pos_status == "Closed":
-                pos_status = "Active"
-                closed_since_week = ""
-                closed_since_year = ""
-            elif not is_active and pos_status != "Closed":
-                pos_status = "Closed"
+        # Present in this week's RAW_DATA -> Active, always (see
+        # ImportEngine.ts's "POS ACTIVE/CLOSED STATUS" comment - presence is
+        # now the sole source of truth, confirmed by product owner).
+        pos_status = "Active"
+        closed_since_week = ""
+        closed_since_year = ""
 
         out_rows.append([
             pos_id,
@@ -151,11 +140,18 @@ def run(workbook: MockWorkbook) -> str:
 
     for pos_id in existing_by_pos.keys():
         if pos_id not in pos_ids_in_raw_data:
+            existing = existing_by_pos[pos_id]
             idx = next(
                 (i for i, r in enumerate(master_existing) if _s(_at(r, m_idx("posId"))) == pos_id), -1
             )
             if idx >= 0:
-                out_rows.append(list(master_existing[idx]))
+                row = list(master_existing[idx])
+                row[m_idx("status")] = "Closed"
+                if existing["status"] != "Closed":
+                    row[m_idx("closedSinceWeek")] = today_week
+                    row[m_idx("closedSinceYear")] = today_year
+                row[m_idx("updatedAt")] = now
+                out_rows.append(row)
 
     master_header_row = [
         "posId", "terminalId", "market", "category", "terminalType", "classification",
@@ -176,6 +172,6 @@ def run(workbook: MockWorkbook) -> str:
 
     return (
         "Import Engine: "
-        f"{len(out_rows)} POS_MASTER rows upserted ({len(pos_ids_in_raw_data)} from RAW_DATA, "
-        f"{len(out_rows) - len(pos_ids_in_raw_data)} retained unchanged)."
+        f"{len(out_rows)} POS_MASTER rows upserted ({len(pos_ids_in_raw_data)} from RAW_DATA (Active), "
+        f"{len(out_rows) - len(pos_ids_in_raw_data)} missing from RAW_DATA this run (set/kept Closed)."
     )

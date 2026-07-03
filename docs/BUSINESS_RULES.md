@@ -44,9 +44,14 @@ Pareto, PPT), not automatically boosted or suppressed
 STATUS: CONFIRMED
 
 **RULE: Closed POS**
-CONDITION: `status = Closed` (set only by POS_STATUS_IMPORT, never inferred from RAW_DATA absence)
-ACTION: never a candidate; history preserved forever
-STATUS: CONFIRMED
+CONDITION: `status = Closed` — set SOLELY by absence from the current week's RAW_DATA import
+(product owner, 2026-07-03: this REPLACED the earlier POS_STATUS_IMPORT-driven rule; confirmed the
+weekly PPT/RAW_DATA export always contains the full universe of POS, so "missing this week"
+reliably means closed — POS_STATUS_IMPORT is no longer read for this at all). A POS present again
+in a later RAW_DATA import reopens automatically (status -> Active, closedSinceWeek/Year cleared).
+ACTION: never a candidate; history preserved forever, closedSinceWeek/Year record the first week
+it was found missing (not overwritten on subsequent still-missing runs)
+STATUS: CONFIRMED (superseding an earlier CONFIRMED version of this same rule)
 
 ## 3. Cadence Rules (unifies CORE / GECO / CORN / Mandatory)
 

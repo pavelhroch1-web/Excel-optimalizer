@@ -11,7 +11,7 @@ One row per POS, forever — never deleted, only marked Closed.
 |---|---|---|
 | posId, terminalId | RAW_DATA | Import Engine |
 | market, category, terminalType, classification, nazev, area, posArea, street, houseNumber, city, gpsX, gpsY, assignedTechnician, ppt | RAW_DATA | Import Engine (overwritten wholesale each run) |
-| status, closedSinceWeek, closedSinceYear | POS_STATUS_IMPORT | Import Engine (RAW_DATA presence/absence never closes a POS) |
+| status, closedSinceWeek, closedSinceYear | RAW_DATA presence/absence | Import Engine — present in this week's RAW_DATA = Active; missing = Closed (product owner, 2026-07-03, replaced the earlier POS_STATUS_IMPORT-driven rule; confirmed the weekly export always contains the full POS universe) |
 | currentLosActivity, currentLotActivity, targetLosActivity, targetLotActivity | ACTIVITY_PLAN + VISIT_HISTORY | Planning Engine (not built yet) |
 | lastRealVisitDate/Week, lastPlannedVisitDate, weeksSinceLastVisit, visitCountThisCampaign | VISIT_HISTORY | Compliance Engine (not built yet) |
 | businessScore | CADENCE_RULES + SCORE_PROFILES + PARETO_GROUPS | Business Engine (not built yet) |
@@ -51,9 +51,11 @@ row here, no reason field, per product-owner decision).
 
 ## Import staging sheets (disposable — never read by any engine except Import Engine)
 
-`RAW_DATA`, `POS_STATUS_IMPORT` (`POS, ACTIVE`), `ACTIVITY_PLAN` (unchanged, including the
-currently-unused `PRIORITY`/`OVERRIDE_GAP` columns — imported and parsed by Import Engine,
-intentionally not referenced by any scoring/filtering logic yet).
+`RAW_DATA`, `ACTIVITY_PLAN` (unchanged, including the currently-unused `PRIORITY`/`OVERRIDE_GAP`
+columns — imported and parsed by Import Engine, intentionally not referenced by any
+scoring/filtering logic yet). `POS_STATUS_IMPORT` (`POS, ACTIVE`) still exists in the workbook but
+is **no longer read by Import Engine** since 2026-07-03 — RAW_DATA presence/absence replaced it as
+the sole Active/Closed signal (see POS_MASTER table above).
 
 ## Not yet in the data model
 

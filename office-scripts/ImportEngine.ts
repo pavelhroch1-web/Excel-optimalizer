@@ -7,7 +7,12 @@
 // files - see office-scripts/README.md for the reasoning and the sync convention.
 //
 // SCOPE OF THIS SCRIPT (per product-owner instruction - bottom-up build order):
-//   - Upserts RAW_DATA + POS_STATUS_IMPORT + ACTIVITY_PLAN into POS_MASTER.
+//   - Upserts RAW_DATA + ACTIVITY_PLAN into POS_MASTER.
+//   - POS Active/Closed status is determined SOLELY by presence in this
+//     week's RAW_DATA (product owner, 2026-07-03: the weekly PPT/RAW_DATA
+//     export always contains the full universe of POS, so "missing this
+//     week" reliably means "closed"). POS_STATUS_IMPORT is no longer read -
+//     this replaced it, it does not sit alongside it.
 //   - Never touches manager-override fields (managerOverrideType/Priority/
 //     Technician, plannerNotes) on existing POS_MASTER rows.
 //   - Does NOT run any scoring, filtering, cadence, or route logic - that is
@@ -62,6 +67,21 @@ function main(workbook: ExcelScript.Workbook) {
   }
   // SYNC-BLOCK-END: columns.ts
 
+  // SYNC-BLOCK-START: core.ts (import)
+  // Verbatim from office-scripts/shared/core.ts - do not hand-edit here.
+  function isoWeekNumber(date: Date): { week: number; year: number } {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = (d.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+    d.setUTCDate(d.getUTCDate() - dayNum + 3); // shift to nearest Thursday
+    const isoYear = d.getUTCFullYear();
+    const firstThursday = new Date(Date.UTC(isoYear, 0, 4));
+    const firstDayNum = (firstThursday.getUTCDay() + 6) % 7;
+    firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNum + 3);
+    const week = 1 + Math.round((d.getTime() - firstThursday.getTime()) / (7 * 24 * 3600 * 1000));
+    return { week, year: isoYear };
+  }
+  // SYNC-BLOCK-END: core.ts (import)
+
   // ==========================================================================
   // LOAD SHEETS
   // ==========================================================================
@@ -71,10 +91,6 @@ function main(workbook: ExcelScript.Workbook) {
 
   const activityWs = workbook.getWorksheet("ACTIVITY_PLAN");
   const activity = activityWs.getUsedRange().getValues();
-
-  const statusWs = workbook.getWorksheet("POS_STATUS_IMPORT");
-  const statusRange = statusWs.getUsedRange();
-  const status = statusRange ? statusRange.getValues() : [["POS", "ACTIVE"]];
 
   const masterWs = workbook.getWorksheet("POS_MASTER");
   const masterRange = masterWs.getUsedRange();
@@ -107,16 +123,17 @@ function main(workbook: ExcelScript.Workbook) {
   const cTERMID = exactCol(headers, "CISLO TERMINALU");
 
   // ==========================================================================
-  // POS_STATUS_IMPORT -> lookup map (source of truth for Active/Closed)
+  // POS ACTIVE/CLOSED STATUS: presence in this week's RAW_DATA is now the
+  // sole source of truth (product owner, 2026-07-03 - confirmed the weekly
+  // PPT/RAW_DATA export always contains the FULL universe of POS, so
+  // "missing = closed" is safe). This REPLACES the previous POS_STATUS_IMPORT
+  // mechanism entirely - POS_STATUS_IMPORT is no longer read by this engine.
+  // See "today" below for closedSinceWeek/Year bookkeeping when a POS
+  // transitions to Closed.
   // ==========================================================================
 
-  let statusByPos: { [pos: string]: boolean } = {};
-  for (let i = 1; i < status.length; i++) {
-    const pos = String(status[i][0]);
-    if (pos) {
-      statusByPos[pos] = Number(status[i][1]) === 1;
-    }
-  }
+  const today = new Date();
+  const { week: todayWeek, year: todayYear } = isoWeekNumber(today);
 
   // ==========================================================================
   // ACTIVITY_PLAN -> stored, not used by any engine yet (see file header)
@@ -188,7 +205,7 @@ function main(workbook: ExcelScript.Workbook) {
   }
 
   // ==========================================================================
-  // UPSERT: RAW_DATA (+ POS_STATUS_IMPORT) -> POS_MASTER
+  // UPSERT: RAW_DATA -> POS_MASTER
   // ==========================================================================
 
   const now = new Date().toISOString();
@@ -205,27 +222,12 @@ function main(workbook: ExcelScript.Workbook) {
 
     const existing = existingByPos[posId];
 
-    // Status: POS_STATUS_IMPORT is the only source of truth. A POS missing
-    // from POS_STATUS_IMPORT keeps its previous status (default Active for a
-    // brand-new POS) - RAW_DATA presence/absence never closes a POS, per
-    // docs/BUSINESS_RULES.md section 2 ("Closed POS").
-    let posStatus = existing ? existing.status : "Active";
-    let closedSinceWeek: string | number = existing ? existing.closedSinceWeek : "";
-    let closedSinceYear: string | number = existing ? existing.closedSinceYear : "";
-    if (statusByPos.hasOwnProperty(posId)) {
-      const isActive = statusByPos[posId];
-      if (isActive && posStatus === "Closed") {
-        // Re-opened: clear closed-since bookkeeping.
-        posStatus = "Active";
-        closedSinceWeek = "";
-        closedSinceYear = "";
-      } else if (!isActive && posStatus !== "Closed") {
-        posStatus = "Closed";
-        // Week/year of closure left for the caller to fill via CONTROL-driven
-        // "current week" once Planning Engine exists; blank for now rather
-        // than guessing.
-      }
-    }
+    // Status: present in this week's RAW_DATA -> Active, always (see the
+    // "POS ACTIVE/CLOSED STATUS" comment above). Re-opening a previously
+    // Closed POS clears its closed-since bookkeeping.
+    const posStatus = "Active";
+    const closedSinceWeek: string | number = "";
+    const closedSinceYear: string | number = "";
 
     outRows.push([
       posId, // posId
@@ -260,16 +262,25 @@ function main(workbook: ExcelScript.Workbook) {
     ]);
   }
 
-  // POS present in POS_MASTER but absent from this RAW_DATA batch: keep them
-  // untouched (append unchanged) rather than dropping the row. RAW_DATA
-  // disappearing a POS is never treated as closure - only POS_STATUS_IMPORT
-  // is authoritative for that.
+  // POS present in POS_MASTER but absent from this week's RAW_DATA: now
+  // treated as Closed (see "POS ACTIVE/CLOSED STATUS" comment above) - the
+  // row is preserved (history, overrides, notes all kept, never dropped),
+  // only status/closedSinceWeek/closedSinceYear are updated. If already
+  // Closed from a previous run, closedSinceWeek/Year are left untouched
+  // (records the ORIGINAL week it first went missing, not the latest one).
   for (const posId of Object.keys(existingByPos)) {
     if (!posIdsInRawData[posId]) {
-      const row = masterExisting[
+      const existing = existingByPos[posId];
+      const row = (masterExisting[
         masterExisting.findIndex((r: (string | number | boolean)[]) => String(r[mIdx("posId")]) === posId)
-      ];
-      outRows.push(row as (string | number)[]);
+      ] as (string | number)[]).slice();
+      row[mIdx("status")] = "Closed";
+      if (existing.status !== "Closed") {
+        row[mIdx("closedSinceWeek")] = todayWeek;
+        row[mIdx("closedSinceYear")] = todayYear;
+      }
+      row[mIdx("updatedAt")] = now;
+      outRows.push(row);
     }
   }
 
@@ -306,8 +317,8 @@ function main(workbook: ExcelScript.Workbook) {
       outRows.length +
       " POS_MASTER rows upserted (" +
       Object.keys(posIdsInRawData).length +
-      " from RAW_DATA, " +
+      " from RAW_DATA (Active), " +
       (outRows.length - Object.keys(posIdsInRawData).length) +
-      " retained unchanged)."
+      " missing from RAW_DATA this run (set/kept Closed)."
   );
 }
