@@ -410,6 +410,47 @@ ACTION: rolled up by week, month, per technician, and network-wide; feeds Adviso
 detection over a configurable `TREND_WINDOW_WEEKS` (default proposed: 4)
 STATUS: CONFIRMED (mechanism), window default ★ OPEN
 
+## 12a. Manager dashboard tracking gate + route efficiency (added 2026-07-06)
+
+**RULE: Explicit "start tracking" step, separate from Publish/Compliance**
+CONDITION: a week's plan has been Published (and possibly already evaluated by
+`ComplianceEngine.ts`)
+ACTION: the week's rows do NOT appear in `TECHNICIAN_PERFORMANCE_LOG` /
+`TECHNICIAN_PERFORMANCE_SUMMARY` / `TECHNICIAN_TOP_ISSUES` (and therefore not on
+`TECHNICIAN_SCORECARD`/`PERFORMANCE`/`WEEK_DASHBOARD`/`HOME`) until the manager explicitly runs
+`StartTrackingEngine.ts`, which stamps `PLAN_LIFECYCLE.trackingStartedAt` for that week.
+Publishing and Compliance evaluation are unaffected and keep happening automatically —
+`COMPLIANCE_LOG` is populated regardless of tracking status. Only the manager-facing dashboard
+aggregation layer (`PerformanceEngine.ts`) is gated.
+RATIONALE (product owner, 2026-07-06): "abych ho začal sledovat až řeknu já" — the manager wants
+to be the one deciding when a freshly published/evaluated week's numbers start counting toward a
+technician's tracked performance, e.g. while still reviewing the plan.
+INTERPRETATION NOTE: "sledovat" (track/monitor) was interpreted as "appear on manager dashboards",
+not "get evaluated at all" — a genuinely ambiguous phrase; correct if this reading is wrong.
+STATUS: CONFIRMED (product owner, 2026-07-06), implemented in `StartTrackingEngine.ts` +
+`PerformanceEngine.ts`.
+
+**RULE: Estimated daily route efficiency (km) per technician**
+CONDITION: at least 2 GPS-resolvable POS realized (Splneno_vcas/Splneno_pozde) by the same
+technician on the same weekday, for a week where tracking has been started
+ACTION: `PerformanceEngine.ts` orders that day's realized POS by their position in the
+technician's PLANNED visit sequence for that exact date (from `MANAGER_PLAN_PUBLISHED` row
+order — itself a product of Planning Engine's GPS clustering), appends any unplanned/"navíc"
+POS at the end (sorted by posId for determinism), and sums consecutive `distanceKm()` calls
+between them. Written to `TECHNICIAN_PERFORMANCE_LOG.kmMon..kmFri`, displayed on
+`TECHNICIAN_SCORECARD` with a semaphore (green/orange/red) against
+`CONTROL.ROUTE_KM_WARNING_KM` (default 80) / `CONTROL.ROUTE_KM_CRITICAL_KM` (default 150).
+CAVEAT: this is an ESTIMATE, not measured GPS/timestamp tracking — no such data exists anywhere
+in this system. It approximates driving distance from planned visit order, not the technician's
+actual route. Fewer than 2 GPS-resolvable stops on a day → 0 (not shown as a driving day).
+RATIONALE (product owner, 2026-07-06): "klidně číslo kolik najel km třeba mezi těmi pos a
+semafor... me zajímá celkový počet návštěv za den" — wants a route-efficiency signal alongside
+daily visit counts (the latter already existed via `visitsMon..visitsFri`), retained long-term
+the same way `TECHNICIAN_PERFORMANCE_LOG` already is (rebuilt every run from the append-only
+`COMPLIANCE_LOG`, never cleared).
+STATUS: CONFIRMED intent (product owner, 2026-07-06); thresholds (80/150 km) are a starting
+guess, explicitly flagged in `CONTROL` as tunable on real data, not a confirmed business rule.
+
 ## 13. Advisor Engine
 
 Never writes to the plan. Reads POS_MASTER + COMPLIANCE_LOG + SCORE_LOG, writes to ADVISOR_LOG.

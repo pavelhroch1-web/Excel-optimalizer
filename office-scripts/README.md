@@ -50,14 +50,22 @@ main risk of this pattern.
 3. Review/adjust MANAGER_PLAN manually (POS_MASTER overrides) as needed, re-run step 2.
 4. `PublishEngine.ts` — explicit action, once you're ready to lock and send a week's plan.
    Publishes the earliest Draft week into MANAGER_PLAN_PUBLISHED.
-5. Send the Published week's rows to technicians (outside this workbook, e.g. export/print).
-6. Next cycle: import the new SalesApp export into SALESAPP_IMPORT, run `ComplianceEngine.ts`
-   (compares only against MANAGER_PLAN_PUBLISHED, advances plan lifecycle, updates POS_MASTER).
-7. `AdvisorEngine.ts` — run any time after Import/Compliance for fresh alerts.
-8. `PerformanceEngine.ts` — run any time after Compliance for an updated `TECHNICIAN_PERFORMANCE_LOG`/
+5. `StartTrackingEngine.ts` — explicit action, run whenever you (the manager) decide a
+   Published/Active/Closed week's numbers should start counting on the manager dashboards
+   (`TECHNICIAN_SCORECARD`/`PERFORMANCE`/`WEEK_DASHBOARD`/`HOME`). Publishing and evaluating a
+   week no longer implies it appears there - see the file header comment for why (product
+   owner, 2026-07-06: "abych ho začal sledovat až řeknu já").
+6. Send the Published week's rows to technicians (outside this workbook, e.g. export/print).
+7. Next cycle: import the new SalesApp export into SALESAPP_IMPORT, run `ComplianceEngine.ts`
+   (compares only against MANAGER_PLAN_PUBLISHED, advances plan lifecycle, updates POS_MASTER;
+   evaluation runs regardless of whether `StartTrackingEngine.ts` has been run for that week).
+8. `AdvisorEngine.ts` — run any time after Import/Compliance for fresh alerts.
+9. `PerformanceEngine.ts` — run any time after Compliance for an updated `TECHNICIAN_PERFORMANCE_LOG`/
    `TECHNICIAN_PERFORMANCE_SUMMARY`/`TECHNICIAN_TOP_ISSUES` (feeds the manager UX layer:
-   `TECHNICIAN_SCORECARD`/`PERFORMANCE`/`WEEK_DETAIL`).
-9. `ReportingEngine.ts` — run any time for an updated DASHBOARD.
+   `TECHNICIAN_SCORECARD`/`PERFORMANCE`/`WEEK_DASHBOARD`). Only includes weeks where tracking has
+   been started (step 5); also computes an estimated daily route distance (kmMon..kmFri) between
+   that day's realized POS, ordered by the technician's planned visit sequence.
+10. `ReportingEngine.ts` — run any time for an updated DASHBOARD.
 
 ## What's intentionally NOT here yet
 

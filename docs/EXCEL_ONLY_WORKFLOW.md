@@ -29,8 +29,9 @@ skript zvlášť:
 3. Klikni na ni — Excel vloží do aktuálně otevřeného listu tlačítko
    navázané na tenhle skript. Přesuň ho třeba do `IMPORT_HUB`, vedle
    popisu příslušného kroku.
-4. Zopakuj pro `PlanningEngine.ts`, `PublishEngine.ts` (a později
-   `ComplianceEngine.ts`, `AdvisorEngine.ts`, `ReportingEngine.ts`).
+4. Zopakuj pro `PlanningEngine.ts`, `PublishEngine.ts`, `StartTrackingEngine.ts`
+   (a později `ComplianceEngine.ts`, `AdvisorEngine.ts`, `PerformanceEngine.ts`,
+   `ReportingEngine.ts`).
 
 Tohle nejde předpřipravit v souboru zvenčí (je to servisní vazba, kterou
 umí vytvořit jen Excel Online interaktivně), ale jde to udělat jen jednou
@@ -70,6 +71,21 @@ nepatří, ten jde až do `SALESAPP_IMPORT` v kroku 5.
 2. Publikuje se vždy jen **nejbližší** Draft týden (ne všechny najednou).
    Zkontroluj `PLAN_LIFECYCLE` — daný týden má teď status `Published`.
 
+### 3b. Začít sledovat týden na manažerských dashboardech (volitelné, kdy chceš ty)
+
+Publikace týdne (krok 3) ještě neznamená, že se jeho čísla objeví na
+`TECHNICIAN_SCORECARD`/`PERFORMANCE`/`WEEK_DASHBOARD`/`HOME`. To je záměr
+(2026-07-06: "abych ho začal sledovat až řeknu já") — třeba proto, že si
+čerstvě publikovaný plán ještě chceš v klidu projít, než se začne počítat
+do statistik. Až budeš chtít, aby se týden začal sledovat:
+
+1. Automatizace → vlož obsah `office-scripts/StartTrackingEngine.ts` →
+   **Spustit**. Označí všechny týdny se stavem Published/Active/Closed,
+   které ještě sledování nemají spuštěné.
+2. Dá se spustit kdykoliv — i pro víc týdnů najednou, i se zpožděním o
+   několik týdnů. Vyhodnocování (Compliance Engine) běží dál bez ohledu na
+   tenhle krok; ovlivňuje jen to, co je vidět na manažerských listech.
+
 ### 4. Rozeslání TOUR PLANu technikům (list `TECHNICIAN_PLAN`)
 
 List `TECHNICIAN_PLAN` je od 2026-07-06 filtrovaný pohled (dropdown výběr
@@ -108,14 +124,19 @@ dropdown + Print), bez appky.
    proti aktuálním datům…) do `ADVISOR_LOG`.
 4. Automatizace → `office-scripts/PerformanceEngine.ts` → Spustit — aktualizuje
    `TECHNICIAN_PERFORMANCE_LOG` (podklad pro manažerské listy `TECHNICIAN_SCORECARD`/
-   `PERFORMANCE`/`WEEK_DETAIL`).
+   `PERFORMANCE`/`WEEK_DASHBOARD`). Zahrne jen týdny, u kterých už bylo spuštěno
+   sledování (krok 3b) — a spočítá i odhad denní ujeté vzdálenosti mezi
+   navštívenými POS (`kmMon..kmFri`, viz `TECHNICIAN_SCORECARD` sekce
+   "Trasa / efektivita jízd"). Jde o odhad z plánovaného pořadí návštěv, ne
+   reálné GPS/časové sledování.
 5. Automatizace → `office-scripts/ReportingEngine.ts` → Spustit — aktuální
    `DASHBOARD`.
 
 ## Pořadí, které nesmíš přehodit
 
 `ImportEngine → PlanningEngine → (ruční review) → PublishEngine → rozeslání
-→ [další týden] ComplianceEngine → AdvisorEngine → PerformanceEngine → ReportingEngine`
+→ StartTrackingEngine (kdykoliv, podle tebe) → [další týden] ComplianceEngine
+→ AdvisorEngine → PerformanceEngine → ReportingEngine`
 
 Planning Engine nikdy nepřepíše uzamčený (Published/Active/Closed) týden —
 je bezpečné ho spouštět opakovaně. Publish Engine publikuje vždy jen

@@ -61,6 +61,8 @@ def main(ref_path, out_path):
     control_ws.append(["ADVISOR_VOLUME_TRAILING_WEEKS", 8, "Planning Cycle Advisor v1 (deterministic, informational only - docs/ARCHITECTURE.md section 19): how many of the most recent weeks in VISIT_HISTORY_ACTUAL count as the 'trailing' period for the volume trend signal."])
     control_ws.append(["ADVISOR_VOLUME_BASELINE_WEEKS", 8, "Planning Cycle Advisor v1: how many weeks immediately before the trailing period form the 'baseline' the trailing period is compared against. Needs TRAILING+BASELINE weeks of history before this signal can fire at all - with under a year of SalesApp history, expect it to stay silent (correct, not a bug)."])
     control_ws.append(["ADVISOR_VOLUME_THRESHOLD_PERCENT", 25, "Planning Cycle Advisor v1: trailing-vs-baseline deviation (%) that triggers a VOLUME_TREND_SIGNAL alert. Proposed default, not a confirmed business rule - tune once a real season of history exists."])
+    control_ws.append(["ROUTE_KM_WARNING_KM", 80, "Proposed default (not a confirmed business rule): daily route-efficiency estimate (PerformanceEngine.ts kmMon..kmFri) above this shows the WARNING semafor color on TECHNICIAN_SCORECARD. Tune on real data - product owner requested the metric 2026-07-06, thresholds are a starting guess."])
+    control_ws.append(["ROUTE_KM_CRITICAL_KM", 150, "Proposed default (not a confirmed business rule): daily route-efficiency estimate above this shows the CRITICAL semafor color. Tune on real data."])
 
     # CATEGORY_RULES: copy reference rows + add explicit confirmed default row
     cat_ws = src_wb["CATEGORY_RULES"]
@@ -225,10 +227,17 @@ def main(ref_path, out_path):
     # PLAN_LIFECYCLE (Draft -> Published -> Active -> Closed, one row per
     # (year, week). Draft->Published only via PublishEngine.ts (explicit
     # manager action); Published->Active->Closed recomputed by
-    # ComplianceEngine.ts on every run - see docs/BUSINESS_RULES.md section 11)
+    # ComplianceEngine.ts on every run - see docs/BUSINESS_RULES.md section 11.
+    # trackingStartedAt: a SEPARATE explicit manager action
+    # (StartTrackingEngine.ts) - blank until the manager runs it, even after
+    # the week is Published/Active. PerformanceEngine.ts only includes a
+    # week's numbers in the manager dashboards once this is set (product
+    # owner, 2026-07-06: "abych ho začal sledovat až řeknu já"). Appended as
+    # a 6th column - ComplianceEngine.ts/PublishEngine.ts only ever write
+    # columns A-E by index, so this is safe to add without touching them.)
     write_table(
         dst_wb, "PLAN_LIFECYCLE",
-        ["year", "week", "status", "publishedAt", "closedAt"],
+        ["year", "week", "status", "publishedAt", "closedAt", "trackingStartedAt"],
         [],
     )
 
@@ -294,7 +303,8 @@ def main(ref_path, out_path):
          "splnenoVcas", "splnenoPozde", "nesplneno", "navicEvidovano",
          "compliancePercent",
          "visitsMon", "visitsTue", "visitsWed", "visitsThu", "visitsFri",
-         "updatedAt"],
+         "updatedAt",
+         "kmMon", "kmTue", "kmWed", "kmThu", "kmFri"],
         [],
     )
 

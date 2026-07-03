@@ -983,7 +983,23 @@ def build_technician_scorecard(wb):
             f'=IF($W{i}="","",SUMPRODUCT(({TP}!$A$2:$A$5000=$D$5)*'
             f'(({TP}!$B$2:$B$5000*100+{TP}!$C$2:$C$5000)=$W{i})*{TP}!$K$2:$K$5000))'
         )
-    for col in "PQRSTUVW":
+    # route-efficiency (km) data block - product owner, 2026-07-06: "číslo
+    # kolik najel km třeba mezi těmi pos a semafor" - estimated daily
+    # driving distance between visited POS, from PerformanceEngine.ts's
+    # kmMon..kmFri columns (TP!R:V), with semaphore thresholds tunable via
+    # CONTROL.ROUTE_KM_WARNING_KM/ROUTE_KM_CRITICAL_KM (see that sheet's
+    # comment: thresholds are a proposed default, not a confirmed rule).
+    ws["X1"] = '=IFERROR(VLOOKUP("ROUTE_KM_WARNING_KM",CONTROL!$A:$B,2,FALSE),80)'
+    ws["X2"] = '=IFERROR(VLOOKUP("ROUTE_KM_CRITICAL_KM",CONTROL!$A:$B,2,FALSE),150)'
+    km_day_cols = [("Y1", "R"), ("Y2", "S"), ("Y3", "T"), ("Y4", "U"), ("Y5", "V")]
+    for cell_ref, tp_col in km_day_cols:
+        ws[cell_ref] = (
+            f'=SUMPRODUCT(({TP}!$A$2:$A$5000=$D$5)*({TP}!$B$2:$B$5000=$R$1)*'
+            f'({TP}!$C$2:$C$5000=$R$2)*{TP}!${tp_col}$2:${tp_col}$5000)'
+        )
+    ws["Y6"] = "=SUM($Y$1:$Y$5)"
+
+    for col in "PQRSTUVWXY":
         ws.column_dimensions[col].hidden = True
 
     # Named Ranges over the hidden spill formulas above - the standard
@@ -1088,14 +1104,52 @@ def build_technician_scorecard(wb):
     ws.add_chart(make_line_chart(t_cats, t_data, color=dashboard_ui.ACCENT_BLUE), "I21")
 
     # ==========================================================================
+    # TRASA / EFEKTIVITA JÍZD - odhad km mezi navštívenými POS + semafor.
+    # No real GPS/timestamp tracking exists in this system (see
+    # PerformanceEngine.ts's routeKmForDay header comment): this is an
+    # estimate based on the technician's planned visit order for that date,
+    # not measured driving distance.
+    # ==========================================================================
+    build_section_header(ws, "C31", "TRASA / EFEKTIVITA JÍZD (odhad km mezi POS)")
+    style_dashboard_table_header(ws, 32, "CDEFGH", ["Po", "Út", "St", "Čt", "Pá", "Týden celkem"])
+    km_cells = [("C33", "Y1"), ("D33", "Y2"), ("E33", "Y3"), ("F33", "Y4"), ("G33", "Y5")]
+    for target, source in km_cells:
+        ws[target] = f"={source}"
+        ws[target].number_format = '0.0" km"'
+        ws[target].font = Font(bold=True, size=12)
+        ws[target].alignment = Alignment(horizontal="center", vertical="center")
+        ws[target].border = CARD_BORDER
+    ws["H33"] = "=$Y$6"
+    ws["H33"].number_format = '0.0" km"'
+    ws["H33"].font = font_card_value(size=14, color=NAVY)
+    ws["H33"].fill = PatternFill("solid", fgColor=WHITE)
+    ws["H33"].alignment = Alignment(horizontal="center", vertical="center")
+    ws["H33"].border = CARD_BORDER
+    ws.row_dimensions[33].height = 20
+    for col, cell in (("C", "C33"), ("D", "D33"), ("E", "E33"), ("F", "F33"), ("G", "G33")):
+        rng = f"{col}33"
+        ws.conditional_formatting.add(
+            rng, FormulaRule(formula=[f"{cell}<=$X$1"], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_GOOD),
+                              font=Font(bold=True, size=12, color=STATUS_GOOD), stopIfTrue=True),
+        )
+        ws.conditional_formatting.add(
+            rng, FormulaRule(formula=[f"{cell}<=$X$2"], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_WARNING),
+                              font=Font(bold=True, size=12, color=STATUS_WARNING), stopIfTrue=True),
+        )
+        ws.conditional_formatting.add(
+            rng, FormulaRule(formula=[f"{cell}>$X$2"], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_CRITICAL),
+                              font=Font(bold=True, size=12, color=STATUS_CRITICAL), stopIfTrue=True),
+        )
+
+    # ==========================================================================
     # TOP PROBLÉMOVÉ POS - deduped, engine-computed (see PerformanceEngine.ts).
     # ==========================================================================
-    build_section_header(ws, "C31", "TOP PROBLÉMOVÉ POS")
-    style_dashboard_table_header(ws, 32, "CDEF", ["POS", "Název", "Region", "Nesplněno (celkem)"])
-    ws["C33"] = f'=IFERROR(FILTER({TI}!$C$2:$F$1000,{TI}!$A$2:$A$1000=$D$5),{{"—","Žádné problémy 🎉","",0}})'
-    apply_table_borders(ws, 33, 37, "CDEF")
+    build_section_header(ws, "C36", "TOP PROBLÉMOVÉ POS")
+    style_dashboard_table_header(ws, 37, "CDEF", ["POS", "Název", "Region", "Nesplněno (celkem)"])
+    ws["C38"] = f'=IFERROR(FILTER({TI}!$C$2:$F$1000,{TI}!$A$2:$A$1000=$D$5),{{"—","Žádné problémy 🎉","",0}})'
+    apply_table_borders(ws, 38, 42, "CDEF")
     ws.conditional_formatting.add(
-        "F33:F37", DataBarRule(start_type="num", start_value=0, end_type="num", end_value=10, color=STATUS_CRITICAL),
+        "F38:F42", DataBarRule(start_type="num", start_value=0, end_type="num", end_value=10, color=STATUS_CRITICAL),
     )
 
     return ws

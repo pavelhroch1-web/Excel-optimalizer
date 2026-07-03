@@ -69,6 +69,7 @@ function main() {
     "ImportEngine.ts",
     "PlanningEngine.ts",
     "PublishEngine.ts",
+    "StartTrackingEngine.ts",
     "ComplianceEngine.ts",
     "AdvisorEngine.ts",
     "PerformanceEngine.ts",

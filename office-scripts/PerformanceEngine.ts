@@ -79,9 +79,41 @@
 // already-tested engine instead of being re-derived in the presentation
 // layer.
 //
+// FOURTH THING THIS ENGINE NOW DOES - TRACKING GATE: a (technician, year,
+// week) bucket is only included in ANY output (TECHNICIAN_PERFORMANCE_LOG,
+// TECHNICIAN_PERFORMANCE_SUMMARY, TECHNICIAN_TOP_ISSUES) if that week's
+// PLAN_LIFECYCLE row has a non-blank trackingStartedAt - see
+// StartTrackingEngine.ts's file header. Publish and Compliance evaluation
+// both keep working exactly as before regardless of this gate; only the
+// manager-dashboard aggregation is held back until the manager explicitly
+// starts tracking that week (product owner, 2026-07-06: "abych ho začal
+// sledovat až řeknu já"). PLAN_LIFECYCLE keys weeks by (CONTROL_YEAR,
+// rawWeek) - the same YEAR-anchored offset convention already reconciled
+// against true-ISO year/week in ComplianceEngine.ts (see that file's own
+// CONTROL_YEAR comment) - so the same reconciliation is repeated here,
+// built once per (technician,true-ISO-week) while walking
+// MANAGER_PLAN_PUBLISHED below.
+//
+// FIFTH OUTPUT ADDITION - route efficiency (kmMon..kmFri on
+// TECHNICIAN_PERFORMANCE_LOG): total straight-line driving distance between
+// consecutive REALIZED visits for each weekday, using POS_MASTER's GPS
+// coordinates and the same distanceKm() flat-earth approximation
+// PlanningEngine.ts already uses for GPS clustering (product owner,
+// 2026-07-06: "kolik najel km" + "semafor"). This is an ESTIMATE, not a
+// real recorded route: there is no visit-time-of-day data anywhere in this
+// system, so the visiting ORDER within a day is assumed to match
+// PlanningEngine.ts's own planned sequence for that technician/date (the
+// order its GPS-clustering already decided) - any realized visit to a POS
+// that wasn't in that day's plan (Navic_evidovano) is appended at the end,
+// sorted by posId for determinism. The severity coloring ("semafor")
+// thresholds live in CONTROL (ROUTE_KM_WARNING_KM/ROUTE_KM_CRITICAL_KM,
+// proposed defaults - see docs/BACKLOG.md) and are applied in
+// tools/ux_style.py, not here - this engine only computes the raw km.
+//
 // NOT IN THIS VERSION (docs/MANAGER_UX_ARCHITECTURE.md, explicitly deferred
-// by product owner 2026-07-03): Merch/Visibility visit-purpose breakdown,
-// GPS-based map data.
+// by product owner 2026-07-03, reconfirmed 2026-07-06 pending real SalesApp
+// data verification): Merch/Visibility visit-purpose breakdown. GPS-based
+// map data remains deferred too.
 // ============================================================================
 
 function main(workbook: ExcelScript.Workbook) {
@@ -114,6 +146,93 @@ function main(workbook: ExcelScript.Workbook) {
   }
   // SYNC-BLOCK-END: core.ts (performance)
 
+  // SYNC-BLOCK-START: text.ts
+  function norm(v: string): string {
+    return v
+      .toUpperCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+  }
+  // SYNC-BLOCK-END: text.ts
+
+  // SYNC-BLOCK-START: dates.ts
+  function isoMonday(year: number, week: number): Date {
+    let d = new Date(year, 0, 4);
+    let day = d.getDay();
+    if (day == 0) {
+      day = 7;
+    }
+    d.setDate(d.getDate() - day + 1 + (week - 1) * 7);
+    return d;
+  }
+
+  function easter(y: number): Date {
+    const f = Math.floor;
+    let a = y % 19;
+    let b = f(y / 100);
+    let c = y % 100;
+    let d = f(b / 4);
+    let e = b % 4;
+    let g = f((8 * b + 13) / 25);
+    let h = (19 * a + b - d - g + 15) % 30;
+    let i = f(c / 4);
+    let k = c % 4;
+    let l = (32 + 2 * e + 2 * i - h - k) % 7;
+    let m = f((a + 11 * h + 22 * l) / 451);
+    let month = f((h + l - 7 * m + 114) / 31);
+    let day = ((h + l - 7 * m + 114) % 31) + 1;
+    return new Date(y, month - 1, day);
+  }
+
+  // Czech public holidays: 11 fixed dates + Good Friday + Easter Monday.
+  function isHoliday(date: Date, year: number): boolean {
+    const fixed = [
+      "1-1", "1-5", "8-5", "5-7", "6-7", "28-9",
+      "28-10", "17-11", "24-12", "25-12", "26-12",
+    ];
+    const key = date.getDate() + "-" + (date.getMonth() + 1);
+    if (fixed.includes(key)) {
+      return true;
+    }
+    const e = easter(year);
+    let friday = new Date(e);
+    friday.setDate(e.getDate() - 2);
+    let monday = new Date(e);
+    monday.setDate(e.getDate() + 1);
+    return (
+      date.toDateString() == friday.toDateString() ||
+      date.toDateString() == monday.toDateString()
+    );
+  }
+
+  // Returns the working (non-holiday) Mon-Fri days for a given ISO week.
+  // This is the automatic part of dynamic capacity - CAPACITY_OVERRIDE (a
+  // new V11 config table) can still override the resulting day/visit count
+  // manually; see docs/BUSINESS_RULES.md section 8.
+  function workDays(year: number, week: number): { day: string; date: Date }[] {
+    const names = ["MON", "TUE", "WED", "THU", "FRI"];
+    let start = isoMonday(year, week);
+    let result: { day: string; date: Date }[] = [];
+    for (let i = 0; i < 5; i++) {
+      let d = new Date(start);
+      d.setDate(start.getDate() + i);
+      if (!isHoliday(d, year)) {
+        result.push({ day: names[i], date: d });
+      }
+    }
+    return result;
+  }
+  // SYNC-BLOCK-END: dates.ts
+
+  // SYNC-BLOCK-START: geo.ts
+  function distanceKm(ax: number, ay: number, bx: number, by: number): number {
+    const dx = (ax - bx) * 111;
+    const dy = (ay - by) * 72;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  // SYNC-BLOCK-END: geo.ts
+
   function readTable(sheetName: string): (string | number | boolean)[][] {
     const ws = workbook.getWorksheet(sheetName);
     const range = ws.getUsedRange();
@@ -123,6 +242,44 @@ function main(workbook: ExcelScript.Workbook) {
   const posMaster = readTable("POS_MASTER");
   const managerPlanPublished = readTable("MANAGER_PLAN_PUBLISHED");
   const complianceLog = readTable("COMPLIANCE_LOG");
+  const control = readTable("CONTROL");
+  const planLifecycle = readTable("PLAN_LIFECYCLE");
+
+  function setting(name: string, fallback: number): number {
+    for (let i = 1; i < control.length; i++) {
+      if (norm(String(control[i][0])) == norm(name)) {
+        const v = Number(control[i][1]);
+        return isNaN(v) ? fallback : v;
+      }
+    }
+    return fallback;
+  }
+  // Same YEAR-anchored raw-week convention as ComplianceEngine.ts's own
+  // CONTROL_YEAR (see that file's header comment) - needed here only to
+  // reconstruct PLAN_LIFECYCLE's own (year, rawWeek) key for the tracking
+  // gate, not for compliance classification.
+  const CONTROL_YEAR = setting("YEAR", new Date().getFullYear());
+
+  // ==========================================================================
+  // PLAN_LIFECYCLE -> which (CONTROL_YEAR, rawWeek) weeks has the manager
+  // explicitly started tracking (StartTrackingEngine.ts sets this - see
+  // file header above).
+  // ==========================================================================
+
+  let trackingStartedRawWeeks: { [key: string]: boolean } = {};
+  if (planLifecycle.length >= 2) {
+    const plHeaders = (planLifecycle[0] as string[]).map((h) => String(h));
+    const plIdx = (name: string) => plHeaders.indexOf(name);
+    const trackingCol = plIdx("trackingStartedAt");
+    if (trackingCol >= 0) {
+      for (let i = 1; i < planLifecycle.length; i++) {
+        const row = planLifecycle[i];
+        if (String(row[trackingCol] ?? "") !== "") {
+          trackingStartedRawWeeks[row[plIdx("year")] + "|" + row[plIdx("week")]] = true;
+        }
+      }
+    }
+  }
 
   // ==========================================================================
   // POS_MASTER -> posId -> {area, technician} lookup (region info + fallback
@@ -134,6 +291,7 @@ function main(workbook: ExcelScript.Workbook) {
   let posArea: { [posId: string]: string } = {};
   let posTechnician: { [posId: string]: string } = {};
   let posName: { [posId: string]: string } = {};
+  let posGps: { [posId: string]: { x: number; y: number } } = {};
   for (let i = 1; i < posMaster.length; i++) {
     const row = posMaster[i];
     const posId = String(row[pmIdx("posId")]);
@@ -144,6 +302,11 @@ function main(workbook: ExcelScript.Workbook) {
     posName[posId] = String(row[pmIdx("nazev")] ?? "");
     const override = String(row[pmIdx("managerOverrideTechnician")] ?? "");
     posTechnician[posId] = override || String(row[pmIdx("assignedTechnician")] ?? "");
+    const gpsX = Number(row[pmIdx("gpsX")]);
+    const gpsY = Number(row[pmIdx("gpsY")]);
+    if (!isNaN(gpsX) && !isNaN(gpsY) && (gpsX != 0 || gpsY != 0)) {
+      posGps[posId] = { x: gpsX, y: gpsY };
+    }
   }
 
   // ==========================================================================
@@ -162,6 +325,7 @@ function main(workbook: ExcelScript.Workbook) {
     nesplneno: number;
     navicEvidovano: number;
     visitsByDay: number[]; // [Mon, Tue, Wed, Thu, Fri]
+    possByDay: string[][]; // realized posIds per weekday, unsorted until output time
   }
   let buckets: { [key: string]: Bucket } = {};
 
@@ -180,17 +344,22 @@ function main(workbook: ExcelScript.Workbook) {
         nesplneno: 0,
         navicEvidovano: 0,
         visitsByDay: [0, 0, 0, 0, 0],
+        possByDay: [[], [], [], [], []],
       };
     }
     return buckets[key];
   }
 
   // ==========================================================================
-  // MANAGER_PLAN_PUBLISHED -> plannedVisits + region tally
+  // MANAGER_PLAN_PUBLISHED -> plannedVisits + region tally (tracking-gated),
+  // plus the per-(technician,date) planned visiting order used later for the
+  // route-efficiency estimate (see file header).
   // ==========================================================================
 
   const mpHeaders = managerPlanPublished.length > 0 ? (managerPlanPublished[0] as string[]).map((h) => String(h)) : [];
   const mpIdx = (name: string) => mpHeaders.indexOf(name);
+  let trueIsoTrackingStarted: { [key: string]: boolean } = {};
+  let plannedOrderByTechDate: { [key: string]: string[] } = {};
   for (let i = 1; i < managerPlanPublished.length; i++) {
     const row = managerPlanPublished[i];
     const tech = String(row[mpIdx("TECHNICIAN")] ?? "");
@@ -199,7 +368,22 @@ function main(workbook: ExcelScript.Workbook) {
     if (!tech || !(dateVal instanceof Date)) {
       continue;
     }
+    const dateKey = dateVal.toISOString().slice(0, 10);
+    const orderKey = tech + "|" + dateKey;
+    if (!plannedOrderByTechDate[orderKey]) {
+      plannedOrderByTechDate[orderKey] = [];
+    }
+    plannedOrderByTechDate[orderKey].push(posId);
+
     const { week, year } = isoWeekNumber(dateVal);
+    const rawWeek = Number(row[mpIdx("WEEK")]);
+    const trackingStarted = trackingStartedRawWeeks[CONTROL_YEAR + "|" + rawWeek] === true;
+    if (trackingStarted) {
+      trueIsoTrackingStarted[year + "|" + week] = true;
+    }
+    if (!trackingStarted) {
+      continue; // week not yet started tracking - see file header ("TRACKING GATE")
+    }
     const bucket = bucketFor(tech, year, week);
     bucket.plannedVisits++;
     const area = posArea[posId] || "";
@@ -260,6 +444,9 @@ function main(workbook: ExcelScript.Workbook) {
   let nesplnenoByTechPos: { [key: string]: { technician: string; posId: string; count: number } } = {};
 
   for (const r of dedupedRows) {
+    if (!trueIsoTrackingStarted[r.year + "|" + r.week]) {
+      continue; // week not yet started tracking - see file header ("TRACKING GATE")
+    }
     // Navic_evidovano rows carry no technician in COMPLIANCE_LOG (never
     // planned for anyone) - fall back to POS_MASTER's current assignment,
     // purely for this aggregation (see file header).
@@ -288,6 +475,7 @@ function main(workbook: ExcelScript.Workbook) {
       const jsDay = r.matchedActualDate.getDay();
       if (jsDay in dayIndex) {
         bucket.visitsByDay[dayIndex[jsDay]]++;
+        bucket.possByDay[dayIndex[jsDay]].push(r.posId);
       }
     }
   }
@@ -298,6 +486,54 @@ function main(workbook: ExcelScript.Workbook) {
   // the underlying append-only logs grow - see
   // docs/MANAGER_UX_ARCHITECTURE.md section 1b).
   // ==========================================================================
+
+  // Route-efficiency estimate for one bucket-day: order that day's realized
+  // posIds by their position in the technician's PLANNED sequence for that
+  // exact calendar date (PlanningEngine.ts's own GPS-clustered order), then
+  // sum consecutive distanceKm() calls. A POS realized that day but absent
+  // from the plan (Navic_evidovano) has no planned position - appended at
+  // the end, sorted by posId, so the result is still deterministic. Returns
+  // 0 when fewer than 2 GPS-resolvable stops are visited that day (no
+  // "route" to measure) rather than a misleading number.
+  function routeKmForDay(technician: string, year: number, week: number, dayIndex: number, posIds: string[]): number {
+    if (posIds.length < 2) {
+      return 0;
+    }
+    const monday = isoMonday(year, week);
+    const visitDate = new Date(monday);
+    visitDate.setDate(monday.getDate() + dayIndex);
+    const dateKey = visitDate.toISOString().slice(0, 10);
+    const plannedOrder = plannedOrderByTechDate[technician + "|" + dateKey] || [];
+    const sorted = [...posIds].sort((a, b) => {
+      const ai = plannedOrder.indexOf(a);
+      const bi = plannedOrder.indexOf(b);
+      if (ai >= 0 && bi >= 0) {
+        return ai - bi;
+      }
+      if (ai >= 0) {
+        return -1;
+      }
+      if (bi >= 0) {
+        return 1;
+      }
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+    let totalKm = 0;
+    let resolvedStops = 0;
+    let prev: { x: number; y: number } | null = null;
+    for (const posId of sorted) {
+      const gps = posGps[posId];
+      if (!gps) {
+        continue; // POS with no GPS coordinates on record - skip, don't guess a distance
+      }
+      resolvedStops++;
+      if (prev) {
+        totalKm += distanceKm(prev.x, prev.y, gps.x, gps.y);
+      }
+      prev = gps;
+    }
+    return resolvedStops >= 2 ? Math.round(totalKm * 10) / 10 : 0;
+  }
 
   const now = new Date().toISOString();
   let outRows: (string | number)[][] = [];
@@ -312,6 +548,7 @@ function main(workbook: ExcelScript.Workbook) {
       }
     }
     const compliancePercent = b.plannedVisits > 0 ? Math.round((b.realizedVisits / b.plannedVisits) * 1000) / 10 : 0;
+    const kmByDay = b.possByDay.map((posIds, dayIdx) => routeKmForDay(b.technician, b.year, b.week, dayIdx, posIds));
     outRows.push([
       b.technician, b.year, b.week, topArea,
       b.plannedVisits, b.realizedVisits,
@@ -319,6 +556,7 @@ function main(workbook: ExcelScript.Workbook) {
       compliancePercent,
       b.visitsByDay[0], b.visitsByDay[1], b.visitsByDay[2], b.visitsByDay[3], b.visitsByDay[4],
       now,
+      kmByDay[0], kmByDay[1], kmByDay[2], kmByDay[3], kmByDay[4],
     ]);
   }
 
@@ -329,9 +567,10 @@ function main(workbook: ExcelScript.Workbook) {
     "compliancePercent",
     "visitsMon", "visitsTue", "visitsWed", "visitsThu", "visitsFri",
     "updatedAt",
+    "kmMon", "kmTue", "kmWed", "kmThu", "kmFri",
   ];
   const outWs = workbook.getWorksheet("TECHNICIAN_PERFORMANCE_LOG");
-  outWs.getRange("A2:Q100000").clear(ExcelScript.ClearApplyTo.contents);
+  outWs.getRange("A2:V100000").clear(ExcelScript.ClearApplyTo.contents);
   outWs.getRangeByIndexes(0, 0, 1, headerRow.length).setValues([headerRow]);
   if (outRows.length > 0) {
     outWs.getRangeByIndexes(1, 0, outRows.length, headerRow.length).setValues(outRows);
@@ -440,7 +679,8 @@ function main(workbook: ExcelScript.Workbook) {
     "Performance Engine: " + outRows.length +
       " technician/week rows written to TECHNICIAN_PERFORMANCE_LOG (from " +
       dedupedRows.length + " deduped compliance evaluations, " +
-      (complianceLog.length - 1) + " raw rows before dedup), " +
+      (complianceLog.length - 1) + " raw rows before dedup, " +
+      Object.keys(trackingStartedRawWeeks).length + " week(s) with tracking started), " +
       summaryRows.length + " rows written to TECHNICIAN_PERFORMANCE_SUMMARY, " +
       issueRows.length + " rows written to TECHNICIAN_TOP_ISSUES."
   );
