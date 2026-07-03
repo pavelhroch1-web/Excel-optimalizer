@@ -71,6 +71,7 @@ function main() {
     "PublishEngine.ts",
     "ComplianceEngine.ts",
     "AdvisorEngine.ts",
+    "PerformanceEngine.ts",
     "ReportingEngine.ts",
   ];
   const pipeline = process.argv[3] ? process.argv[3].split(",") : defaultPipeline;

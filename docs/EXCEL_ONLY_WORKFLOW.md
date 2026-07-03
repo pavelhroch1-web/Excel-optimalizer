@@ -103,13 +103,16 @@ jedním kliknutím — v čistě-Excelové variantě ji děláš takhle.
 3. Automatizace → `office-scripts/AdvisorEngine.ts` → Spustit — diagnostická
    upozornění (zanedbané POS, přetížení techniků, rozjetý publikovaný plán
    proti aktuálním datům…) do `ADVISOR_LOG`.
-4. Automatizace → `office-scripts/ReportingEngine.ts` → Spustit — aktuální
+4. Automatizace → `office-scripts/PerformanceEngine.ts` → Spustit — aktualizuje
+   `TECHNICIAN_PERFORMANCE_LOG` (podklad pro manažerské listy `TECHNICIAN_SCORECARD`/
+   `PERFORMANCE`/`WEEK_DETAIL`).
+5. Automatizace → `office-scripts/ReportingEngine.ts` → Spustit — aktuální
    `DASHBOARD`.
 
 ## Pořadí, které nesmíš přehodit
 
 `ImportEngine → PlanningEngine → (ruční review) → PublishEngine → rozeslání
-→ [další týden] ComplianceEngine → AdvisorEngine → ReportingEngine`
+→ [další týden] ComplianceEngine → AdvisorEngine → PerformanceEngine → ReportingEngine`
 
 Planning Engine nikdy nepřepíše uzamčený (Published/Active/Closed) týden —
 je bezpečné ho spouštět opakovaně. Publish Engine publikuje vždy jen

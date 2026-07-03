@@ -26,6 +26,7 @@ DEPLOYABLE_FILES = [
     ROOT / "office-scripts" / "AdvisorEngine.ts",
     ROOT / "office-scripts" / "ReportingEngine.ts",
     ROOT / "office-scripts" / "PublishEngine.ts",
+    ROOT / "office-scripts" / "PerformanceEngine.ts",
 ]
 
 BLOCK_RE = re.compile(

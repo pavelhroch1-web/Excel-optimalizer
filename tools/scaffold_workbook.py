@@ -284,6 +284,20 @@ def main(ref_path, out_path):
     # DASHBOARD (Reporting Engine output - written fresh on every run)
     write_table(dst_wb, "DASHBOARD", ["", "", "", "", "", ""], [])
 
+    # TECHNICIAN_PERFORMANCE_LOG (Performance Engine output - full rebuild
+    # every run, one row per technician/ISO-week - see
+    # docs/MANAGER_UX_ARCHITECTURE.md section 1)
+    write_table(
+        dst_wb, "TECHNICIAN_PERFORMANCE_LOG",
+        ["technician", "year", "week", "region",
+         "plannedVisits", "realizedVisits",
+         "splnenoVcas", "splnenoPozde", "nesplneno", "navicEvidovano",
+         "compliancePercent",
+         "visitsMon", "visitsTue", "visitsWed", "visitsThu", "visitsFri",
+         "updatedAt"],
+        [],
+    )
+
     # UX pass: sheet organization, color coding, dropdowns, legend,
     # START_HERE, ACTIVITY_PLAN timeline - pure presentation, see
     # tools/ux_style.py. Runs last so it sees the final sheet content.

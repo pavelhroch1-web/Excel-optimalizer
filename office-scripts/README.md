@@ -54,7 +54,9 @@ main risk of this pattern.
 6. Next cycle: import the new SalesApp export into SALESAPP_IMPORT, run `ComplianceEngine.ts`
    (compares only against MANAGER_PLAN_PUBLISHED, advances plan lifecycle, updates POS_MASTER).
 7. `AdvisorEngine.ts` — run any time after Import/Compliance for fresh alerts.
-8. `ReportingEngine.ts` — run any time for an updated DASHBOARD.
+8. `PerformanceEngine.ts` — run any time after Compliance for an updated `TECHNICIAN_PERFORMANCE_LOG`
+   (feeds the manager UX layer: `TECHNICIAN_SCORECARD`/`PERFORMANCE`/`WEEK_DETAIL`).
+9. `ReportingEngine.ts` — run any time for an updated DASHBOARD.
 
 ## What's intentionally NOT here yet
 

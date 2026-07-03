@@ -105,6 +105,10 @@ HIDDEN_SHEETS = {
     "CADENCE_RULES", "PARETO_GROUPS", "SCORE_PROFILES", "ADVISOR_RULES",
     "CAPACITY_OVERRIDE", "COMPLIANCE_LOG", "ADVISOR_LOG",
     "VISIT_HISTORY_ACTUAL", "VISIT_HISTORY", "PLANNING_HORIZON_RULES",
+    # Performance Engine's raw aggregated table - a data source for the
+    # manager UX sheets (docs/MANAGER_UX_ARCHITECTURE.md), not something a
+    # manager reads directly, same treatment as COMPLIANCE_LOG/ADVISOR_LOG.
+    "TECHNICIAN_PERFORMANCE_LOG",
 }
 
 # Sheets an engine writes to programmatically - never real-protected, see
@@ -113,6 +117,7 @@ HIDDEN_SHEETS = {
 ENGINE_WRITABLE = {
     "POS_MASTER", "MANAGER_PLAN", "MANAGER_PLAN_PUBLISHED", "PLAN_LIFECYCLE",
     "COMPLIANCE_LOG", "ADVISOR_LOG", "VISIT_HISTORY_ACTUAL", "DASHBOARD",
+    "TECHNICIAN_PERFORMANCE_LOG",
 }
 
 # Per-sheet: which columns (by header name) are meant for manual editing.
