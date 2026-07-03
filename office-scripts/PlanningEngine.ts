@@ -386,10 +386,17 @@ function main(workbook: ExcelScript.Workbook) {
     year: number,
     week: number,
     workDaysCount: number,
-    targetVisitsPerDay: number
+    targetVisitsPerDay: number,
+    targetVisitsWeek: number | null = null
   ): number {
     const key = tech + "|" + year + "|" + week;
-    return overrideMap[key] !== undefined ? overrideMap[key] : workDaysCount * targetVisitsPerDay;
+    if (overrideMap[key] !== undefined) {
+      return overrideMap[key];
+    }
+    if (targetVisitsWeek !== null) {
+      return targetVisitsWeek;
+    }
+    return workDaysCount * targetVisitsPerDay;
   }
 
   // SYNC-BLOCK-END: core.ts (planning)
@@ -434,9 +441,32 @@ function main(workbook: ExcelScript.Workbook) {
     return fallback;
   }
 
+  // Distinct from setting(): returns null when the row is absent/blank
+  // rather than a numeric fallback, so callers can tell "not configured"
+  // apart from "configured as zero".
+  function settingOptional(name: string): number | null {
+    for (let i = 1; i < control.length; i++) {
+      if (norm(String(control[i][0])) == norm(name)) {
+        const raw = control[i][1];
+        if (raw === "" || raw === undefined || raw === null) {
+          return null;
+        }
+        const v = Number(raw);
+        return isNaN(v) ? null : v;
+      }
+    }
+    return null;
+  }
+
   const START_WEEK = setting("CAMPAIGN_START_WEEK", 30);
   const CAMPAIGN_LENGTH = setting("CAMPAIGN_LENGTH", 4);
   const TARGET_DAY = setting("TARGET_VISITS_DAY", 8);
+  // Optional: a flat weekly capacity target, used instead of deriving
+  // capacity from workDays x TARGET_VISITS_DAY when configured - product
+  // owner (2026-07-03) wants to work with weekly capacity as the primary
+  // unit. Per-technician/week CAPACITY_OVERRIDE still wins over this if
+  // both are present - see resolveCapacity() below.
+  const TARGET_WEEK = settingOptional("TARGET_VISITS_WEEK");
   const STANDARD_GAP = setting("STANDARD_VISIT_GAP", 8);
   const NEGLECTED_AFTER = setting("NEGLECTED_AFTER_WEEKS", 26);
   const YEAR = setting("YEAR", new Date().getFullYear());
@@ -765,7 +795,7 @@ function main(workbook: ExcelScript.Workbook) {
       }
       touchedWeeks.add(week);
       const days = workDays(YEAR, week);
-      const capacity = resolveCapacity(capacityOverrideMap, tech, YEAR, week, days.length, TARGET_DAY);
+      const capacity = resolveCapacity(capacityOverrideMap, tech, YEAR, week, days.length, TARGET_DAY, TARGET_WEEK);
 
       if (capacity <= 0 || days.length == 0) {
         continue; // technician has zero capacity this week - skip cleanly

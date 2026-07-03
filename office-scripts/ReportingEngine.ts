@@ -185,10 +185,17 @@ function main(workbook: ExcelScript.Workbook) {
     year: number,
     week: number,
     workDaysCount: number,
-    targetVisitsPerDay: number
+    targetVisitsPerDay: number,
+    targetVisitsWeek: number | null = null
   ): number {
     const key = tech + "|" + year + "|" + week;
-    return overrideMap[key] !== undefined ? overrideMap[key] : workDaysCount * targetVisitsPerDay;
+    if (overrideMap[key] !== undefined) {
+      return overrideMap[key];
+    }
+    if (targetVisitsWeek !== null) {
+      return targetVisitsWeek;
+    }
+    return workDaysCount * targetVisitsPerDay;
   }
 
   function weeksBetween(week1: number, year1: number, week2: number, year2: number): number {
@@ -461,6 +468,11 @@ function main(workbook: ExcelScript.Workbook) {
       }
     }
     const targetVisitsDay = controlMap["TARGET_VISITS_DAY"] ? Number(controlMap["TARGET_VISITS_DAY"]) : 8;
+    // Mirrors PlanningEngine.ts's TARGET_WEEK - keeps the dashboard's
+    // utilization % consistent with whatever capacity model Planning
+    // actually used to build the plan.
+    const targetVisitsWeekRaw = controlMap["TARGET_VISITS_WEEK"] ? Number(controlMap["TARGET_VISITS_WEEK"]) : NaN;
+    const targetVisitsWeek = isNaN(targetVisitsWeekRaw) ? null : targetVisitsWeekRaw;
 
     let capacityOverrideMap: { [key: string]: number } = {};
     for (let i = 1; i < capacityOverrideRows.length; i++) {
@@ -498,7 +510,7 @@ function main(workbook: ExcelScript.Workbook) {
         if (v.week != latestWeek.week || v.year != latestWeek.year) {
           continue;
         }
-        const capacity = resolveCapacity(capacityOverrideMap, v.tech, v.year, v.week, days, targetVisitsDay);
+        const capacity = resolveCapacity(capacityOverrideMap, v.tech, v.year, v.week, days, targetVisitsDay, targetVisitsWeek);
         const utilization = capacity > 0 ? Math.round((v.count / capacity) * 1000) / 10 : 0;
         row(v.tech, v.count, capacity, utilization);
         chartWorkload.push({ tech: v.tech, planned: v.count, capacity, utilization });

@@ -45,9 +45,12 @@ V11's first scoring pass can be diffed against V10.5.5 output before anything is
 **ADVISOR_RULES** — structure only (`ruleId, type, condition, threshold, severity,
 messageTemplate, active`), no rows yet — Advisor Engine not built.
 
-**CAPACITY_OVERRIDE** — `technician, year, week, capacity`. Empty; used once Planning Engine's
-capacity calculation exists (default = `workDays(week) × TARGET_VISITS_DAY`, overridable per
-row here, no reason field, per product-owner decision).
+**CAPACITY_OVERRIDE** — `technician, year, week, capacity`. Per-technician/week override, always
+wins over both settings below (no reason field, per product-owner decision). Below that: if
+`CONTROL.TARGET_VISITS_WEEK` is set, it's used directly as a flat weekly target (product owner,
+2026-07-03: wants to work in weekly capacity as the primary unit). Only if NEITHER is set does
+capacity fall back to `workDays(week) × TARGET_VISITS_DAY` (still the default - existing workbooks
+with only `TARGET_VISITS_DAY` configured are unaffected). See `resolveCapacity()` in `core.ts`.
 
 ## Import staging sheets (disposable — never read by any engine except Import Engine)
 

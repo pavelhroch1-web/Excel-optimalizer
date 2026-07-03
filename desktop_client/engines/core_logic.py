@@ -272,7 +272,21 @@ def iso_week_number(d: "__import__('datetime').date") -> tuple[int, int]:
 
 
 def resolve_capacity(
-    override_map: dict[str, float], tech: str, year: int, week: int, work_days_count: int, target_visits_per_day: float
+    override_map: dict[str, float],
+    tech: str,
+    year: int,
+    week: int,
+    work_days_count: int,
+    target_visits_per_day: float,
+    target_visits_week: Optional[float] = None,
 ) -> float:
+    """Port of core.ts's resolveCapacity() - capacity is fundamentally
+    weekly: a per-technician/week override always wins; below that, a flat
+    weekly target (if configured) is used directly; only if neither exists
+    does this fall back to work_days_count * target_visits_per_day."""
     key = f"{tech}|{year}|{week}"
-    return override_map[key] if key in override_map else work_days_count * target_visits_per_day
+    if key in override_map:
+        return override_map[key]
+    if target_visits_week is not None:
+        return target_visits_week
+    return work_days_count * target_visits_per_day

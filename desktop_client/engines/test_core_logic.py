@@ -133,6 +133,9 @@ check("addGpsBonus disabled returns selection unchanged", add_gps_bonus(gps_sele
 override = {"Tech1|2026|31": 5}
 check("resolveCapacity uses override", resolve_capacity(override, "Tech1", 2026, 31, 5, 8) == 5)
 check("resolveCapacity falls back to days*target", resolve_capacity(override, "Tech2", 2026, 31, 5, 8) == 40)
+check("resolveCapacity uses flat weekly target when set", resolve_capacity({}, "Tech3", 2026, 31, 5, 8, 35) == 35)
+check("resolveCapacity per-tech override still wins over weekly target", resolve_capacity(override, "Tech1", 2026, 31, 5, 8, 35) == 5)
+check("resolveCapacity weekly target defaults to None (falls back to days*target)", resolve_capacity({}, "Tech4", 2026, 31, 5, 8) == 40)
 
 # --- matchesCadenceRuleScope / isOverdueForCadenceRule (CORN/GECO) ---
 corn_rule = CadenceRule(ruleId="CORN", scope="MARKET", matchValue=["CORN"], minGapWeeks=None,

@@ -12,6 +12,7 @@ its SYNC-BLOCK core from its adapter code.
 from __future__ import annotations
 
 import datetime
+from typing import Optional
 
 from .core_logic import (
     CadenceRule,
@@ -67,9 +68,22 @@ def run(workbook: MockWorkbook) -> str:
                 return fallback if v != v else v  # isNaN(v) ? fallback : v
         return fallback
 
+    def setting_optional(name: str) -> Optional[float]:
+        for i in range(1, len(control)):
+            if norm(_s(_at(control[i], 0))) == norm(name):
+                raw = _at(control[i], 1)
+                if raw in ("", None):
+                    return None
+                v = _js_number(raw)
+                return None if v != v else v  # isNaN(v) ? None : v
+        return None
+
     START_WEEK = int(setting("CAMPAIGN_START_WEEK", 30))
     CAMPAIGN_LENGTH = int(setting("CAMPAIGN_LENGTH", 4))
     TARGET_DAY = setting("TARGET_VISITS_DAY", 8)
+    # Optional flat weekly capacity target - see resolve_capacity()'s
+    # docstring. Per-technician/week CAPACITY_OVERRIDE still wins over this.
+    TARGET_WEEK = setting_optional("TARGET_VISITS_WEEK")
     STANDARD_GAP = setting("STANDARD_VISIT_GAP", 8)
     NEGLECTED_AFTER = setting("NEGLECTED_AFTER_WEEKS", 26)
     YEAR = int(setting("YEAR", datetime.date.today().year))
@@ -333,7 +347,7 @@ def run(workbook: MockWorkbook) -> str:
                 continue
             touched_weeks.add(week)
             days = work_days(YEAR, week)
-            capacity = resolve_capacity(capacity_override_map, tech, YEAR, week, len(days), TARGET_DAY)
+            capacity = resolve_capacity(capacity_override_map, tech, YEAR, week, len(days), TARGET_DAY, TARGET_WEEK)
 
             if capacity <= 0 or len(days) == 0:
                 continue

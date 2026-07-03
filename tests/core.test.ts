@@ -394,6 +394,16 @@ test("override of 0 is respected (not treated as missing)", () => {
   const overrideMap = { "Novak|2026|44": 0 };
   assert.strictEqual(resolveCapacity(overrideMap, "Novak", 2026, 44, 5, 8), 0);
 });
+test("targetVisitsWeek (flat weekly target) is used instead of days x targetPerDay when set", () => {
+  assert.strictEqual(resolveCapacity({}, "Novak", 2026, 45, 5, 8, 35), 35);
+});
+test("per-technician override still wins over targetVisitsWeek", () => {
+  const overrideMap = { "Novak|2026|46": 10 };
+  assert.strictEqual(resolveCapacity(overrideMap, "Novak", 2026, 46, 5, 8, 35), 10);
+});
+test("targetVisitsWeek defaults to null (falls back to days x targetPerDay) when omitted", () => {
+  assert.strictEqual(resolveCapacity({}, "Novak", 2026, 47, 5, 8), 40);
+});
 
 // ==========================================================================
 

@@ -362,16 +362,33 @@ export function determineComplianceStatus(
   // it happened, so it is not "Nesplneno" (which means it never happened)
 }
 
+// Capacity is fundamentally a WEEKLY number - a per-technician/week
+// CAPACITY_OVERRIDE always wins if present. Below that, targetVisitsWeek
+// (a flat weekly target, e.g. CONTROL.TARGET_VISITS_WEEK) is used directly
+// if configured (product owner, 2026-07-03: wants to work in weekly
+// capacity, not derive it from a daily rate). Only if NEITHER a per-
+// technician override NOR a flat weekly target exists does this fall back
+// to the original workDaysCount x targetVisitsPerDay derivation (still
+// useful as a holiday-aware default, and kept for backward compatibility -
+// existing workbooks with only TARGET_VISITS_DAY configured keep working
+// exactly as before).
 export function resolveCapacity(
   overrideMap: { [key: string]: number },
   tech: string,
   year: number,
   week: number,
   workDaysCount: number,
-  targetVisitsPerDay: number
+  targetVisitsPerDay: number,
+  targetVisitsWeek: number | null = null
 ): number {
   const key = tech + "|" + year + "|" + week;
-  return overrideMap[key] !== undefined ? overrideMap[key] : workDaysCount * targetVisitsPerDay;
+  if (overrideMap[key] !== undefined) {
+    return overrideMap[key];
+  }
+  if (targetVisitsWeek !== null) {
+    return targetVisitsWeek;
+  }
+  return workDaysCount * targetVisitsPerDay;
 }
 
 // ============================================================================
