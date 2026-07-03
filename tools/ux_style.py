@@ -120,6 +120,18 @@ ENGINE_WRITABLE = {
     "TECHNICIAN_PERFORMANCE_LOG", "TECHNICIAN_PERFORMANCE_SUMMARY", "TECHNICIAN_TOP_ISSUES",
 }
 
+# A third category, distinct from both of the above: dashboard screens that
+# are neither engine-written nor plain config, but require live user
+# interaction (Data Validation dropdowns, a native Excel Table's own
+# sort/filter). protect_config_sheet()'s binary "engine-writable = never
+# protected, else = locked down" model has no room for "not engine-written,
+# but the user still needs to click things" - found as a real bug during a
+# post-build QA pass (2026-07-06): TECHNICIAN_SCORECARD/WEEK_DASHBOARD's
+# filter dropdowns and PERFORMANCE's Table sort/filter were being silently
+# disabled by real Excel sheet protection, defeating the entire point of
+# building them as native, interactive Excel elements.
+INTERACTIVE_DASHBOARD_SHEETS = {"TECHNICIAN_SCORECARD", "PERFORMANCE", "WEEK_DASHBOARD"}
+
 # Per-sheet: which columns (by header name) are meant for manual editing.
 # Everything else on that sheet is shown as system/read-only styling.
 EDITABLE_COLUMNS = {
@@ -510,7 +522,7 @@ def add_dropdowns(ws, sheet_name, max_rows=500):
 
 
 def protect_config_sheet(ws, sheet_name):
-    if sheet_name in ENGINE_WRITABLE:
+    if sheet_name in ENGINE_WRITABLE or sheet_name in INTERACTIVE_DASHBOARD_SHEETS:
         return
     editable = set(EDITABLE_COLUMNS.get(sheet_name, []))
     idx = _header_index(ws)
@@ -1177,10 +1189,15 @@ def build_performance_sheet(wb, n_rows=60):
     )
     # Trend column: native Excel icon set (▲/flat/▼), not a custom arrow -
     # a numeric column sorts correctly in the Table, the icon set alone
-    # carries direction.
+    # carries direction. cfvo thresholds MUST be non-decreasing (OOXML
+    # requirement) - found broken as [0, -0.001, 0.001] during a post-build
+    # QA pass (2026-07-06), which is not ascending and risks Excel flagging
+    # the file for repair on open. [0, 0, 0.0001] is valid and keeps the
+    # same intent: negative delta -> down arrow, delta in [0, 0.0001) ->
+    # flat, delta >= 0.0001 -> up arrow.
     ws.conditional_formatting.add(
         f"M{first_data_row}:M{last_row}",
-        IconSetRule(icon_style="3Arrows", type="num", values=[0, -0.001, 0.001], showValue=True, reverse=False),
+        IconSetRule(icon_style="3Arrows", type="num", values=[0, 0, 0.0001], showValue=True, reverse=False),
     )
 
     return ws
@@ -1891,14 +1908,20 @@ def apply_all(wb, control_rows):
         build_technician_plan(wb)
     if "DASHBOARD" in wb.sheetnames:
         build_dashboard_template(wb)
-    if "TECHNICIAN_PERFORMANCE_LOG" in wb.sheetnames and "TECHNICIAN_TOP_ISSUES" in wb.sheetnames:
+    scorecard_built = "TECHNICIAN_PERFORMANCE_LOG" in wb.sheetnames and "TECHNICIAN_TOP_ISSUES" in wb.sheetnames
+    if scorecard_built:
         build_technician_scorecard(wb)
     if "TECHNICIAN_PERFORMANCE_SUMMARY" in wb.sheetnames:
         build_performance_sheet(wb)
-    if "TECHNICIAN_PERFORMANCE_LOG" in wb.sheetnames and "TECHNICIAN_SCORECARD" in wb.sheetnames:
-        # Must run after build_technician_scorecard() - reuses its unique-
-        # technician spill (TECHNICIAN_SCORECARD!$P$2#) rather than
-        # recomputing UNIQUE/FILTER a second time.
+    if scorecard_built:
+        # Must run after build_technician_scorecard() (just above) - reuses
+        # its unique-technician spill (TECHNICIAN_SCORECARD!$P$2#) rather
+        # than recomputing UNIQUE/FILTER a second time. Gated on the same
+        # scorecard_built flag that gated the call above, not on
+        # "does a TECHNICIAN_SCORECARD sheet happen to exist" (a stale sheet
+        # from an earlier run could satisfy that check without this pass
+        # having actually rebuilt it - found during a post-build QA pass,
+        # 2026-07-06).
         build_week_dashboard(wb)
     if "POS_MASTER" in wb.sheetnames:
         apply_banded_rows(wb["POS_MASTER"], 2, 500, wb["POS_MASTER"].max_column or 39)
