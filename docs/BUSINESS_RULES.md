@@ -301,6 +301,24 @@ STATUS: CONFIRMED
 
 ## 12. Compliance
 
+**RULE: SalesApp "Store UID" is a terminal number, not a POS number**
+CONDITION: matching a SalesApp visit row to a planned POS visit
+DISCOVERED/CONFIRMED: 2026-07-03 - a real production test found ZERO direct matches between
+`POS_MASTER.posId` and SalesApp's `Store UID` column on real data, despite the code previously
+assuming they were the same identifier. Product owner confirmed: SalesApp mislabels this column -
+it is actually the TERMINAL number (matches `POS_MASTER.terminalId`, sourced from RAW_DATA's
+"ČÍSLO TERMINÁLU"), not the POS/location number. A single physical POS can have 2 terminals, and
+plans are made per-POS (location), never per-terminal, so every SalesApp row must be resolved
+terminal → POS via `POS_MASTER.terminalId` before matching against `MANAGER_PLAN_PUBLISHED`.
+ACTION: `ComplianceEngine.ts` builds a `terminalId → posId` map from `POS_MASTER` and resolves
+every SalesApp row through it before compliance matching; a terminal not found in `POS_MASTER` is
+skipped (not guessed at). Verified: resolving via `terminalId` matched 73% of rows in a real
+SalesApp export (5636/7710), all with plausible name/address correspondence; the remaining 27% are
+terminals not present in that particular `POS_MASTER` snapshot (expected, not a bug).
+STATUS: CONFIRMED (product owner, 2026-07-03) - corrects a previously-CONFIRMED-but-wrong
+assumption ("Store UID = POS number") that would have silently prevented essentially all real
+compliance matching from ever succeeding in production.
+
 **RULE: Compliance states**
 States: `Splněno_včas`, `Splněno_pozdě`, `Nesplněno`, `Navíc_evidováno`
 CONDITION: computed by comparing the Published snapshot of `plannedVisit` against `actualVisit`

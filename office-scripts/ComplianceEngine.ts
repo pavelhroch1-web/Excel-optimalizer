@@ -21,9 +21,15 @@
 //     campaign-purpose row is what counts, both conditions together.
 //   - Appends to VISIT_HISTORY_ACTUAL, deduplicated by SalesApp UID (safe to
 //     re-import overlapping weekly exports).
-//   - Matches actual visits to MANAGER_PLAN rows by POS + week (Store UID =
-//     POS number, confirmed against real data). Does NOT attempt to match
-//     SalesApp "Executor" to a POS_MASTER technician name - the two systems
+//   - Matches actual visits to MANAGER_PLAN rows by POS + week. SalesApp's
+//     "Store UID" is a TERMINAL number, not a POS (location) number -
+//     verified against real data 2026-07-03 (direct Store-UID-to-posId
+//     matching produced ZERO matches on a real export; POS_MASTER and
+//     SalesApp use entirely different numbering for the same location).
+//     Resolved via POS_MASTER.terminalId before matching - a POS can have 2
+//     terminals, and plans are made per-POS, not per-terminal. Does NOT
+//     attempt to match SalesApp "Executor" to a POS_MASTER technician name -
+//     the two systems
 //     use incompatible name formats ("Rek Lubomir" vs "302 Jan Kochman") and
 //     guessing a fuzzy match was explicitly ruled out. Technician-level KPIs
 //     use MANAGER_PLAN's own technician assignment instead, which sidesteps
@@ -287,6 +293,30 @@ function main(workbook: ExcelScript.Workbook) {
     (h) => noSpace(h).includes("MCHD") && noSpace(h).includes("NABEHKAMPANE")
   );
 
+  // SalesApp's "Store UID" is actually a TERMINAL number, not a POS (location)
+  // number - confirmed by product owner (2026-07-03), found by comparing real
+  // data: direct Store-UID-to-posId matching produced ZERO matches on a real
+  // export (POS_MASTER.posId and SalesApp Store UID use different numbering
+  // entirely), while resolving through POS_MASTER.terminalId (RAW_DATA's
+  // "CISLO TERMINALU" column) matched 73% of real rows with names/addresses
+  // confirming the same physical location. One POS can have 2 terminals
+  // (product owner: "na jedne provozovne mohou byt 2 terminaly"), and plans
+  // are made per-POS (location), not per-terminal, so every SalesApp row
+  // must be resolved terminal -> POS via this map before it can be matched
+  // to anything in MANAGER_PLAN_PUBLISHED (which is keyed by POS, not
+  // terminal).
+  const pmHeadersForTerminalMap = (posMaster[0] as string[]).map((h) => String(h));
+  const pmIdxForTerminalMap = (name: string) => pmHeadersForTerminalMap.indexOf(name);
+  const cTerminalId = pmIdxForTerminalMap("terminalId");
+  const cPosIdInMaster = pmIdxForTerminalMap("posId");
+  let terminalIdToPosId: { [terminalId: string]: string } = {};
+  for (let i = 1; i < posMaster.length; i++) {
+    const tid = String(posMaster[i][cTerminalId]);
+    if (tid) {
+      terminalIdToPosId[tid] = String(posMaster[i][cPosIdInMaster]);
+    }
+  }
+
   const knownUids = new Set<string>();
   for (let i = 1; i < visitHistoryActual.length; i++) {
     knownUids.add(String(visitHistoryActual[i][6]));
@@ -339,8 +369,17 @@ function main(workbook: ExcelScript.Workbook) {
     if (cCampaignPurpose == -1 || norm(String(row[cCampaignPurpose])) != "ANO") {
       continue;
     }
+    // Resolve SalesApp's terminal-number "Store UID" to the POS (location)
+    // it belongs to - see terminalIdToPosId's comment above. A terminal not
+    // found in POS_MASTER (e.g. genuinely new/unknown, or this POS_MASTER
+    // snapshot predates it) cannot be matched to any planned POS visit, so
+    // the row is skipped rather than guessed.
+    const resolvedPosId = terminalIdToPosId[String(row[cStoreUID])];
+    if (!resolvedPosId) {
+      continue;
+    }
     newVisits.push({
-      posId: String(row[cStoreUID]),
+      posId: resolvedPosId,
       date,
       week,
       year,
