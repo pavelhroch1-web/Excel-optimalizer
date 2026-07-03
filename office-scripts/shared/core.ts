@@ -22,6 +22,7 @@ export interface POSItem {
   pos: string;
   tech: string;
   kategorie: string;
+  market: string;
   classification: string;
   nazev: string;
   ulice: string;
@@ -128,6 +129,36 @@ function normalizeAddressKey(v: string): string {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .trim();
+}
+
+// Whether a CadenceRule's scope/matchValue covers a given POS - CATEGORY and
+// CATEGORYPREFIX match on category, MARKET matches on market (added for
+// CORN, whose real business condition is `market = CORN`, not a category).
+// Callers pass already-normalized (norm()'d) strings - this function does no
+// normalization itself, consistent with categoryRule() above.
+export function matchesCadenceRuleScope(
+  rule: CadenceRule,
+  categoryNormalized: string,
+  marketNormalized: string
+): boolean {
+  return (
+    (rule.scope == "CATEGORY" && rule.matchValue.includes(categoryNormalized)) ||
+    (rule.scope == "CATEGORYPREFIX" && rule.matchValue.some((p) => categoryNormalized.startsWith(p))) ||
+    (rule.scope == "MARKET" && rule.matchValue.includes(marketNormalized))
+  );
+}
+
+// Whether a POS is overdue for a RECURRING+HARD cadence rule (e.g. CORN,
+// GECO): never visited (weeksSinceLastVisit is null), or at/beyond
+// maxIntervalWeeks since the last real visit. A rule with no
+// maxIntervalWeeks configured can never trigger this (nothing to be overdue
+// against) - deliberately conservative rather than treating "no interval"
+// as "always overdue".
+export function isOverdueForCadenceRule(rule: CadenceRule, weeksSinceLastVisit: number | null): boolean {
+  return (
+    rule.maxIntervalWeeks != null &&
+    (weeksSinceLastVisit === null || weeksSinceLastVisit >= rule.maxIntervalWeeks)
+  );
 }
 
 export function pickMandatory(list: POSItem[], mandatoryRules: CadenceRule[]): POSItem[] {

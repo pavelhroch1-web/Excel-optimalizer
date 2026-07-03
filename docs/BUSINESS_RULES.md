@@ -76,9 +76,23 @@ CADENCE_RULES
 CONDITION: `market = CORN` (confirmed: 16 POS in production data)
 ACTION: guaranteeType = HARD, maxIntervalWeeks = 4
 PRIORITY: HARD — reserved capacity, evaluated before scored competition
-STATUS: CONFIRMED - ACTIVATED in `CADENCE_RULES` 2026-07-03 (was marked CONFIRMED here since
-early in the project, but `active` was never actually flipped to YES in the config table itself -
-found and fixed as an inconsistency between docs and config, not a new decision)
+STATUS: CONFIRMED - ACTIVATED and IMPLEMENTED 2026-07-03. Was marked CONFIRMED here since early in
+the project, but two gaps existed until now: (1) `active` was never actually flipped to YES in the
+`CADENCE_RULES` config table - a docs/config inconsistency, not a new decision; (2)
+`PlanningEngine.ts` had no code path at all for a RECURRING+HARD guarantee (only
+ONCE_PER_CAMPAIGN+HARD via `MANDATORY_9PODNIK`, and CORE's SOFT_HIGH_WEIGHT scoring boost existed)
+- found when verifying CORN/GECO empirically produced zero change in plan output despite being
+"active". Implemented via `core.ts`'s `matchesCadenceRuleScope()`/`isOverdueForCadenceRule()`
+(unit-tested) plus a second matching pass in `PlanningEngine.ts` that force-includes an overdue POS
+through the same `pickMandatory()`/`selectWeekPOS()` path as `MANDATORY_9PODNIK`, only if no
+ONCE_PER_CAMPAIGN rule already claimed it first. KNOWN SIMPLIFICATION: since Planning generates a
+whole multi-week Draft horizon in one run and a forced POS is added to that technician's `used` set
+for the rest of the run, a POS is force-included at most ONCE per Planning run, not once every time
+it crosses `maxIntervalWeeks` within the run - correct as long as `maxIntervalWeeks` (CORN=4,
+GECO=5) is `>=` `CAMPAIGN_LENGTH` (4 by default), which holds for both today, but would need
+revisiting if either changes. In practice CORN's 16 POS mostly overlap with `MANDATORY_9PODNIK`'s
+category match already (found while testing on real data), so this mechanism's CORN impact is
+currently small; GECO (category-only, no such overlap) is where it matters.
 
 **RULE: GECO**
 CONDITION: `category = 1GECO` (387 POS) - product owner confirmed 2026-07-03, not the broader
@@ -86,7 +100,13 @@ CONDITION: `category = 1GECO` (387 POS) - product owner confirmed 2026-07-03, no
 ACTION: maxIntervalWeeks = 5, guaranteeType = HARD (volume is small relative to weekly capacity,
 so a hard reservation cannot meaningfully starve other visits — see worked example in
 ARCHITECTURE.md §6)
-STATUS: CONFIRMED (product owner, 2026-07-03) - ACTIVATED in `CADENCE_RULES`
+STATUS: CONFIRMED (product owner, 2026-07-03) - ACTIVATED and IMPLEMENTED, see CORN entry above for
+the shared mechanism and its "once per Planning run" caveat. Verified on real data: a 1GECO POS
+mocked to 10 weeks since last visit (past the 5-week threshold) was correctly force-included with
+reason tag "MANDATORY (GECO)"; most 1GECO POS already score highly enough via CORE's
+SOFT_HIGH_WEIGHT boost to be selected anyway (category `1GECO` also matches CORE's `STARTS_1`
+categoryPrefix rule), so this mechanism's practical effect is mainly a safety net for GECO POS that
+would otherwise lose out on scored competition, not the primary reason most of them get visited.
 
 **RULE: Mandatory**
 CONDITION: any condition configured in CADENCE_RULES with guaranteeType = HARD and an explicit

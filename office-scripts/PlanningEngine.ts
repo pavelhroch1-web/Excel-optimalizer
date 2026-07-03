@@ -140,6 +140,7 @@ function main(workbook: ExcelScript.Workbook) {
     pos: string;
     tech: string;
     kategorie: string;
+    market: string;
     classification: string;
     nazev: string;
     ulice: string;
@@ -233,6 +234,25 @@ function main(workbook: ExcelScript.Workbook) {
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .trim();
+  }
+
+  function matchesCadenceRuleScope(
+    rule: CadenceRule,
+    categoryNormalized: string,
+    marketNormalized: string
+  ): boolean {
+    return (
+      (rule.scope == "CATEGORY" && rule.matchValue.includes(categoryNormalized)) ||
+      (rule.scope == "CATEGORYPREFIX" && rule.matchValue.some((p) => categoryNormalized.startsWith(p))) ||
+      (rule.scope == "MARKET" && rule.matchValue.includes(marketNormalized))
+    );
+  }
+
+  function isOverdueForCadenceRule(rule: CadenceRule, weeksSinceLastVisit: number | null): boolean {
+    return (
+      rule.maxIntervalWeeks != null &&
+      (weeksSinceLastVisit === null || weeksSinceLastVisit >= rule.maxIntervalWeeks)
+    );
   }
 
   function pickMandatory(list: POSItem[], mandatoryRules: CadenceRule[]): POSItem[] {
@@ -524,6 +544,18 @@ function main(workbook: ExcelScript.Workbook) {
   const mandatoryRules = activeCadenceRules.filter(
     (r) => r.intervalType == "ONCE_PER_CAMPAIGN" && r.guaranteeType == "HARD"
   );
+  // RECURRING + HARD (e.g. CORN, GECO once activated): "must be visited at
+  // least every maxIntervalWeeks weeks", enforced on an ongoing basis, not
+  // just once per campaign - see the overdue-matching loop below. Distinct
+  // from mandatoryRules (ONCE_PER_CAMPAIGN) above and from coreRule
+  // (SOFT_HIGH_WEIGHT, a scoring boost, not a hard guarantee).
+  const recurringHardRules = activeCadenceRules.filter(
+    (r) => r.intervalType == "RECURRING" && r.guaranteeType == "HARD"
+  );
+  // Passed to pickMandatory()/selectWeekPOS() so its dedupBy lookup resolves
+  // correctly for BOTH kinds of forced-inclusion rule, not just the
+  // ONCE_PER_CAMPAIGN ones.
+  const allHardRules = [...mandatoryRules, ...recurringHardRules];
 
   let premiumPercent = 20;
   const parHeaders = (paretoGroups[0] as string[]).map((h) => String(h));
@@ -638,6 +670,7 @@ function main(workbook: ExcelScript.Workbook) {
       pos: String(r[midx("posId")]),
       tech: tech,
       kategorie: category,
+      market: String(r[midx("market")]),
       classification: String(r[midx("classification")]),
       nazev: String(r[midx("nazev")]),
       ulice: String(r[midx("street")]),
@@ -658,12 +691,29 @@ function main(workbook: ExcelScript.Workbook) {
     };
 
     for (const mr of mandatoryRules) {
-      const matches =
-        (mr.scope == "CATEGORY" && mr.matchValue.includes(norm(category))) ||
-        (mr.scope == "CATEGORYPREFIX" && mr.matchValue.some((p) => norm(category).startsWith(p)));
-      if (matches) {
+      if (matchesCadenceRuleScope(mr, norm(category), norm(item.market))) {
         item.mandatoryRuleId = mr.ruleId;
         break;
+      }
+    }
+
+    // RECURRING + HARD overdue check (CORN/GECO): only if no ONCE_PER_CAMPAIGN
+    // rule already claimed this item above - forces it through the same
+    // pickMandatory()/selectWeekPOS() path, bypassing scored competition,
+    // for whichever week of THIS run it's first overdue in. A POS with
+    // maxIntervalWeeks >= CAMPAIGN_LENGTH (true for both CORN=4 and GECO=5
+    // against the current 4-week campaign default) is naturally forced at
+    // most once per run either way - see docs/BUSINESS_RULES.md for the
+    // "at most once per Planning run" scoping note on this simplification.
+    if (!item.mandatoryRuleId) {
+      for (const rr of recurringHardRules) {
+        if (
+          matchesCadenceRuleScope(rr, norm(category), norm(item.market)) &&
+          isOverdueForCadenceRule(rr, weeksSince)
+        ) {
+          item.mandatoryRuleId = rr.ruleId;
+          break;
+        }
       }
     }
 
@@ -723,7 +773,7 @@ function main(workbook: ExcelScript.Workbook) {
 
       const available = groups[tech].filter((p) => !used.includes(p));
       const holdPremium = campaignChangeSoon(week);
-      const baseSelection = selectWeekPOS(available, capacity, mandatoryRules, holdPremium);
+      const baseSelection = selectWeekPOS(available, capacity, allHardRules, holdPremium);
       const preGpsIds = new Set(baseSelection.map((p) => p.pos));
       const selected = addGpsBonus(baseSelection, available, GPS_CONFIG);
 

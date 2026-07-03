@@ -10,6 +10,8 @@ import {
   categoryRule,
   computeScore,
   applyPremiumTier,
+  matchesCadenceRuleScope,
+  isOverdueForCadenceRule,
   pickMandatory,
   selectWeekPOS,
   addGpsBonus,
@@ -47,6 +49,7 @@ function makeItem(overrides: Partial<POSItem>): POSItem {
     pos: "1",
     tech: "TECH_A",
     kategorie: "4OSTATNI",
+    market: "OSTATNI",
     classification: "B",
     nazev: "Test Shop",
     ulice: "Main St",
@@ -160,6 +163,62 @@ test("small list (3 items, 20%) rounds up to 1 via ceil - boundary case", () => 
 });
 test("empty list does not crash", () => {
   assert.doesNotThrow(() => applyPremiumTier([], 20));
+});
+
+// ==========================================================================
+console.log("matchesCadenceRuleScope() / isOverdueForCadenceRule()");
+// ==========================================================================
+
+const cornRule: CadenceRule = {
+  ruleId: "CORN",
+  scope: "MARKET",
+  matchValue: ["CORN"],
+  minGapWeeks: null,
+  maxIntervalWeeks: 4,
+  intervalType: "RECURRING",
+  guaranteeType: "HARD",
+  dedupBy: "NONE",
+  campaignChangeOverride: false,
+  priority: 80,
+};
+const gecoRule: CadenceRule = {
+  ruleId: "GECO",
+  scope: "CATEGORY",
+  matchValue: ["1GECO"],
+  minGapWeeks: null,
+  maxIntervalWeeks: 5,
+  intervalType: "RECURRING",
+  guaranteeType: "HARD",
+  dedupBy: "NONE",
+  campaignChangeOverride: false,
+  priority: 80,
+};
+
+test("matchesCadenceRuleScope: MARKET scope matches on market, not category", () => {
+  assert.strictEqual(matchesCadenceRuleScope(cornRule, "9PODNIKC", "CORN"), true);
+  assert.strictEqual(matchesCadenceRuleScope(cornRule, "CORN", "OSTATNI"), false);
+});
+test("matchesCadenceRuleScope: CATEGORY scope matches on category, not market", () => {
+  assert.strictEqual(matchesCadenceRuleScope(gecoRule, "1GECO", "OSTATNI"), true);
+  assert.strictEqual(matchesCadenceRuleScope(gecoRule, "OSTATNI", "1GECO"), false);
+});
+test("matchesCadenceRuleScope: CATEGORYPREFIX matches by prefix", () => {
+  const coreRule: CadenceRule = { ...cornRule, scope: "CATEGORYPREFIX", matchValue: ["1"] };
+  assert.strictEqual(matchesCadenceRuleScope(coreRule, "1GECO", ""), true);
+  assert.strictEqual(matchesCadenceRuleScope(coreRule, "4OSTATNI", ""), false);
+});
+test("isOverdueForCadenceRule: never visited (null) is always overdue when maxIntervalWeeks is set", () => {
+  assert.strictEqual(isOverdueForCadenceRule(cornRule, null), true);
+});
+test("isOverdueForCadenceRule: exactly at the interval is overdue", () => {
+  assert.strictEqual(isOverdueForCadenceRule(cornRule, 4), true);
+});
+test("isOverdueForCadenceRule: under the interval is not overdue", () => {
+  assert.strictEqual(isOverdueForCadenceRule(cornRule, 3), false);
+});
+test("isOverdueForCadenceRule: rule with no maxIntervalWeeks never triggers overdue", () => {
+  const noInterval: CadenceRule = { ...cornRule, maxIntervalWeeks: null };
+  assert.strictEqual(isOverdueForCadenceRule(noInterval, null), false);
 });
 
 // ==========================================================================
