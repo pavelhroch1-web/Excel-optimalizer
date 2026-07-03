@@ -99,13 +99,12 @@ def main(ref_path, out_path):
              "Preserves V10.5.5 mandatoryPodnik(): one guaranteed slot per campaign run, "
              "best-PTT POS per street+city."],
             ["GECO", "category", "1GECO", "", 5, "RECURRING", "HARD", "NONE", "NO",
-             80, "NO", "", "",
-             "TODO: confirm scope (1GECO only vs whole KA PARTNERS market) and "
-             "guaranteeType before activating. New for V11, no V10.5.5 precedent."],
+             80, "YES", "", "",
+             "Scope confirmed as 1GECO only (not the broader KA PARTNERS market), "
+             "guaranteeType=HARD confirmed - product owner, 2026-07-03."],
             ["CORN", "market", "CORN", "", 4, "RECURRING", "HARD", "NONE", "NO",
-             80, "NO", "", "",
-             "TODO: confirm guaranteeType before activating (HARD proposed, "
-             "16 POS = negligible capacity impact). New for V11, no V10.5.5 precedent."],
+             80, "YES", "", "",
+             "HARD/4 weeks confirmed (16 POS = negligible capacity impact)."],
         ],
     )
 

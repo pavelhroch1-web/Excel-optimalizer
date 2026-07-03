@@ -76,15 +76,17 @@ CADENCE_RULES
 CONDITION: `market = CORN` (confirmed: 16 POS in production data)
 ACTION: guaranteeType = HARD, maxIntervalWeeks = 4
 PRIORITY: HARD — reserved capacity, evaluated before scored competition
-STATUS: CONFIRMED
+STATUS: CONFIRMED - ACTIVATED in `CADENCE_RULES` 2026-07-03 (was marked CONFIRMED here since
+early in the project, but `active` was never actually flipped to YES in the config table itself -
+found and fixed as an inconsistency between docs and config, not a new decision)
 
 **RULE: GECO**
-CONDITION: ★ OPEN — proposed `category = 1GECO` (387 POS), pending confirmation whether scope is
-broader (e.g. entire `market = KA PARTNERS`, 2088 POS)
-ACTION: maxIntervalWeeks = 5. guaranteeType ★ OPEN — proposed HARD (volume is small relative to
-weekly capacity, so a hard reservation cannot meaningfully starve other visits — see worked
-example in ARCHITECTURE.md §6)
-STATUS: ★ OPEN — needs scope + guarantee-type confirmation before Planning Engine can score it
+CONDITION: `category = 1GECO` (387 POS) - product owner confirmed 2026-07-03, not the broader
+`market = KA PARTNERS` (2088 POS) alternative that was also on the table
+ACTION: maxIntervalWeeks = 5, guaranteeType = HARD (volume is small relative to weekly capacity,
+so a hard reservation cannot meaningfully starve other visits — see worked example in
+ARCHITECTURE.md §6)
+STATUS: CONFIRMED (product owner, 2026-07-03) - ACTIVATED in `CADENCE_RULES`
 
 **RULE: Mandatory**
 CONDITION: any condition configured in CADENCE_RULES with guaranteeType = HARD and an explicit
