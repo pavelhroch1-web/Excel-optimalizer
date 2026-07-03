@@ -24,6 +24,7 @@ from openpyxl.formatting.rule import FormulaRule, DataBarRule
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import column_index_from_string
 from openpyxl.chart import BarChart, LineChart
+from openpyxl.workbook.defined_name import DefinedName
 
 # ============================================================================
 # COLOR PALETTE
@@ -56,7 +57,7 @@ TINT_CRITICAL = "FCE4D6"
 TINT_NEUTRAL = WHITE
 
 ICONS = {
-    "home": "🏠", "scorecard": "📊", "dashboard": "📈", "plan": "🗺",
+    "home": "🏠", "scorecard": "📊", "performance": "📋", "dashboard": "📈", "plan": "🗺",
     "good": "✅", "bad": "❌", "warning": "⚠", "celebrate": "🎉",
     "up": "▲", "down": "▼", "flat": "→",
 }
@@ -89,6 +90,7 @@ CARD_BORDER = Border(*(Side(style="thin", color=BORDER_GREY),) * 4)
 NAV_RAIL_SHEETS = [
     ("HOME", f"{ICONS['home']} Domů", "404040"),
     ("TECHNICIAN_SCORECARD", f"{ICONS['scorecard']} Scorecard", ACCENT_BLUE),
+    ("PERFORMANCE", f"{ICONS['performance']} Performance", ACCENT_BLUE),
     ("DASHBOARD", f"{ICONS['dashboard']} Dashboard", "375623"),
     ("TECHNICIAN_PLAN", f"{ICONS['plan']} Plán týdne", "375623"),
 ]
@@ -177,6 +179,23 @@ def build_section_header(ws, cell_ref, text):
 
 
 # ============================================================================
+# NAMED RANGES
+# ============================================================================
+def define_named_range(ws, name, formula):
+    """Registers a sheet-scoped Named Range (Excel's native "give this
+    formula/range a readable name" feature) - preferred over raw
+    `=$P$2#`-style cell references baked into DataValidation/formulas
+    (product owner, 2026-07-05: prefer Named Ranges + Data Validation
+    lists as the standard filter-dropdown pattern, so the wiring is
+    readable and editable directly in Excel without touching this Python
+    scaffold). Scoped to the sheet (not workbook-global) so each dashboard
+    screen can define its own "TechnicianList"-style name without
+    colliding with another screen's. formula should be a full sheet-
+    qualified reference/formula, e.g. "TECHNICIAN_SCORECARD!$P$2#"."""
+    ws.defined_names[name] = DefinedName(name, attr_text=formula)
+
+
+# ============================================================================
 # FILTER PANEL
 # ============================================================================
 def build_filter_bar_background(ws, row, col_start, col_end, fill=LIGHT_GREY, height=26):
@@ -188,10 +207,12 @@ def build_filter_bar_background(ws, row, col_start, col_end, fill=LIGHT_GREY, he
 
 def build_filter_dropdown(ws, label_cell, label_text, input_range, source_formula, default_formula=None):
     """One dropdown filter control: a label cell plus a (possibly merged)
-    input cell with a list-type DataValidation sourced from source_formula
-    (typically a dynamic-array spill reference like "=$P$2#" built by the
-    caller elsewhere on the sheet). Returns the input cell's coordinate so
-    other formulas on the sheet can reference the selection."""
+    input cell with a list-type DataValidation sourced from source_formula.
+    Pass a Named Range reference (e.g. "=TechnicianList", defined via
+    define_named_range() above) rather than a raw cell reference - the
+    standard pattern for every dashboard filter in this workbook. Returns
+    the input cell's coordinate so other formulas on the sheet can
+    reference the selection."""
     ws[label_cell] = label_text
     ws[label_cell].font = FONT_CARD_LABEL
     ws[label_cell].alignment = Alignment(vertical="center", indent=1)

@@ -298,7 +298,18 @@ def main(ref_path, out_path):
         [],
     )
 
-    # TECHNICIAN_TOP_ISSUES (Performance Engine's second output - top 5
+    # TECHNICIAN_PERFORMANCE_SUMMARY (Performance Engine's second output -
+    # one row per technician, most recent week + long-run avg + trend,
+    # feeds PERFORMANCE)
+    write_table(
+        dst_wb, "TECHNICIAN_PERFORMANCE_SUMMARY",
+        ["technician", "region", "latestYear", "latestWeek",
+         "plannedVisits", "realizedVisits", "splnenoVcas", "splnenoPozde", "nesplneno", "navicEvidovano",
+         "compliancePercent", "longRunAvgCompliance", "trendDelta"],
+        [],
+    )
+
+    # TECHNICIAN_TOP_ISSUES (Performance Engine's third output - top 5
     # all-time Nesplneno POS per technician, feeds TECHNICIAN_SCORECARD)
     write_table(
         dst_wb, "TECHNICIAN_TOP_ISSUES",

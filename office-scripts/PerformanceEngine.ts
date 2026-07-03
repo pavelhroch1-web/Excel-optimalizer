@@ -55,7 +55,19 @@
 //     planned POS that week (informational tie-break: first area seen wins
 //     ties, not a business rule).
 //
-// SECOND OUTPUT - TECHNICIAN_TOP_ISSUES: top 5 all-time Nesplneno POS per
+// SECOND OUTPUT - TECHNICIAN_PERFORMANCE_SUMMARY: one row per technician -
+// their most recent week's numbers, a long-run average compliance, and a
+// trend delta vs. the previous week on record (technician, region,
+// latestYear, latestWeek, plannedVisits, realizedVisits, splnenoVcas,
+// splnenoPozde, nesplneno, navicEvidovano, compliancePercent,
+// longRunAvgCompliance, trendDelta), bounded technicians x 1 row, full
+// rebuild every run. Feeds the PERFORMANCE comparison screen - a real
+// native Excel Table/AutoFilter (product owner, 2026-07-05: prefer native
+// Excel Table+AutoFilter over a custom filter UI - see
+// tools/ux_style.py's build_performance_sheet()). Derived from the SAME
+// buckets already used above, not a second read of anything.
+//
+// THIRD OUTPUT - TECHNICIAN_TOP_ISSUES: top 5 all-time Nesplneno POS per
 // technician (technician, rank, posId, posName, region, nesplnenoCount),
 // bounded technicians x 5 rows, full rebuild every run. Feeds
 // TECHNICIAN_SCORECARD's "TOP problematic POS" tile. Deliberately computed
@@ -326,6 +338,75 @@ function main(workbook: ExcelScript.Workbook) {
   }
 
   // ==========================================================================
+  // WRITE TECHNICIAN_PERFORMANCE_SUMMARY: one row per technician - their
+  // most recent week's numbers, plus a long-run average and trend vs the
+  // previous week on record. A bounded (technicians-count) snapshot, same
+  // full-rebuild-every-run approach as TECHNICIAN_PERFORMANCE_LOG above.
+  // Feeds the PERFORMANCE comparison screen - built as a real, sortable/
+  // filterable native Excel Table over this sheet (product owner,
+  // 2026-07-05: prefer native Excel features over custom substitutes -
+  // see tools/ux_style.py's build_performance_sheet()). Derived from the
+  // SAME buckets already computed above, not a second read of anything -
+  // no new correctness risk.
+  // ==========================================================================
+
+  interface TechWeekEntry {
+    year: number; week: number; region: string;
+    plannedVisits: number; realizedVisits: number;
+    splnenoVcas: number; splnenoPozde: number; nesplneno: number; navicEvidovano: number;
+    compliancePercent: number;
+  }
+  let byTechWeeks: { [tech: string]: TechWeekEntry[] } = {};
+  for (const key of Object.keys(buckets)) {
+    const b = buckets[key];
+    let topArea = "";
+    let topAreaCount = 0;
+    for (const area of Object.keys(b.areaCounts)) {
+      if (b.areaCounts[area] > topAreaCount) {
+        topArea = area;
+        topAreaCount = b.areaCounts[area];
+      }
+    }
+    const compliancePercent = b.plannedVisits > 0 ? Math.round((b.realizedVisits / b.plannedVisits) * 1000) / 10 : 0;
+    if (!byTechWeeks[b.technician]) {
+      byTechWeeks[b.technician] = [];
+    }
+    byTechWeeks[b.technician].push({
+      year: b.year, week: b.week, region: topArea,
+      plannedVisits: b.plannedVisits, realizedVisits: b.realizedVisits,
+      splnenoVcas: b.splnenoVcas, splnenoPozde: b.splnenoPozde,
+      nesplneno: b.nesplneno, navicEvidovano: b.navicEvidovano,
+      compliancePercent,
+    });
+  }
+
+  let summaryRows: (string | number)[][] = [];
+  for (const tech of Object.keys(byTechWeeks)) {
+    const weeks = byTechWeeks[tech].sort((a, b) => b.year * 100 + b.week - (a.year * 100 + a.week));
+    const latest = weeks[0];
+    const prev = weeks.length > 1 ? weeks[1] : null;
+    const longRunAvgCompliance = Math.round((weeks.reduce((s, w) => s + w.compliancePercent, 0) / weeks.length) * 10) / 10;
+    const trendDelta = prev ? Math.round((latest.compliancePercent - prev.compliancePercent) * 10) / 10 : "";
+    summaryRows.push([
+      tech, latest.region, latest.year, latest.week,
+      latest.plannedVisits, latest.realizedVisits,
+      latest.splnenoVcas, latest.splnenoPozde, latest.nesplneno, latest.navicEvidovano,
+      latest.compliancePercent, longRunAvgCompliance, trendDelta,
+    ]);
+  }
+  const summaryHeaderRow = [
+    "technician", "region", "latestYear", "latestWeek",
+    "plannedVisits", "realizedVisits", "splnenoVcas", "splnenoPozde", "nesplneno", "navicEvidovano",
+    "compliancePercent", "longRunAvgCompliance", "trendDelta",
+  ];
+  const summaryWs = workbook.getWorksheet("TECHNICIAN_PERFORMANCE_SUMMARY");
+  summaryWs.getRange("A2:M100000").clear(ExcelScript.ClearApplyTo.contents);
+  summaryWs.getRangeByIndexes(0, 0, 1, summaryHeaderRow.length).setValues([summaryHeaderRow]);
+  if (summaryRows.length > 0) {
+    summaryWs.getRangeByIndexes(1, 0, summaryRows.length, summaryHeaderRow.length).setValues(summaryRows);
+  }
+
+  // ==========================================================================
   // WRITE TECHNICIAN_TOP_ISSUES: top 5 all-time-Nesplneno POS per technician
   // (bounded technicians x 5 rows, same full-rebuild-every-run approach as
   // TECHNICIAN_PERFORMANCE_LOG above). Feeds TECHNICIAN_SCORECARD's "TOP
@@ -360,6 +441,7 @@ function main(workbook: ExcelScript.Workbook) {
       " technician/week rows written to TECHNICIAN_PERFORMANCE_LOG (from " +
       dedupedRows.length + " deduped compliance evaluations, " +
       (complianceLog.length - 1) + " raw rows before dedup), " +
+      summaryRows.length + " rows written to TECHNICIAN_PERFORMANCE_SUMMARY, " +
       issueRows.length + " rows written to TECHNICIAN_TOP_ISSUES."
   );
 }

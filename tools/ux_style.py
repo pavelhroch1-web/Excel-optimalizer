@@ -19,8 +19,9 @@ get color-only "please don't hand-edit this" cues, never real protection -
 this trade-off is documented in the legend so it isn't a silent gap.
 """
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.formatting.rule import FormulaRule, DataBarRule
+from openpyxl.formatting.rule import FormulaRule, DataBarRule, IconSetRule
 from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter, column_index_from_string
 from openpyxl.comments import Comment
 from openpyxl.chart import LineChart, BarChart, Reference
@@ -59,6 +60,7 @@ THIN_BORDER = Border(*(Side(style="thin", color="BFBFBF"),) * 4)
 SHEET_GROUPS = [
     ("HOME", "404040"),
     ("TECHNICIAN_SCORECARD", "2E75B6"),
+    ("PERFORMANCE", "2E75B6"),
     ("DASHBOARD", "375623"),
     ("TECHNICIAN_PLAN", "375623"),
     ("POS_MASTER", "7030A0"),
@@ -89,7 +91,7 @@ SHEET_GROUPS = [
 # Everything else that stays visible (import staging) is a necessary but
 # occasional "mailbox", not part of the daily working set - communicated on
 # HOME, not hidden, because the user must paste into it weekly.
-CORE_DAILY_SHEETS = ["HOME", "TECHNICIAN_SCORECARD", "DASHBOARD", "TECHNICIAN_PLAN", "POS_MASTER", "ACTIVITY_PLAN", "IMPORT_HUB"]
+CORE_DAILY_SHEETS = ["HOME", "TECHNICIAN_SCORECARD", "PERFORMANCE", "DASHBOARD", "TECHNICIAN_PLAN", "POS_MASTER", "ACTIVITY_PLAN", "IMPORT_HUB"]
 IMPORT_UTILITY_SHEETS = ["RAW_DATA", "POS_STATUS_IMPORT", "SALESAPP_IMPORT"]
 
 # Everything not in CORE_DAILY_SHEETS/IMPORT_UTILITY_SHEETS is implementation
@@ -105,7 +107,7 @@ HIDDEN_SHEETS = {
     # Performance Engine's raw aggregated tables - data sources for the
     # manager UX sheets (docs/MANAGER_UX_ARCHITECTURE.md), not something a
     # manager reads directly, same treatment as COMPLIANCE_LOG/ADVISOR_LOG.
-    "TECHNICIAN_PERFORMANCE_LOG", "TECHNICIAN_TOP_ISSUES",
+    "TECHNICIAN_PERFORMANCE_LOG", "TECHNICIAN_PERFORMANCE_SUMMARY", "TECHNICIAN_TOP_ISSUES",
 }
 
 # Sheets an engine writes to programmatically - never real-protected, see
@@ -114,7 +116,7 @@ HIDDEN_SHEETS = {
 ENGINE_WRITABLE = {
     "POS_MASTER", "MANAGER_PLAN", "MANAGER_PLAN_PUBLISHED", "PLAN_LIFECYCLE",
     "COMPLIANCE_LOG", "ADVISOR_LOG", "VISIT_HISTORY_ACTUAL", "DASHBOARD",
-    "TECHNICIAN_PERFORMANCE_LOG", "TECHNICIAN_TOP_ISSUES",
+    "TECHNICIAN_PERFORMANCE_LOG", "TECHNICIAN_PERFORMANCE_SUMMARY", "TECHNICIAN_TOP_ISSUES",
 }
 
 # Per-sheet: which columns (by header name) are meant for manual editing.
@@ -572,7 +574,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     ws = wb.create_sheet("HOME", 0)
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 3
-    for col in "BCDEFGHI":
+    for col in "BCDEFGHIJK":
         ws.column_dimensions[col].width = 15
 
     # ---- Banner ----
@@ -772,6 +774,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     r += 1
     quick_links = [
         ("SCORECARD", "TECHNICIAN_SCORECARD", "2E75B6"),
+        ("PERFORMANCE", "PERFORMANCE", "2E75B6"),
         ("DASHBOARD", "DASHBOARD", "375623"),
         ("TECHNICIAN_PLAN", "TECHNICIAN_PLAN", "375623"),
         ("POS_MASTER", "POS_MASTER", "7030A0"),
@@ -904,12 +907,20 @@ def build_technician_scorecard(wb):
     for col in "PQRSTUVW":
         ws.column_dimensions[col].hidden = True
 
+    # Named Ranges over the hidden spill formulas above - the standard
+    # filter-dropdown pattern for every dashboard screen (product owner,
+    # 2026-07-05: prefer Named Ranges + Data Validation lists over raw
+    # `$P$2#`-style cell references, so the wiring is inspectable in
+    # Excel's own Name Manager, not just in this Python scaffold).
+    dashboard_ui.define_named_range(ws, "TechnicianList", "TECHNICIAN_SCORECARD!$P$2#")
+    dashboard_ui.define_named_range(ws, "TechnicianWeekList", "TECHNICIAN_SCORECARD!$Q$2#")
+
     # ==========================================================================
     # FILTER BAR - the two dropdowns that drive the entire sheet.
     # ==========================================================================
     build_filter_bar_background(ws, 5, "C", "N")
-    build_filter_dropdown(ws, "C5", "TECHNIK", "D5:F5", "=$P$2#", default_formula='=IFERROR(INDEX($P$2#,1),"")')
-    build_filter_dropdown(ws, "G5", "TÝDEN", "H5:J5", "=$Q$2#", default_formula='=IFERROR(INDEX($Q$2#,1),"")')
+    build_filter_dropdown(ws, "C5", "TECHNIK", "D5:F5", "=TechnicianList", default_formula='=IFERROR(INDEX(TechnicianList,1),"")')
+    build_filter_dropdown(ws, "G5", "TÝDEN", "H5:J5", "=TechnicianWeekList", default_formula='=IFERROR(INDEX(TechnicianWeekList,1),"")')
     ws.merge_cells("K5:N5")
     ws["K5"] = (
         f'=IFERROR("Region: "&INDEX({TP}!$D$2:$D$5000,MATCH(1,({TP}!$A$2:$A$5000=$D$5)*'
@@ -1006,6 +1017,103 @@ def build_technician_scorecard(wb):
     apply_table_borders(ws, 33, 37, "CDEF")
     ws.conditional_formatting.add(
         "F33:F37", DataBarRule(start_type="num", start_value=0, end_type="num", end_value=10, color=STATUS_CRITICAL),
+    )
+
+    return ws
+
+
+def build_performance_sheet(wb, n_rows=60):
+    """PERFORMANCE: all technicians compared side by side. Built as a real,
+    native Excel Table (ListObject) with AutoFilter over
+    TECHNICIAN_PERFORMANCE_SUMMARY (PerformanceEngine.ts's per-technician
+    snapshot) - sorting/filtering is Excel's own built-in Table behavior,
+    not a custom UI (product owner, 2026-07-05: prefer native Excel Table +
+    AutoFilter over a hand-rolled filter panel for a comparison grid).
+
+    Same live-formula-view pattern as TECHNICIAN_PLAN (see that function's
+    docstring): each table row is a plain, non-array formula pulling row r-8
+    from TECHNICIAN_PERFORMANCE_SUMMARY's row r - a fixed n_rows cap well
+    above any realistic technician count. Deliberately NOT a FILTER()/
+    dynamic-array spill: Excel does not allow a spilling array formula
+    inside a Table's range, so a native, sortable Table needs per-row
+    formulas instead - this is why PerformanceEngine.ts pre-computes one row
+    per technician (TECHNICIAN_PERFORMANCE_SUMMARY) rather than this sheet
+    trying to derive that itself."""
+    TS = "TECHNICIAN_PERFORMANCE_SUMMARY"
+    if "PERFORMANCE" in wb.sheetnames:
+        del wb["PERFORMANCE"]
+    ws = wb.create_sheet("PERFORMANCE")
+    ws.sheet_view.showGridLines = False
+    for col in "CDEFGHIJKLM":
+        ws.column_dimensions[col].width = 13
+    build_nav_rail(ws, "PERFORMANCE")
+
+    build_dashboard_banner(
+        ws, "PERFORMANCE", "Srovnání všech techniků - řaď a filtruj přímo v tabulce (Excel AutoFilter)",
+        col_start="C", col_end="M",
+    )
+    ws.freeze_panes = "C9"
+
+    # ---- Team KPI summary row ----
+    build_section_header(ws, "C5", "TÝM CELKEM")
+    cards = [
+        ("C", "E", "Průměrná compliance (tým)",
+         f'=IFERROR(ROUND(AVERAGE({TS}!$K$2:$K$5000),1)&"%","-")', NAVY, WHITE),
+        ("F", "H", "Nejlepší technik",
+         f'=IFERROR(INDEX({TS}!$A$2:$A$5000,MATCH(MAX({TS}!$K$2:$K$5000),{TS}!$K$2:$K$5000,0))'
+         f'&" ("&TEXT(MAX({TS}!$K$2:$K$5000),"0.0")&"%)","-")', STATUS_GOOD, dashboard_ui.TINT_GOOD),
+        ("I", "M", "Nejslabší technik",
+         f'=IFERROR(INDEX({TS}!$A$2:$A$5000,MATCH(MIN({TS}!$K$2:$K$5000),{TS}!$K$2:$K$5000,0))'
+         f'&" ("&TEXT(MIN({TS}!$K$2:$K$5000),"0.0")&"%)","-")', STATUS_CRITICAL, dashboard_ui.TINT_CRITICAL),
+    ]
+    build_kpi_card_row(ws, cards, label_row=6, value_row_start=7, value_row_end=7)
+    for c1, c2, label, formula, color, fill in cards:
+        ws[f"{c1}7"].font = font_card_value(size=13, color=color)
+    ws.row_dimensions[7].height = 22
+
+    # ==========================================================================
+    # COMPARISON TABLE - native Excel Table/AutoFilter, row-anchored view of
+    # TECHNICIAN_PERFORMANCE_SUMMARY (see docstring above).
+    # ==========================================================================
+    build_section_header(ws, "C9", "SROVNÁNÍ TECHNIKŮ")
+    header_row = 10
+    headers = [
+        "Technik", "Region", "Naplánováno", "Realizováno", "Splněno včas", "Splněno pozdě",
+        "Nesplněno", "Navíc", "Compliance %", "Dlouhodobý průměr", "Trend",
+    ]
+    for col, label in zip("CDEFGHIJKLM", headers):
+        ws[f"{col}{header_row}"] = label
+
+    src_cols = "ABEFGHIJKLM"  # TECHNICIAN_PERFORMANCE_SUMMARY column per table column, in order
+    first_data_row = header_row + 1
+    for i in range(n_rows):
+        r = first_data_row + i
+        sr = i + 2  # TECHNICIAN_PERFORMANCE_SUMMARY row (header is row 1 there)
+        for col, src_col in zip("CDEFGHIJKLM", src_cols):
+            ws[f"{col}{r}"] = f'=IF({TS}!$A${sr}="","",{TS}!{src_col}{sr})'
+
+    last_row = first_data_row + n_rows - 1
+    table_ref = f"C{header_row}:M{last_row}"
+    table = Table(displayName="PerformanceTable", ref=table_ref)
+    table.tableStyleInfo = TableStyleInfo(
+        name="TableStyleMedium2", showFirstColumn=False, showLastColumn=False,
+        showRowStripes=True, showColumnStripes=False,
+    )
+    ws.add_table(table)
+
+    # Compliance % severity coloring - same 4-tier palette as every other
+    # compliance figure in this workbook (STATUS_GOOD/WARNING/SERIOUS/CRITICAL).
+    apply_severity_conditional_formatting(
+        ws, f"K{first_data_row}:K{last_row}", f"K{first_data_row}",
+        thresholds=[(90, STATUS_GOOD), (70, STATUS_WARNING), (50, STATUS_SERIOUS)],
+        below_color=STATUS_CRITICAL, font_size=11, font_color=WHITE,
+    )
+    # Trend column: native Excel icon set (▲/flat/▼), not a custom arrow -
+    # a numeric column sorts correctly in the Table, the icon set alone
+    # carries direction.
+    ws.conditional_formatting.add(
+        f"M{first_data_row}:M{last_row}",
+        IconSetRule(icon_style="3Arrows", type="num", values=[0, -0.001, 0.001], showValue=True, reverse=False),
     )
 
     return ws
@@ -1512,6 +1620,8 @@ def apply_all(wb, control_rows):
         build_dashboard_template(wb)
     if "TECHNICIAN_PERFORMANCE_LOG" in wb.sheetnames and "TECHNICIAN_TOP_ISSUES" in wb.sheetnames:
         build_technician_scorecard(wb)
+    if "TECHNICIAN_PERFORMANCE_SUMMARY" in wb.sheetnames:
+        build_performance_sheet(wb)
     if "POS_MASTER" in wb.sheetnames:
         apply_banded_rows(wb["POS_MASTER"], 2, 500, wb["POS_MASTER"].max_column or 39)
         enhance_pos_master(wb)
@@ -1527,6 +1637,8 @@ def apply_all(wb, control_rows):
             continue  # build_dashboard_template already fully styled it
         if sheet_name == "TECHNICIAN_SCORECARD":
             continue  # build_technician_scorecard already fully styled it
+        if sheet_name == "PERFORMANCE":
+            continue  # build_performance_sheet already fully styled it (native Table)
         if sheet_name == "ACTIVITY_PLAN":
             # freeze_below=False: redesign_activity_plan() already set
             # freeze_panes="C2" (keep TYPE+ACTIVITY visible while scrolling
