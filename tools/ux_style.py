@@ -335,7 +335,7 @@ def build_import_hub(wb, pos_master_tech_col="O"):
         None,
         "POS_MASTER se aktualizuje, historie návštěv se rozšíří (nikdy nepřepisuje ani nemaže).",
         "BF8F00",
-        extra_note="⚙ Automatizace - spouští se jako Office Script, ne jako list.",
+        extra_note="⚙ Automatizace → skript \"ImportEngine.ts\" (1. z 3 tento týden: Import → Planning → Publish) - spouští se jako Office Script, ne jako list.",
     )
 
     # Before Planning Engine: the one check that actually matters here. A
@@ -363,8 +363,8 @@ def build_import_hub(wb, pos_master_tech_col="O"):
     ws.cell(r, 1).font = TITLE_FONT
     r += 1
     for num, title, target, color in [
-        (4, "Uprav aktivity/kampaně, pokud je potřeba", "ACTIVITY_PLAN", "BF8F00"),
-        (5, "Spusť Planning Engine, zkontroluj rozpis a publikuj", "TECHNICIAN_PLAN", "375623"),
+        (4, "Uprav aktivity/kampaně (ACTIVITY_PLAN), pokud je potřeba - volitelné, jen když se něco mění", "ACTIVITY_PLAN", "BF8F00"),
+        (5, "Automatizace → \"PlanningEngine.ts\" (2. skript), zkontroluj MANAGER_PLAN, pak \"PublishEngine.ts\" (3. skript) publikuje nejbližší týden", "TECHNICIAN_PLAN", "375623"),
     ]:
         ws.cell(r, 1, str(num)).font = Font(bold=True, size=14, color=WHITE)
         ws.cell(r, 1).fill = PatternFill("solid", fgColor=color)
