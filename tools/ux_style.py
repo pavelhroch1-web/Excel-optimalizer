@@ -40,6 +40,18 @@ WARNING_FILL = "FCE4D6"        # soft orange - inactive/TODO config rows
 LOS_FILL = "BDD7EE"            # timeline: LOS campaigns
 LOT_FILL = "F8CBAD"            # timeline: LOT campaigns
 
+# Status colors - a fixed, accessibility-validated set (never themed, never
+# reused for anything else), always paired with an icon + text label since
+# WARNING/SERIOUS fall under 3:1 contrast against a white sheet on their own
+# (checked with the project's color-accessibility validator - that's an
+# accepted tradeoff *because* every use here already carries an icon/label,
+# not a silent one). Distinct on purpose from EDITABLE/SYSTEM/IMPORT/OUTPUT
+# above, which encode "what kind of cell is this", not "is something wrong".
+STATUS_GOOD = "0CA30C"
+STATUS_WARNING = "FAB219"
+STATUS_SERIOUS = "EC835A"
+STATUS_CRITICAL = "D03B3B"
+
 HEADER_FONT = Font(color=WHITE, bold=True, size=11)
 HEADER_FILL = PatternFill("solid", fgColor=NAVY)
 TITLE_FONT = Font(bold=True, size=14, color=NAVY)
@@ -353,7 +365,7 @@ def build_import_hub(wb, pos_master_tech_col="O"):
     check_cell.font = Font(bold=True, size=14, color=NAVY)
     ws.conditional_formatting.add(
         check_cell.coordinate,
-        FormulaRule(formula=[f"{check_cell.coordinate}>0"], fill=PatternFill("solid", fgColor="FCE4D6"), font=Font(bold=True, size=14, color="C00000")),
+        FormulaRule(formula=[f"{check_cell.coordinate}>0"], fill=PatternFill("solid", fgColor=STATUS_SERIOUS), font=Font(bold=True, size=14, color=STATUS_CRITICAL)),
     )
     _nav_button(ws, f"G{r}", "Zkontrolovat →", "POS_MASTER", color="7030A0")
     r += 2
@@ -665,7 +677,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     r += 1
     assert r == PIPE_FIRST_ROW, "PIPE_FIRST_ROW must match the row this loop actually starts at"
     green_fill = PatternFill("solid", fgColor="E2EFDA")
-    red_fill = PatternFill("solid", fgColor="FCE4D6")
+    red_fill = PatternFill("solid", fgColor=STATUS_SERIOUS)
     for num, name, desc, status_formula, target, color in stages:
         ws.cell(r, 1, num).font = Font(bold=True, size=16, color=WHITE)
         ws.cell(r, 1).fill = PatternFill("solid", fgColor=color)
@@ -725,7 +737,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
         ws[f"{col}{r + row_offset + 1}"].font = value_font
     ws.conditional_formatting.add(
         f"D{r + 7}",
-        FormulaRule(formula=[f"D{r + 7}>0"], fill=PatternFill("solid", fgColor="FCE4D6")),
+        FormulaRule(formula=[f"D{r + 7}>0"], fill=PatternFill("solid", fgColor=STATUS_SERIOUS)),
     )
     r += 9
 
@@ -770,7 +782,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     )
     ws.conditional_formatting.add(
         check_cell.coordinate,
-        FormulaRule(formula=[f'LEFT({check_cell.coordinate},1)="⚠"'], fill=PatternFill("solid", fgColor="FCE4D6")),
+        FormulaRule(formula=[f'LEFT({check_cell.coordinate},1)="⚠"'], fill=PatternFill("solid", fgColor=STATUS_SERIOUS)),
     )
     r += 2
 
