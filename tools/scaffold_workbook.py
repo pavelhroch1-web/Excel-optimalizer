@@ -298,6 +298,14 @@ def main(ref_path, out_path):
         [],
     )
 
+    # TECHNICIAN_TOP_ISSUES (Performance Engine's second output - top 5
+    # all-time Nesplneno POS per technician, feeds TECHNICIAN_SCORECARD)
+    write_table(
+        dst_wb, "TECHNICIAN_TOP_ISSUES",
+        ["technician", "rank", "posId", "posName", "region", "nesplnenoCount"],
+        [],
+    )
+
     # UX pass: sheet organization, color coding, dropdowns, legend,
     # START_HERE, ACTIVITY_PLAN timeline - pure presentation, see
     # tools/ux_style.py. Runs last so it sees the final sheet content.

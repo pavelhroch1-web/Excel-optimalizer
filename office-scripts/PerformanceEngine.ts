@@ -55,6 +55,18 @@
 //     planned POS that week (informational tie-break: first area seen wins
 //     ties, not a business rule).
 //
+// SECOND OUTPUT - TECHNICIAN_TOP_ISSUES: top 5 all-time Nesplneno POS per
+// technician (technician, rank, posId, posName, region, nesplnenoCount),
+// bounded technicians x 5 rows, full rebuild every run. Feeds
+// TECHNICIAN_SCORECARD's "TOP problematic POS" tile. Deliberately computed
+// here from the already-deduped compliance rows (same latestByKey() pass
+// used above), NOT as an Excel formula over raw COMPLIANCE_LOG as originally
+// sketched in docs/MANAGER_UX_ARCHITECTURE.md section 4 - a formula-side
+// COUNTIFS over the raw append-only log would hit the exact double-counting
+// bug this file exists to avoid (see above), so this stays inside the
+// already-tested engine instead of being re-derived in the presentation
+// layer.
+//
 // NOT IN THIS VERSION (docs/MANAGER_UX_ARCHITECTURE.md, explicitly deferred
 // by product owner 2026-07-03): Merch/Visibility visit-purpose breakdown,
 // GPS-based map data.
@@ -109,6 +121,7 @@ function main(workbook: ExcelScript.Workbook) {
   const pmIdx = (name: string) => pmHeaders.indexOf(name);
   let posArea: { [posId: string]: string } = {};
   let posTechnician: { [posId: string]: string } = {};
+  let posName: { [posId: string]: string } = {};
   for (let i = 1; i < posMaster.length; i++) {
     const row = posMaster[i];
     const posId = String(row[pmIdx("posId")]);
@@ -116,6 +129,7 @@ function main(workbook: ExcelScript.Workbook) {
       continue;
     }
     posArea[posId] = String(row[pmIdx("area")] ?? "");
+    posName[posId] = String(row[pmIdx("nazev")] ?? "");
     const override = String(row[pmIdx("managerOverrideTechnician")] ?? "");
     posTechnician[posId] = override || String(row[pmIdx("assignedTechnician")] ?? "");
   }
@@ -223,6 +237,16 @@ function main(workbook: ExcelScript.Workbook) {
 
   const dayIndex: { [jsDay: number]: number } = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4 }; // Mon..Fri, Sat/Sun (0,6) excluded
 
+  // Cumulative, all-time Nesplneno tally per (technician, posId) - the data
+  // behind TECHNICIAN_SCORECARD's "TOP problematic POS" tile. Built from the
+  // SAME dedupedRows pass above (not a second read of raw COMPLIANCE_LOG),
+  // deliberately - counting raw append-only rows here would hit the exact
+  // double-counting bug already fixed once via latestByKey() (see file
+  // header): a POS can sit as Nesplneno across several re-evaluated runs
+  // before finally being visited, and counting every one of those rows would
+  // overstate how often it was actually missed.
+  let nesplnenoByTechPos: { [key: string]: { technician: string; posId: string; count: number } } = {};
+
   for (const r of dedupedRows) {
     // Navic_evidovano rows carry no technician in COMPLIANCE_LOG (never
     // planned for anyone) - fall back to POS_MASTER's current assignment,
@@ -240,6 +264,11 @@ function main(workbook: ExcelScript.Workbook) {
       bucket.realizedVisits++;
     } else if (r.status == "Nesplneno") {
       bucket.nesplneno++;
+      const key = tech + "|" + r.posId;
+      if (!nesplnenoByTechPos[key]) {
+        nesplnenoByTechPos[key] = { technician: tech, posId: r.posId, count: 0 };
+      }
+      nesplnenoByTechPos[key].count++;
     } else if (r.status == "Navic_evidovano") {
       bucket.navicEvidovano++;
     }
@@ -296,10 +325,41 @@ function main(workbook: ExcelScript.Workbook) {
     outWs.getRangeByIndexes(1, 0, outRows.length, headerRow.length).setValues(outRows);
   }
 
+  // ==========================================================================
+  // WRITE TECHNICIAN_TOP_ISSUES: top 5 all-time-Nesplneno POS per technician
+  // (bounded technicians x 5 rows, same full-rebuild-every-run approach as
+  // TECHNICIAN_PERFORMANCE_LOG above). Feeds TECHNICIAN_SCORECARD's "TOP
+  // problematic POS" tile.
+  // ==========================================================================
+
+  let byTech: { [tech: string]: { posId: string; count: number }[] } = {};
+  for (const entry of Object.values(nesplnenoByTechPos)) {
+    if (!byTech[entry.technician]) {
+      byTech[entry.technician] = [];
+    }
+    byTech[entry.technician].push({ posId: entry.posId, count: entry.count });
+  }
+  let issueRows: (string | number)[][] = [];
+  for (const tech of Object.keys(byTech)) {
+    const sorted = byTech[tech].sort((a, b) => b.count - a.count || (a.posId < b.posId ? -1 : 1));
+    const top5 = sorted.slice(0, 5);
+    top5.forEach((entry, i) => {
+      issueRows.push([tech, i + 1, entry.posId, posName[entry.posId] || "", posArea[entry.posId] || "", entry.count]);
+    });
+  }
+  const issueHeaderRow = ["technician", "rank", "posId", "posName", "region", "nesplnenoCount"];
+  const issueWs = workbook.getWorksheet("TECHNICIAN_TOP_ISSUES");
+  issueWs.getRange("A2:F100000").clear(ExcelScript.ClearApplyTo.contents);
+  issueWs.getRangeByIndexes(0, 0, 1, issueHeaderRow.length).setValues([issueHeaderRow]);
+  if (issueRows.length > 0) {
+    issueWs.getRangeByIndexes(1, 0, issueRows.length, issueHeaderRow.length).setValues(issueRows);
+  }
+
   console.log(
     "Performance Engine: " + outRows.length +
       " technician/week rows written to TECHNICIAN_PERFORMANCE_LOG (from " +
       dedupedRows.length + " deduped compliance evaluations, " +
-      (complianceLog.length - 1) + " raw rows before dedup)."
+      (complianceLog.length - 1) + " raw rows before dedup), " +
+      issueRows.length + " rows written to TECHNICIAN_TOP_ISSUES."
   );
 }

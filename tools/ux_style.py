@@ -62,6 +62,7 @@ THIN_BORDER = Border(*(Side(style="thin", color="BFBFBF"),) * 4)
 # Sheet grouping -> tab color + intended sheet order (top to bottom in Excel)
 SHEET_GROUPS = [
     ("HOME", "404040"),
+    ("TECHNICIAN_SCORECARD", "2E75B6"),
     ("DASHBOARD", "375623"),
     ("TECHNICIAN_PLAN", "375623"),
     ("POS_MASTER", "7030A0"),
@@ -92,7 +93,7 @@ SHEET_GROUPS = [
 # Everything else that stays visible (import staging) is a necessary but
 # occasional "mailbox", not part of the daily working set - communicated on
 # HOME, not hidden, because the user must paste into it weekly.
-CORE_DAILY_SHEETS = ["HOME", "DASHBOARD", "TECHNICIAN_PLAN", "POS_MASTER", "ACTIVITY_PLAN", "IMPORT_HUB"]
+CORE_DAILY_SHEETS = ["HOME", "TECHNICIAN_SCORECARD", "DASHBOARD", "TECHNICIAN_PLAN", "POS_MASTER", "ACTIVITY_PLAN", "IMPORT_HUB"]
 IMPORT_UTILITY_SHEETS = ["RAW_DATA", "POS_STATUS_IMPORT", "SALESAPP_IMPORT"]
 
 # Everything not in CORE_DAILY_SHEETS/IMPORT_UTILITY_SHEETS is implementation
@@ -105,10 +106,10 @@ HIDDEN_SHEETS = {
     "CADENCE_RULES", "PARETO_GROUPS", "SCORE_PROFILES", "ADVISOR_RULES",
     "CAPACITY_OVERRIDE", "COMPLIANCE_LOG", "ADVISOR_LOG",
     "VISIT_HISTORY_ACTUAL", "VISIT_HISTORY", "PLANNING_HORIZON_RULES",
-    # Performance Engine's raw aggregated table - a data source for the
+    # Performance Engine's raw aggregated tables - data sources for the
     # manager UX sheets (docs/MANAGER_UX_ARCHITECTURE.md), not something a
     # manager reads directly, same treatment as COMPLIANCE_LOG/ADVISOR_LOG.
-    "TECHNICIAN_PERFORMANCE_LOG",
+    "TECHNICIAN_PERFORMANCE_LOG", "TECHNICIAN_TOP_ISSUES",
 }
 
 # Sheets an engine writes to programmatically - never real-protected, see
@@ -117,7 +118,7 @@ HIDDEN_SHEETS = {
 ENGINE_WRITABLE = {
     "POS_MASTER", "MANAGER_PLAN", "MANAGER_PLAN_PUBLISHED", "PLAN_LIFECYCLE",
     "COMPLIANCE_LOG", "ADVISOR_LOG", "VISIT_HISTORY_ACTUAL", "DASHBOARD",
-    "TECHNICIAN_PERFORMANCE_LOG",
+    "TECHNICIAN_PERFORMANCE_LOG", "TECHNICIAN_TOP_ISSUES",
 }
 
 # Per-sheet: which columns (by header name) are meant for manual editing.
@@ -587,7 +588,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     ws = wb.create_sheet("HOME", 0)
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 3
-    for col in "BCDEFGH":
+    for col in "BCDEFGHI":
         ws.column_dimensions[col].width = 15
 
     # ---- Banner ----
@@ -808,6 +809,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     ws.cell(r, 1, "RYCHLÁ NAVIGACE").font = TITLE_FONT
     r += 1
     quick_links = [
+        ("SCORECARD", "TECHNICIAN_SCORECARD", "2E75B6"),
         ("DASHBOARD", "DASHBOARD", "375623"),
         ("TECHNICIAN_PLAN", "TECHNICIAN_PLAN", "375623"),
         ("POS_MASTER", "POS_MASTER", "7030A0"),
@@ -853,6 +855,334 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
         ws.merge_cells(f"B{r}:H{r}")
         ws.cell(r, 2, text).font = Font(size=10)
         r += 1
+
+    return ws
+
+
+# Sheets that make up the manager UX layer's persistent side menu (product
+# owner, 2026-07-03: "stejný designový jazyk použijeme pro HOME, PERFORMANCE
+# DASHBOARD a WEEK DASHBOARD" - PERFORMANCE/WEEK_DASHBOARD don't exist yet,
+# added here once they're built so every screen's rail grows in lockstep).
+NAV_RAIL_SHEETS = [
+    ("HOME", "🏠 Domů", "404040"),
+    ("TECHNICIAN_SCORECARD", "📊 Scorecard", "2E75B6"),
+    ("DASHBOARD", "📈 Dashboard", "375623"),
+    ("TECHNICIAN_PLAN", "🗺 Plán týdne", "375623"),
+]
+
+
+def _build_nav_rail(ws, current_sheet, first_row=1):
+    """A persistent vertical stack of nav buttons in column A, frozen via
+    the caller's freeze_panes - the "left menu" a plain Excel tab strip
+    can't give you (see docs/MANAGER_UX_ARCHITECTURE.md section 3: sheet
+    tabs are the top-level switcher, this rail is what actually produces
+    the "looks like an app" impression on every screen, not just HOME)."""
+    ws.column_dimensions["A"].width = 20
+    ws.column_dimensions["B"].width = 3
+    ws["A1"].fill = PatternFill("solid", fgColor="2B2B2B")
+    r = first_row
+    for sheet_name, label, color in NAV_RAIL_SHEETS:
+        is_current = sheet_name == current_sheet
+        cell = ws.cell(r, 1)
+        cell.value = ("▶ " if is_current else "   ") + label
+        if not is_current:
+            cell.hyperlink = f"#{sheet_name}!A1"
+        cell.font = Font(bold=is_current, size=11, color=WHITE)
+        cell.fill = PatternFill("solid", fgColor=color if is_current else "2B2B2B")
+        cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        ws.row_dimensions[r].height = 26
+        r += 1
+    # fill the rest of the rail down to a generous depth so it reads as one
+    # continuous dark sidebar, not a stack of buttons floating on white
+    for rr in range(r, r + 40):
+        ws.cell(rr, 1).fill = PatternFill("solid", fgColor="2B2B2B")
+
+
+def build_technician_scorecard(wb):
+    """The first screen of the manager UX layer (docs/MANAGER_UX_ARCHITECTURE.md
+    section 4) - a technician/week-driven dashboard, not a table. Every KPI
+    is a live formula over TECHNICIAN_PERFORMANCE_LOG/TECHNICIAN_TOP_ISSUES
+    (PerformanceEngine.ts's output) keyed on two dropdowns; no new business
+    logic here (see that engine's file header for why "TOP problematic POS"
+    is computed there, not as a raw-COMPLIANCE_LOG formula).
+
+    All formula plumbing (unique technician/week lists, parsed year/week,
+    previous-week lookup, chart data blocks) lives in hidden columns P:W -
+    per the product owner's explicit ask ("minimum mřížky Excelu... působit
+    jako desktopová aplikace"), the visible area (C:N) shows only the
+    finished dashboard, nothing a user would recognize as "Excel plumbing"."""
+    TP = "TECHNICIAN_PERFORMANCE_LOG"
+    TI = "TECHNICIAN_TOP_ISSUES"
+    if "TECHNICIAN_SCORECARD" in wb.sheetnames:
+        del wb["TECHNICIAN_SCORECARD"]
+    ws = wb.create_sheet("TECHNICIAN_SCORECARD")
+    ws.sheet_view.showGridLines = False
+    for col in "CDEFGHIJKLMN":
+        ws.column_dimensions[col].width = 12
+    _build_nav_rail(ws, "TECHNICIAN_SCORECARD")
+
+    card_side = Side(style="thin", color="D9D9D9")
+    card_border = Border(top=card_side, bottom=card_side, left=card_side, right=card_side)
+
+    # ---- Banner ----
+    ws.merge_cells("C1:N2")
+    ws["C1"] = "TECHNICIAN SCORECARD"
+    ws["C1"].font = Font(bold=True, size=24, color=WHITE)
+    ws["C1"].fill = PatternFill("solid", fgColor=NAVY)
+    ws["C1"].alignment = Alignment(horizontal="left", vertical="center", indent=2)
+    ws.row_dimensions[1].height = 30
+    ws.row_dimensions[2].height = 22
+    ws.merge_cells("C3:N3")
+    ws["C3"] = "Výkon technika v čase - vyber technika a týden níže"
+    ws["C3"].font = Font(italic=True, size=11, color=WHITE)
+    ws["C3"].fill = PatternFill("solid", fgColor=NAVY)
+    ws["C3"].alignment = Alignment(horizontal="left", vertical="center", indent=2)
+    ws.row_dimensions[3].height = 20
+    ws.freeze_panes = "C4"
+
+    # ==========================================================================
+    # HIDDEN FORMULA PLUMBING (columns P:W) - never shown to the user.
+    # ==========================================================================
+    ws["P1"] = "technici"
+    ws["P2"] = (
+        '=IFERROR(SORT(UNIQUE(FILTER('
+        f'{TP}!$A$2:$A$5000,{TP}!$A$2:$A$5000<>""))),"Zatím žádná data")'
+    )
+    ws["Q1"] = "týdny pro vybraného technika"
+    ws["Q2"] = (
+        '=IFERROR(SORT(UNIQUE(FILTER('
+        f'TEXT({TP}!$B$2:$B$5000,"0000")&"-W"&TEXT({TP}!$C$2:$C$5000,"00"),'
+        f'{TP}!$A$2:$A$5000=$D$5))),"Vyber technika")'
+    )
+    ws["R1"] = '=IFERROR(VALUE(LEFT($H$5,4)),0)'   # selected year
+    ws["R2"] = '=IFERROR(VALUE(MID($H$5,7,2)),0)'  # selected week
+    ws["R3"] = (  # previous week on record for this technician (any gap size)
+        f'=IFERROR(AGGREGATE(14,6,({TP}!$B$2:$B$5000*100+{TP}!$C$2:$C$5000)/'
+        f'(({TP}!$A$2:$A$5000=$D$5)*(({TP}!$B$2:$B$5000*100+{TP}!$C$2:$C$5000)<($R$1*100+$R$2))),1),"")'
+    )
+    ws["R4"] = (  # that previous week's compliance %
+        f'=IF($R$3="","-",SUMPRODUCT(({TP}!$A$2:$A$5000=$D$5)*'
+        f'(({TP}!$B$2:$B$5000*100+{TP}!$C$2:$C$5000)=$R$3)*{TP}!$K$2:$K$5000))'
+    )
+    # daily distribution data block (S=label, T=value)
+    day_cols = [("S1", "Po", "L"), ("S2", "Út", "M"), ("S3", "St", "N"), ("S4", "Čt", "O"), ("S5", "Pá", "P")]
+    for i, (cell_ref, label, tp_col) in enumerate(day_cols, start=1):
+        ws[cell_ref] = label
+        ws[f"T{i}"] = (
+            f'=SUMPRODUCT(({TP}!$A$2:$A$5000=$D$5)*({TP}!$B$2:$B$5000=$R$1)*'
+            f'({TP}!$C$2:$C$5000=$R$2)*{TP}!${tp_col}$2:${tp_col}$5000)'
+        )
+    # last-6-weeks trend data block (W=resolved year*100+week key, U=label, V=value)
+    for i in range(1, 7):
+        k = 7 - i
+        ws[f"W{i}"] = (
+            f'=IFERROR(AGGREGATE(14,6,({TP}!$B$2:$B$5000*100+{TP}!$C$2:$C$5000)/'
+            f'({TP}!$A$2:$A$5000=$D$5),{k}),"")'
+        )
+        ws[f"U{i}"] = f'=IF($W{i}="","","W"&TEXT(MOD($W{i},100),"00"))'
+        ws[f"V{i}"] = (
+            f'=IF($W{i}="","",SUMPRODUCT(({TP}!$A$2:$A$5000=$D$5)*'
+            f'(({TP}!$B$2:$B$5000*100+{TP}!$C$2:$C$5000)=$W{i})*{TP}!$K$2:$K$5000))'
+        )
+    for col in "PQRSTUVW":
+        ws.column_dimensions[col].hidden = True
+
+    # ==========================================================================
+    # FILTER BAR - the two dropdowns that drive the entire sheet.
+    # ==========================================================================
+    filter_fill = PatternFill("solid", fgColor="F2F2F2")
+    for col in "CDEFGHIJKLMN":
+        ws[f"{col}5"].fill = filter_fill
+    ws.row_dimensions[5].height = 26
+    ws["C5"] = "TECHNIK"
+    ws["C5"].font = Font(bold=True, size=9, color="595959")
+    ws["C5"].alignment = Alignment(vertical="center", indent=1)
+    ws.merge_cells("D5:F5")
+    ws["D5"] = '=IFERROR(INDEX($P$2#,1),"")'
+    ws["D5"].font = Font(bold=True, size=13, color=NAVY)
+    ws["D5"].fill = PatternFill("solid", fgColor=WHITE)
+    ws["D5"].alignment = Alignment(vertical="center", indent=1)
+    ws["D5"].border = card_border
+    dv_tech = DataValidation(type="list", formula1="=$P$2#", allow_blank=True)
+    ws.add_data_validation(dv_tech)
+    dv_tech.add(ws["D5"])
+    ws["G5"] = "TÝDEN"
+    ws["G5"].font = Font(bold=True, size=9, color="595959")
+    ws["G5"].alignment = Alignment(vertical="center", indent=1)
+    ws.merge_cells("H5:J5")
+    ws["H5"] = '=IFERROR(INDEX($Q$2#,1),"")'
+    ws["H5"].font = Font(bold=True, size=13, color=NAVY)
+    ws["H5"].fill = PatternFill("solid", fgColor=WHITE)
+    ws["H5"].alignment = Alignment(vertical="center", indent=1)
+    ws["H5"].border = card_border
+    dv_week = DataValidation(type="list", formula1="=$Q$2#", allow_blank=True)
+    ws.add_data_validation(dv_week)
+    dv_week.add(ws["H5"])
+    ws.merge_cells("K5:N5")
+    ws["K5"] = (
+        f'=IFERROR("Region: "&INDEX({TP}!$D$2:$D$5000,MATCH(1,({TP}!$A$2:$A$5000=$D$5)*'
+        f'({TP}!$B$2:$B$5000=$R$1)*({TP}!$C$2:$C$5000=$R$2),0)),"-")'
+    )
+    ws["K5"].font = Font(italic=True, size=10, color="595959")
+    ws["K5"].alignment = Alignment(vertical="center", horizontal="right", indent=1)
+
+    # ==========================================================================
+    # KPI CARD ROW - 6 cards, each a 2-column-wide tile.
+    # ==========================================================================
+    ws.cell(7, 3, "KPI PŘEHLED").font = TITLE_FONT
+    tp_cond = f'({TP}!$A$2:$A$5000=$D$5)*({TP}!$B$2:$B$5000=$R$1)*({TP}!$C$2:$C$5000=$R$2)'
+    cards = [
+        ("C", "D", "Plánováno", f'=SUMPRODUCT({tp_cond}*{TP}!$E$2:$E$5000)', NAVY, WHITE),
+        ("E", "F", "Realizováno", f'=SUMPRODUCT({tp_cond}*{TP}!$F$2:$F$5000)', NAVY, WHITE),
+        ("G", "H", "Splněno (včas+pozdě)", f'=SUMPRODUCT({tp_cond}*({TP}!$G$2:$G$5000+{TP}!$H$2:$H$5000))', "0CA30C", "E2EFDA"),
+        ("I", "J", "Nesplněno", f'=SUMPRODUCT({tp_cond}*{TP}!$I$2:$I$5000)', "D03B3B", "FCE4D6"),
+        ("K", "L", "Návštěvy navíc", f'=SUMPRODUCT({tp_cond}*{TP}!$J$2:$J$5000)', "BF8F00", "FFF2CC"),
+        ("M", "N", "Compliance %", f'=SUMPRODUCT({tp_cond}*{TP}!$K$2:$K$5000)', NAVY, WHITE),
+    ]
+    for c1, c2, label, formula, value_color, fill_color in cards:
+        ws.merge_cells(f"{c1}8:{c2}8")
+        ws[f"{c1}8"] = label
+        ws[f"{c1}8"].font = Font(bold=True, size=9, color="595959")
+        ws[f"{c1}8"].alignment = Alignment(horizontal="center", vertical="center")
+        ws.merge_cells(f"{c1}9:{c2}11")
+        cell = ws[f"{c1}9"]
+        cell.value = formula
+        cell.font = Font(bold=True, size=22, color=value_color)
+        cell.fill = PatternFill("solid", fgColor=fill_color)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        for row in (9, 10, 11):
+            for col in (c1, c2):
+                ws[f"{col}{row}"].border = card_border
+    ws.row_dimensions[9].height = 18
+    ws.row_dimensions[10].height = 18
+    ws.row_dimensions[11].height = 18
+    compliance_cell = "M9"
+    nesplneno_cell = "I9"
+    # Compliance % card recolors by severity - the one card whose fixed color
+    # above (NAVY) is a placeholder overridden by these threshold rules.
+    for threshold, color in [(90, STATUS_GOOD), (70, STATUS_WARNING), (50, STATUS_SERIOUS)]:
+        ws.conditional_formatting.add(
+            "M9:N11",
+            FormulaRule(formula=[f"{compliance_cell}>={threshold}"], fill=PatternFill("solid", fgColor=color),
+                        font=Font(bold=True, size=22, color=WHITE), stopIfTrue=True),
+        )
+    ws.conditional_formatting.add(
+        "M9:N11",
+        FormulaRule(formula=[f"{compliance_cell}<50"], fill=PatternFill("solid", fgColor=STATUS_CRITICAL),
+                    font=Font(bold=True, size=22, color=WHITE), stopIfTrue=True),
+    )
+    ws.conditional_formatting.add(
+        "I9:J11",
+        FormulaRule(formula=[f"{nesplneno_cell}=0"], fill=PatternFill("solid", fgColor="E2EFDA"),
+                    font=Font(bold=True, size=22, color="0CA30C")),
+    )
+
+    # ---- Compliance progress bar ----
+    ws.cell(12, 3, "Poměr realizace vs. plán").font = Font(italic=True, size=9, color="808080")
+    ws.merge_cells("C13:N13")
+    ws["C13"] = f"={compliance_cell}"
+    ws["C13"].number_format = '0.0"%"'
+    ws["C13"].font = Font(bold=True, size=11, color=WHITE)
+    ws["C13"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[13].height = 20
+    ws.conditional_formatting.add(
+        "C13", DataBarRule(start_type="num", start_value=0, end_type="num", end_value=100, color="2E75B6"),
+    )
+
+    # ==========================================================================
+    # LONG-RUN AVERAGE + TREND + BUSIEST DAY - 3 side-by-side cards.
+    # ==========================================================================
+    ws.cell(15, 3, "DLOUHODOBÝ VÝKON").font = TITLE_FONT
+    ws.merge_cells("C16:F16")
+    ws["C16"] = "Dlouhodobý průměr (compliance %)"
+    ws["C16"].font = Font(bold=True, size=9, color="595959")
+    ws.merge_cells("C17:F18")
+    ws["C17"] = f'=IFERROR(ROUND(AVERAGEIFS({TP}!$K$2:$K$5000,{TP}!$A$2:$A$5000,$D$5),1),"-")'
+    ws["C17"].font = Font(bold=True, size=18, color=NAVY)
+    ws["C17"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.merge_cells("G16:J16")
+    ws["G16"] = "Trend proti minulému týdnu"
+    ws["G16"].font = Font(bold=True, size=9, color="595959")
+    ws.merge_cells("G17:J18")
+    trend_cell = ws["G17"]
+    trend_cell.value = (
+        f'=IF($R$3="","Zatím není s čím srovnat",'
+        f'IF({compliance_cell}>$R$4,"▲ "&TEXT({compliance_cell}-$R$4,"+0.0")&" p.b.",'
+        f'IF({compliance_cell}<$R$4,"▼ "&TEXT({compliance_cell}-$R$4,"+0.0;-0.0")&" p.b.","→ beze změny")))'
+    )
+    trend_cell.font = Font(bold=True, size=16, color=NAVY)
+    trend_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.conditional_formatting.add(
+        "G17:J18", FormulaRule(formula=['LEFT(G17,1)="▲"'], font=Font(bold=True, size=16, color="0CA30C")),
+    )
+    ws.conditional_formatting.add(
+        "G17:J18", FormulaRule(formula=['LEFT(G17,1)="▼"'], font=Font(bold=True, size=16, color="D03B3B")),
+    )
+    ws.merge_cells("K16:N16")
+    ws["K16"] = "Nejvytíženější den"
+    ws["K16"].font = Font(bold=True, size=9, color="595959")
+    ws.merge_cells("K17:N18")
+    ws["K17"] = (
+        '=IF(SUM($T$1:$T$5)=0,"Zatím žádná data",'
+        'INDEX($S$1:$S$5,MATCH(MAX($T$1:$T$5),$T$1:$T$5,0))&" ("&MAX($T$1:$T$5)&" návštěv)"'
+    )
+    ws["K17"].font = Font(bold=True, size=16, color=NAVY)
+    ws["K17"].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for c1, c2 in [("C", "F"), ("G", "J"), ("K", "N")]:
+        for row in (16, 17, 18):
+            for col in (c1, c2):
+                ws[f"{col}{row}"].border = card_border
+
+    # ==========================================================================
+    # DAILY DISTRIBUTION + 6-WEEK TREND - two small native charts.
+    # ==========================================================================
+    ws.cell(20, 3, "DENNÍ ROZLOŽENÍ NÁVŠTĚV").font = TITLE_FONT
+    daily_chart = BarChart()
+    daily_chart.type = "col"
+    daily_chart.title = None
+    daily_chart.style = 10
+    daily_chart.height = 6.5
+    daily_chart.width = 14
+    daily_chart.legend = None
+    d_cats = Reference(ws, min_col=19, min_row=1, max_row=5)   # S1:S5
+    d_data = Reference(ws, min_col=20, min_row=1, max_row=5)   # T1:T5
+    daily_chart.add_data(d_data)
+    daily_chart.set_categories(d_cats)
+    daily_chart.series[0].graphicalProperties.solidFill = "2E75B6"
+    ws.add_chart(daily_chart, "C21")
+
+    ws.cell(20, 9, "VÝVOJ COMPLIANCE (posl. 6 týdnů)").font = TITLE_FONT
+    trend_chart = LineChart()
+    trend_chart.title = None
+    trend_chart.style = 2
+    trend_chart.height = 6.5
+    trend_chart.width = 14
+    trend_chart.legend = None
+    t_cats = Reference(ws, min_col=21, min_row=1, max_row=6)  # U1:U6
+    t_data = Reference(ws, min_col=22, min_row=1, max_row=6)  # V1:V6
+    trend_chart.add_data(t_data)
+    trend_chart.set_categories(t_cats)
+    trend_chart.series[0].graphicalProperties.line.solidFill = "2E75B6"
+    trend_chart.series[0].graphicalProperties.line.width = 20000
+    trend_chart.series[0].smooth = False
+    ws.add_chart(trend_chart, "I21")
+
+    # ==========================================================================
+    # TOP PROBLÉMOVÉ POS - deduped, engine-computed (see PerformanceEngine.ts).
+    # ==========================================================================
+    ws.cell(31, 3, "TOP PROBLÉMOVÉ POS").font = TITLE_FONT
+    headers = ["POS", "Název", "Region", "Nesplněno (celkem)"]
+    for col, label in zip("CDEF", headers):
+        ws[f"{col}32"] = label
+        ws[f"{col}32"].font = Font(bold=True, size=9, color="595959")
+        ws[f"{col}32"].fill = PatternFill("solid", fgColor="F2F2F2")
+    ws["C33"] = f'=IFERROR(FILTER({TI}!$C$2:$F$1000,{TI}!$A$2:$A$1000=$D$5),{{"—","Žádné problémy 🎉","",0}})'
+    for row in range(33, 38):
+        for col in "CDEF":
+            ws[f"{col}{row}"].border = card_border
+    ws.conditional_formatting.add(
+        "F33:F37", DataBarRule(start_type="num", start_value=0, end_type="num", end_value=10, color=STATUS_CRITICAL),
+    )
 
     return ws
 
@@ -1356,6 +1686,8 @@ def apply_all(wb, control_rows):
         build_technician_plan(wb)
     if "DASHBOARD" in wb.sheetnames:
         build_dashboard_template(wb)
+    if "TECHNICIAN_PERFORMANCE_LOG" in wb.sheetnames and "TECHNICIAN_TOP_ISSUES" in wb.sheetnames:
+        build_technician_scorecard(wb)
     if "POS_MASTER" in wb.sheetnames:
         apply_banded_rows(wb["POS_MASTER"], 2, 500, wb["POS_MASTER"].max_column or 39)
         enhance_pos_master(wb)
@@ -1369,6 +1701,8 @@ def apply_all(wb, control_rows):
             continue
         if sheet_name == "DASHBOARD":
             continue  # build_dashboard_template already fully styled it
+        if sheet_name == "TECHNICIAN_SCORECARD":
+            continue  # build_technician_scorecard already fully styled it
         if sheet_name == "ACTIVITY_PLAN":
             # freeze_below=False: redesign_activity_plan() already set
             # freeze_panes="C2" (keep TYPE+ACTIVITY visible while scrolling
