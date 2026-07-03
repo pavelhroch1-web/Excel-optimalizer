@@ -23,6 +23,8 @@ from .core_logic import (
     category_rule,
     compute_score,
     geo_days,
+    is_overdue_for_cadence_rule,
+    matches_cadence_rule_scope,
     norm,
     resolve_capacity,
     select_week_pos,
@@ -156,6 +158,14 @@ def run(workbook: MockWorkbook) -> str:
     mandatory_rules = [
         r for r in active_cadence_rules if r.intervalType == "ONCE_PER_CAMPAIGN" and r.guaranteeType == "HARD"
     ]
+    # RECURRING + HARD (CORN, GECO): "must be visited at least every
+    # maxIntervalWeeks weeks", enforced on an ongoing basis - see
+    # office-scripts/PlanningEngine.ts's identical comment for the "at most
+    # once per Planning run" scoping note.
+    recurring_hard_rules = [
+        r for r in active_cadence_rules if r.intervalType == "RECURRING" and r.guaranteeType == "HARD"
+    ]
+    all_hard_rules = mandatory_rules + recurring_hard_rules
 
     premium_percent = 20.0
     par_headers = [_s(h) for h in pareto_groups[0]] if pareto_groups else []
@@ -256,6 +266,7 @@ def run(workbook: MockWorkbook) -> str:
             pos=_s(_at(r, midx("posId"))),
             tech=tech,
             kategorie=category,
+            market=_s(_at(r, midx("market"))),
             classification=_s(_at(r, midx("classification"))),
             nazev=_s(_at(r, midx("nazev"))),
             ulice=_s(_at(r, midx("street"))),
@@ -273,13 +284,19 @@ def run(workbook: MockWorkbook) -> str:
         )
 
         for mr in mandatory_rules:
-            matches = (
-                (mr.scope == "CATEGORY" and norm(category) in mr.matchValue)
-                or (mr.scope == "CATEGORYPREFIX" and any(norm(category).startswith(p) for p in mr.matchValue))
-            )
-            if matches:
+            if matches_cadence_rule_scope(mr, norm(category), norm(item.market)):
                 item.mandatoryRuleId = mr.ruleId
                 break
+
+        # RECURRING + HARD overdue check (CORN/GECO) - only if no
+        # ONCE_PER_CAMPAIGN rule already claimed this item above.
+        if not item.mandatoryRuleId:
+            for rr in recurring_hard_rules:
+                if matches_cadence_rule_scope(rr, norm(category), norm(item.market)) and is_overdue_for_cadence_rule(
+                    rr, weeks_since
+                ):
+                    item.mandatoryRuleId = rr.ruleId
+                    break
 
         if item.core and core_rule:
             min_gap = core_rule.minGapWeeks if core_rule.minGapWeeks is not None else 2
@@ -324,7 +341,7 @@ def run(workbook: MockWorkbook) -> str:
             used_ids = set(id(p) for p in used)
             available = [p for p in groups[tech] if id(p) not in used_ids]
             hold_premium = campaign_change_soon(week)
-            base_selection = select_week_pos(available, capacity, mandatory_rules, hold_premium)
+            base_selection = select_week_pos(available, capacity, all_hard_rules, hold_premium)
             pre_gps_ids = set(p.pos for p in base_selection)
             selected = add_gps_bonus(base_selection, available, GPS_CONFIG)
 

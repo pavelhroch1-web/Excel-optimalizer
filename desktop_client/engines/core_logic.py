@@ -63,6 +63,7 @@ class POSItem:
     pos: str
     tech: str
     kategorie: str
+    market: str
     classification: str
     nazev: str
     ulice: str
@@ -128,6 +129,23 @@ def apply_premium_tier(items: list[POSItem], premium_percent: float) -> None:
     premium_set = {i.pos for i in sorted_items[:limit]}
     for item in items:
         item.premium = item.pos in premium_set
+
+
+def matches_cadence_rule_scope(rule: CadenceRule, category_normalized: str, market_normalized: str) -> bool:
+    """Port of core.ts's matchesCadenceRuleScope() - callers pass already-
+    normalized (norm()'d) strings, same convention as category_rule()."""
+    return (
+        (rule.scope == "CATEGORY" and category_normalized in rule.matchValue)
+        or (rule.scope == "CATEGORYPREFIX" and any(category_normalized.startswith(p) for p in rule.matchValue))
+        or (rule.scope == "MARKET" and market_normalized in rule.matchValue)
+    )
+
+
+def is_overdue_for_cadence_rule(rule: CadenceRule, weeks_since_last_visit: Optional[float]) -> bool:
+    """Port of core.ts's isOverdueForCadenceRule()."""
+    return rule.maxIntervalWeeks is not None and (
+        weeks_since_last_visit is None or weeks_since_last_visit >= rule.maxIntervalWeeks
+    )
 
 
 def pick_mandatory(items: list[POSItem], mandatory_rules: list[CadenceRule]) -> list[POSItem]:

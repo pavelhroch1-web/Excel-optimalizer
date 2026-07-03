@@ -22,6 +22,8 @@ from core_logic import (
     compute_score,
     distance_km,
     geo_days,
+    is_overdue_for_cadence_rule,
+    matches_cadence_rule_scope,
     norm,
     pick_mandatory,
     resolve_capacity,
@@ -43,8 +45,8 @@ def check(name: str, condition: bool):
 
 def make_item(pos, score=0, core=False, classification="B", ppt=0, x=0, y=0, weeks=None, force=False, mand=None):
     return POSItem(
-        pos=pos, tech="T1", kategorie="9PODNIK", classification=classification, nazev="", ulice="U", cislo="1",
-        mesto="M", oblast="O", posArea="PA", ppt=ppt, x=x, y=y, weeksSinceLastVisit=weeks,
+        pos=pos, tech="T1", kategorie="9PODNIK", market="OSTATNI", classification=classification, nazev="",
+        ulice="U", cislo="1", mesto="M", oblast="O", posArea="PA", ppt=ppt, x=x, y=y, weeksSinceLastVisit=weeks,
         forceInclude=force, core=core, mandatoryRuleId=mand, score=score,
     )
 
@@ -131,6 +133,22 @@ check("addGpsBonus disabled returns selection unchanged", add_gps_bonus(gps_sele
 override = {"Tech1|2026|31": 5}
 check("resolveCapacity uses override", resolve_capacity(override, "Tech1", 2026, 31, 5, 8) == 5)
 check("resolveCapacity falls back to days*target", resolve_capacity(override, "Tech2", 2026, 31, 5, 8) == 40)
+
+# --- matchesCadenceRuleScope / isOverdueForCadenceRule (CORN/GECO) ---
+corn_rule = CadenceRule(ruleId="CORN", scope="MARKET", matchValue=["CORN"], minGapWeeks=None,
+                         maxIntervalWeeks=4, intervalType="RECURRING", guaranteeType="HARD",
+                         dedupBy="NONE", campaignChangeOverride=False, priority=80)
+geco_rule = CadenceRule(ruleId="GECO", scope="CATEGORY", matchValue=["1GECO"], minGapWeeks=None,
+                         maxIntervalWeeks=5, intervalType="RECURRING", guaranteeType="HARD",
+                         dedupBy="NONE", campaignChangeOverride=False, priority=80)
+check("matchesCadenceRuleScope: MARKET scope matches on market", matches_cadence_rule_scope(corn_rule, "9PODNIKC", "CORN"))
+check("matchesCadenceRuleScope: MARKET scope does not match on category", not matches_cadence_rule_scope(corn_rule, "CORN", "OSTATNI"))
+check("matchesCadenceRuleScope: CATEGORY scope matches on category", matches_cadence_rule_scope(geco_rule, "1GECO", "OSTATNI"))
+check("isOverdueForCadenceRule: never visited is overdue", is_overdue_for_cadence_rule(corn_rule, None))
+check("isOverdueForCadenceRule: at the interval is overdue", is_overdue_for_cadence_rule(corn_rule, 4))
+check("isOverdueForCadenceRule: under the interval is not overdue", not is_overdue_for_cadence_rule(corn_rule, 3))
+no_interval = CadenceRule(**{**corn_rule.__dict__, "maxIntervalWeeks": None})
+check("isOverdueForCadenceRule: no maxIntervalWeeks never triggers", not is_overdue_for_cadence_rule(no_interval, None))
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
