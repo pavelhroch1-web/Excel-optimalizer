@@ -678,13 +678,26 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     assert r == PIPE_FIRST_ROW, "PIPE_FIRST_ROW must match the row this loop actually starts at"
     green_fill = PatternFill("solid", fgColor="E2EFDA")
     red_fill = PatternFill("solid", fgColor=STATUS_SERIOUS)
-    for num, name, desc, status_formula, target, color in stages:
+    # Each stage renders as one bordered "card row" (thin border on every
+    # cell of the row, subtle alternating tint) instead of plain borderless
+    # text - a small but real step toward "looks like an app, not a sheet
+    # of numbers" (product owner, 2026-07-03).
+    card_side = Side(style="thin", color="D9D9D9")
+    card_border = Border(top=card_side, bottom=card_side, left=card_side, right=card_side)
+    for stage_index, (num, name, desc, status_formula, target, color) in enumerate(stages):
+        row_tint = "FFFFFF" if stage_index % 2 == 0 else "F7F9FB"
+        for col in range(1, 9):
+            cell = ws.cell(r, col)
+            cell.border = card_border
+            if col != 1:  # badge (col 1) sets its own fill below; conditional
+                # formatting on col 7 overlays this when a rule matches
+                cell.fill = PatternFill("solid", fgColor=row_tint)
         ws.cell(r, 1, num).font = Font(bold=True, size=16, color=WHITE)
         ws.cell(r, 1).fill = PatternFill("solid", fgColor=color)
         ws.cell(r, 1).alignment = Alignment(horizontal="center", vertical="center")
         ws.merge_cells(f"B{r}:E{r}")
         ws.cell(r, 2, f"{name} — {desc}").font = Font(size=11)
-        ws.cell(r, 2).alignment = Alignment(vertical="center")
+        ws.cell(r, 2).alignment = Alignment(vertical="center", indent=1)
         status_cell = ws.cell(r, 7, status_formula)
         status_cell.font = Font(bold=True, size=11)
         status_cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -702,7 +715,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
             ws.cell(r, 8, "⚙ Automatizace")
             ws.cell(r, 8).font = Font(italic=True, size=10, color="808080")
             ws.cell(r, 8).alignment = Alignment(horizontal="center", vertical="center")
-        ws.row_dimensions[r].height = 26
+        ws.row_dimensions[r].height = 28
         r += 1
     r += 1
 
