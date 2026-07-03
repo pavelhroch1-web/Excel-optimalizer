@@ -561,35 +561,103 @@ def _nav_button(ws, cell_ref, label, target_sheet, color=NAVY, width=None):
 
 
 def build_home(wb, real_control_values, pos_master_tech_col="O"):
-    """A real app hub, not a README sheet: a live pipeline status strip
-    (each stage checks the actual workbook state - Import/Plan/Rozpis/
-    Publikace/Vyhodnocení/Dashboard - and shows Hotovo/Chybí with a
-    one-click link), a single "co dělat dál" callout that always points at
-    the first incomplete stage, KPI numbers, quick nav and the legend -
-    built for someone opening this workbook for the first time to
-    understand within 30 seconds where things stand and what to do next,
-    without reading any instructions first."""
+    """A real app hub, not a README sheet: a live network-wide KPI card row
+    (same component every other dashboard screen uses), a live pipeline
+    status strip (each stage checks the actual workbook state - Import/
+    Plan/Rozpis/Publikace/Vyhodnocení/Dashboard - and shows Hotovo/Chybí
+    with a one-click link), a single "co dělat dál" callout that always
+    points at the first incomplete stage, an operational numbers strip,
+    quick nav, and the legend - built for someone opening this workbook for
+    the first time to understand within 30 seconds where things stand and
+    what to do next, without reading any instructions first.
+
+    Uses the same nav rail / banner / KPI card / severity-coloring
+    components as TECHNICIAN_SCORECARD/PERFORMANCE/WEEK_DASHBOARD
+    (tools/dashboard_ui.py) - HOME is the landing page, so it gets the same
+    design language as everything it links to (product owner, 2026-07-06)."""
+    TP = "TECHNICIAN_PERFORMANCE_LOG"
     for old_name in ("START_HERE", "HOME"):
         if old_name in wb.sheetnames:
             del wb[old_name]
     ws = wb.create_sheet("HOME", 0)
     ws.sheet_view.showGridLines = False
-    ws.column_dimensions["A"].width = 3
-    for col in "BCDEFGHIJKLM":
+    for col in "CDEFGHIJKLMNO":
         ws.column_dimensions[col].width = 15
+    build_nav_rail(ws, "HOME")
 
     # ---- Banner ----
     build_dashboard_banner(
         ws, "FIELD FORCE OPTIMIZER", "Plánování a řízení terénních techniků",
-        col_start="A", col_end="H", title_size=26,
+        col_start="C", col_end="J", title_size=26,
     )
-    ws.freeze_panes = "A4"  # banner stays visible while scrolling through the pipeline/legend below
+    ws.freeze_panes = "C4"  # banner + nav rail stay visible while scrolling below
 
-    # ---- Pipeline stages: each row's status (col G) is a LIVE formula that
+    # ==========================================================================
+    # HIDDEN FORMULA PLUMBING - network-wide "latest week on record" + the
+    # week before it, for the KPI card row's trend. Same AGGREGATE-based
+    # combined-key technique already proven in TECHNICIAN_SCORECARD/
+    # WEEK_DASHBOARD, no engine change.
+    # ==========================================================================
+    ws["Q1"] = "latestKey"
+    ws["Q2"] = f'=IFERROR(AGGREGATE(14,6,({TP}!$B$2:$B$5000*100+{TP}!$C$2:$C$5000)/({TP}!$A$2:$A$5000<>""),1),"")'
+    ws["R1"] = "prevKey"
+    ws["R2"] = (
+        f'=IFERROR(AGGREGATE(14,6,({TP}!$B$2:$B$5000*100+{TP}!$C$2:$C$5000)/'
+        f'(({TP}!$A$2:$A$5000<>"")*(({TP}!$B$2:$B$5000*100+{TP}!$C$2:$C$5000)<$Q$2)),1),"")'
+    )
+    prev_cond = f'({TP}!$B$2:$B$5000*100+{TP}!$C$2:$C$5000=$R$2)'
+    ws["R3"] = (  # previous week's network-wide compliance % - computed once, referenced by the trend card below
+        f'=IF($R$2="","-",IFERROR(ROUND(SUMPRODUCT({prev_cond}*{TP}!$F$2:$F$5000)/'
+        f'SUMPRODUCT({prev_cond}*{TP}!$E$2:$E$5000)*100,1),"-"))'
+    )
+    ws.column_dimensions["Q"].hidden = True
+    ws.column_dimensions["R"].hidden = True
+
+    # ==========================================================================
+    # KPI CARD ROW - network-wide totals for the most recent evaluated week
+    # (docs/MANAGER_UX_ARCHITECTURE.md section 4: "same card component as
+    # today's summary cards" - values are formulas over TECHNICIAN_PERFORMANCE_LOG,
+    # not a new calculation).
+    # ==========================================================================
+    build_section_header(ws, "C5", "KOMPLIANCE - POSLEDNÍ VYHODNOCENÝ TÝDEN")
+    latest_cond = f'({TP}!$B$2:$B$5000*100+{TP}!$C$2:$C$5000=$Q$2)'
+    latest_planned = f'SUMPRODUCT({latest_cond}*{TP}!$E$2:$E$5000)'
+    latest_realized = f'SUMPRODUCT({latest_cond}*{TP}!$F$2:$F$5000)'
+    cards = [
+        ("C", "D", "Naplánováno", f'=IF($Q$2="",0,{latest_planned})', NAVY, WHITE),
+        ("E", "F", "Realizováno", f'=IF($Q$2="",0,{latest_realized})', NAVY, WHITE),
+        ("G", "H", "Nesplněno", f'=IF($Q$2="",0,SUMPRODUCT({latest_cond}*{TP}!$I$2:$I$5000))', STATUS_CRITICAL, dashboard_ui.TINT_CRITICAL),
+        ("I", "J", "Návštěvy navíc", f'=IF($Q$2="",0,SUMPRODUCT({latest_cond}*{TP}!$J$2:$J$5000))', STATUS_WARNING, dashboard_ui.TINT_WARNING),
+        ("K", "L", "Compliance %", f'=IF($Q$2="",0,IFERROR(ROUND({latest_realized}/{latest_planned}*100,1),0))', NAVY, WHITE),
+        ("M", "N", "Trend proti minulému týdnu", '=IF($Q$2="","Zatím žádná data",IF($R$2="","Zatím není s čím srovnat",""))', NAVY, WHITE),
+    ]
+    value_cells = build_kpi_card_row(ws, cards, label_row=6, value_row_start=7, value_row_end=9)
+    home_compliance_cell = value_cells[4]  # "K7"
+    home_trend_cell = value_cells[5]       # "M7"
+    apply_severity_conditional_formatting(
+        ws, "K7:L9", home_compliance_cell,
+        thresholds=[(90, STATUS_GOOD), (70, STATUS_WARNING), (50, STATUS_SERIOUS)],
+        below_color=STATUS_CRITICAL,
+    )
+    ws[home_trend_cell] = (
+        f'=IF($Q$2="","Zatím žádná data",IF($R$2="","Zatím není s čím srovnat",'
+        f'IF({home_compliance_cell}>$R$3,"▲ "&TEXT({home_compliance_cell}-$R$3,"+0.0")&" p.b.",'
+        f'IF({home_compliance_cell}<$R$3,"▼ "&TEXT({home_compliance_cell}-$R$3,"+0.0;-0.0")&" p.b.","→ beze změny"))))'
+    )
+    ws[home_trend_cell].font = font_card_value(size=14)
+    build_status_badge_conditional(ws, f"{home_trend_cell}:N9", home_trend_cell, rules=[
+        ("▲", None, STATUS_GOOD),
+        ("▼", None, STATUS_CRITICAL),
+    ])
+    ws.row_dimensions[7].height = 18
+    ws.row_dimensions[8].height = 18
+    ws.row_dimensions[9].height = 18
+
+    # ---- Pipeline stages: each row's status (col I) is a LIVE formula that
     # reads the actual sheet the stage produces/consumes, not a static
     # instruction. Row numbers are fixed here so the "DALŠÍ KROK" callout
     # above can reference them even though it's written first. ----
-    PIPE_FIRST_ROW = 10
+    PIPE_FIRST_ROW = 18
     stages = [
         # (num, name, description, status formula, target sheet or None, color)
         (
@@ -623,7 +691,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
             "DASHBOARD", "375623",
         ),
     ]
-    status_cells = [f"G{PIPE_FIRST_ROW + i}" for i in range(len(stages))]
+    status_cells = [f"I{PIPE_FIRST_ROW + i}" for i in range(len(stages))]
     step_labels = [
         "1) Vlož export POS a SalesApp do RAW_DATA / POS_STATUS_IMPORT / SALESAPP_IMPORT a spusť Import Engine",
         "2) Vytvoř nebo prodluž kampaň v ACTIVITY_PLAN",
@@ -635,11 +703,11 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     # ---- "DALŠÍ KROK" callout: one live sentence, always the first
     # incomplete pipeline stage - this is the answer to "what do I do now",
     # not a checklist the user has to read themselves. ----
-    r = 5
-    ws.cell(r, 1, "DALŠÍ KROK").font = SECTION_FONT
+    r = 13
+    ws.cell(r, 3, "DALŠÍ KROK").font = SECTION_FONT
     r += 1
-    ws.merge_cells(f"A{r}:H{r+1}")
-    next_step_cell = ws.cell(r, 1)
+    ws.merge_cells(f"C{r}:J{r+1}")
+    next_step_cell = ws.cell(r, 3)
     ifs_args = []
     for cell_ref, label in zip(status_cells, step_labels):
         ifs_args.append(f'{cell_ref}="❌ Chybí"')
@@ -656,7 +724,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     r += 3
 
     # ---- Pipeline status strip ----
-    ws.cell(r, 1, "STAV PROCESU").font = TITLE_FONT
+    ws.cell(r, 3, "STAV PROCESU").font = TITLE_FONT
     r += 1
     assert r == PIPE_FIRST_ROW, "PIPE_FIRST_ROW must match the row this loop actually starts at"
     # Each stage renders as one bordered "card row" (thin border on every
@@ -665,19 +733,19 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     # of numbers" (product owner, 2026-07-03).
     for stage_index, (num, name, desc, status_formula, target, color) in enumerate(stages):
         row_tint = "FFFFFF" if stage_index % 2 == 0 else "F7F9FB"
-        for col in range(1, 9):
+        for col in range(3, 11):
             cell = ws.cell(r, col)
             cell.border = CARD_BORDER
-            if col != 1:  # badge (col 1) sets its own fill below; conditional
-                # formatting on col 7 overlays this when a rule matches
+            if col != 3:  # badge (col C) sets its own fill below; conditional
+                # formatting on col I overlays this when a rule matches
                 cell.fill = PatternFill("solid", fgColor=row_tint)
-        ws.cell(r, 1, num).font = Font(bold=True, size=16, color=WHITE)
-        ws.cell(r, 1).fill = PatternFill("solid", fgColor=color)
-        ws.cell(r, 1).alignment = Alignment(horizontal="center", vertical="center")
-        ws.merge_cells(f"B{r}:E{r}")
-        ws.cell(r, 2, f"{name} — {desc}").font = Font(size=11)
-        ws.cell(r, 2).alignment = Alignment(vertical="center", indent=1)
-        status_cell = ws.cell(r, 7, status_formula)
+        ws.cell(r, 3, num).font = Font(bold=True, size=16, color=WHITE)
+        ws.cell(r, 3).fill = PatternFill("solid", fgColor=color)
+        ws.cell(r, 3).alignment = Alignment(horizontal="center", vertical="center")
+        ws.merge_cells(f"D{r}:G{r}")
+        ws.cell(r, 4, f"{name} — {desc}").font = Font(size=11)
+        ws.cell(r, 4).alignment = Alignment(vertical="center", indent=1)
+        status_cell = ws.cell(r, 9, status_formula)
         status_cell.font = Font(bold=True, size=11)
         status_cell.alignment = Alignment(horizontal="center", vertical="center")
         build_status_badge_conditional(ws, status_cell.coordinate, status_cell.coordinate, rules=[
@@ -685,38 +753,35 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
             ("❌", STATUS_SERIOUS, None),
         ])
         if target:
-            _nav_button(ws, f"H{r}", "Otevřít →", target, color=color)
+            _nav_button(ws, f"J{r}", "Otevřít →", target, color=color)
         else:
-            ws.cell(r, 8, "⚙ Automatizace")
-            ws.cell(r, 8).font = Font(italic=True, size=10, color="808080")
-            ws.cell(r, 8).alignment = Alignment(horizontal="center", vertical="center")
+            ws.cell(r, 10, "⚙ Automatizace")
+            ws.cell(r, 10).font = Font(italic=True, size=10, color="808080")
+            ws.cell(r, 10).alignment = Alignment(horizontal="center", vertical="center")
         ws.row_dimensions[r].height = 28
         r += 1
     r += 1
 
     # ---- Status strip (live formulas - stays accurate without any manual
-    # update). Two rows of 3 tiles: row 1 is "how big is the plan", row 2 is
-    # "how is it going" - the latter simply mirrors DASHBOARD's own KPI
-    # tiles (B3/C3) rather than recomputing them, so there is exactly one
-    # source of truth for compliance numbers (ReportingEngine.ts), just
-    # surfaced here too. Distinct-POS/distinct-technician tiles reuse the
-    # same SUMPRODUCT/COUNTIF distinct-count pattern already proven in
+    # update). Operational numbers distinct from the compliance KPI cards
+    # above (plan size/coverage, not plan vs. reality). Two rows of 3 tiles.
+    # Distinct-POS/distinct-technician tiles reuse the same SUMPRODUCT/
+    # COUNTIF distinct-count pattern already proven in
     # redesign_activity_plan()'s reference panel. ----
-    ws.cell(r, 1, "TENTO TÝDEN").font = SECTION_FONT
+    ws.cell(r, 3, "PROVOZNÍ PŘEHLED").font = SECTION_FONT
     r += 1
     mp_pos_range = "MANAGER_PLAN!E2:E200000"
     mp_tech_range = "MANAGER_PLAN!D2:D200000"
     strip = [
-        ("B", "Aktuální kampaň týden", '=IFERROR(VLOOKUP("CAMPAIGN_START_WEEK",CONTROL!A:B,2,FALSE),"-")'),
-        ("D", "POS v systému", '=COUNTA(POS_MASTER!A:A)-1'),
-        ("F", "Naplánováno návštěv", '=COUNTA(MANAGER_PLAN!A:A)-1'),
-        ("B", "POS pokryto plánem", f'=SUMPRODUCT(({mp_pos_range}<>"")/COUNTIF({mp_pos_range},{mp_pos_range}&""))'),
-        ("D", "Techniků naplánováno", f'=SUMPRODUCT(({mp_tech_range}<>"")/COUNTIF({mp_tech_range},{mp_tech_range}&""))'),
-        ("F", "Compliance (splněno / nesplněno)", '=DASHBOARD!C3&" / "&DASHBOARD!D3'),
-        ("B", "Aktivní kampaně", '=COUNTA(ACTIVITY_PLAN!A:A)-1'),
+        ("D", "Aktuální kampaň týden", '=IFERROR(VLOOKUP("CAMPAIGN_START_WEEK",CONTROL!A:B,2,FALSE),"-")'),
+        ("F", "POS v systému", '=COUNTA(POS_MASTER!A:A)-1'),
+        ("H", "Naplánováno návštěv", '=COUNTA(MANAGER_PLAN!A:A)-1'),
+        ("D", "POS pokryto plánem", f'=SUMPRODUCT(({mp_pos_range}<>"")/COUNTIF({mp_pos_range},{mp_pos_range}&""))'),
+        ("F", "Techniků naplánováno", f'=SUMPRODUCT(({mp_tech_range}<>"")/COUNTIF({mp_tech_range},{mp_tech_range}&""))'),
+        ("H", "Aktivní kampaně", '=COUNTA(ACTIVITY_PLAN!A:A)-1'),
         ("D", "Otevřená upozornění", "=DASHBOARD!E3"),
     ]
-    row_offsets = [0, 0, 0, 3, 3, 3, 6, 6]
+    row_offsets = [0, 0, 0, 3, 3, 3, 6]
     for (col, label, formula), row_offset in zip(strip, row_offsets):
         ws[f"{col}{r + row_offset}"] = label
         ws[f"{col}{r + row_offset}"].font = Font(size=9, color="595959")
@@ -745,20 +810,20 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
         f'=SUMPRODUCT(({tech_pm_range}<>"")*({active_range}="Active")'
         f'/COUNTIFS({tech_pm_range},{tech_pm_range}&"",{active_range},"Active"))'
     )
-    ws.cell(r, 1, "PŘED PUBLIKACÍ ZKONTROLUJ").font = TITLE_FONT
+    ws.cell(r, 3, "PŘED PUBLIKACÍ ZKONTROLUJ").font = TITLE_FONT
     r += 1
-    ws.cell(r, 1, "Technik. s aktivními POS").font = Font(size=9, color="595959")
-    ws.cell(r, 3, "Technik. v plánu tento týden").font = Font(size=9, color="595959")
+    ws.cell(r, 3, "Technik. s aktivními POS").font = Font(size=9, color="595959")
+    ws.cell(r, 5, "Technik. v plánu tento týden").font = Font(size=9, color="595959")
     r += 1
-    ws.cell(r, 1, active_tech_count_formula).font = Font(bold=True, size=16, color=NAVY)
-    ws.cell(r, 3, f'=SUMPRODUCT(({mp_tech_range}<>"")/COUNTIF({mp_tech_range},{mp_tech_range}&""))').font = Font(bold=True, size=16, color=NAVY)
+    ws.cell(r, 3, active_tech_count_formula).font = Font(bold=True, size=16, color=NAVY)
+    ws.cell(r, 5, f'=SUMPRODUCT(({mp_tech_range}<>"")/COUNTIF({mp_tech_range},{mp_tech_range}&""))').font = Font(bold=True, size=16, color=NAVY)
     check_row = r
     r += 1
-    ws.merge_cells(f"A{r}:G{r}")
+    ws.merge_cells(f"C{r}:I{r}")
     check_cell = ws.cell(
-        r, 1,
-        f'=IF(A{check_row}=C{check_row},"✅ Počty souhlasí",'
-        f'"⚠ Nesoulad ("&A{check_row}&" vs "&C{check_row}&") - zkontroluj, jestli někdo nechybí v plánu")'
+        r, 3,
+        f'=IF(C{check_row}=E{check_row},"✅ Počty souhlasí",'
+        f'"⚠ Nesoulad ("&C{check_row}&" vs "&E{check_row}&") - zkontroluj, jestli někdo nechybí v plánu")'
     )
     check_cell.font = Font(bold=True, size=11, color=NAVY)
     check_cell.fill = PatternFill("solid", fgColor="FFF2CC")
@@ -771,7 +836,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     r += 2
 
     # ---- Quick navigation ----
-    ws.cell(r, 1, "RYCHLÁ NAVIGACE").font = TITLE_FONT
+    ws.cell(r, 3, "RYCHLÁ NAVIGACE").font = TITLE_FONT
     r += 1
     quick_links = [
         ("SCORECARD", "TECHNICIAN_SCORECARD", "2E75B6"),
@@ -782,7 +847,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
         ("POS_MASTER", "POS_MASTER", "7030A0"),
         ("ACTIVITY_PLAN", "ACTIVITY_PLAN", "BF8F00"),
     ]
-    col_idx = 1
+    col_idx = 3
     for label, target, color in quick_links:
         col_letter = get_column_letter(col_idx)
         _nav_button(ws, f"{col_letter}{r}", label, target, color=color)
@@ -791,7 +856,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     r += 2
 
     # ---- Legend, inline, not an appendix ----
-    ws.cell(r, 1, "JAK ČÍST BARVY").font = TITLE_FONT
+    ws.cell(r, 3, "JAK ČÍST BARVY").font = TITLE_FONT
     r += 1
     legend_items = [
         (EDITABLE_FILL, "Editovatelné - sem zapisuješ"),
@@ -799,7 +864,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
         (IMPORT_FILL, "Sem vlož export"),
         (OUTPUT_FILL, "Výsledek plánování"),
     ]
-    col_idx = 1
+    col_idx = 3
     for color, text in legend_items:
         col_letter = get_column_letter(col_idx)
         ws[f"{col_letter}{r}"] = ""
@@ -812,15 +877,15 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     r += 2
 
     # ---- First-time setup, kept short - detail lives in office-scripts/README.md ----
-    ws.cell(r, 1, "PRVNÍ SPUŠTĚNÍ").font = TITLE_FONT
+    ws.cell(r, 3, "PRVNÍ SPUŠTĚNÍ").font = TITLE_FONT
     r += 1
     for text in [
         "1) Otevři tento sešit v Excelu na webu (OneDrive/SharePoint) - Office Scripts to vyžadují.",
         "2) Záložka Automatizace → New Script → vlož obsah office-scripts/ImportEngine.ts → Spustit.",
         "3) Opakuj pro PlanningEngine.ts, PublishEngine.ts, ComplianceEngine.ts, AdvisorEngine.ts, ReportingEngine.ts.",
     ]:
-        ws.merge_cells(f"B{r}:H{r}")
-        ws.cell(r, 2, text).font = Font(size=10)
+        ws.merge_cells(f"D{r}:J{r}")
+        ws.cell(r, 4, text).font = Font(size=10)
         r += 1
 
     return ws
