@@ -951,9 +951,12 @@ def redesign_activity_plan(wb, tech_column_letter):
 
 
 def build_technician_plan(wb, n_rows=3000, pos_master_notes_col="AK"):
-    """This is exactly what a technician gets - nothing else. No WEEK
-    counter, no internal category code, no POS_AREA, no system REASON tag:
-    just what's needed to go do the visit, in print/export order. Pure
+    """This is exactly what a technician gets - almost nothing else. No
+    internal category code, no POS_AREA, no system REASON tag: just what's
+    needed to go do the visit, in print/export order (TYDEN/week number is
+    included - product owner confirmed it's important for them, 2026-07-03
+    - unlike the other omissions above, which stay deliberately excluded).
+    Pure
     live-formula view (no engine change): stays in sync automatically
     whenever Planning Engine regenerates MANAGER_PLAN, including Draft
     weeks, so the manager sees the full upcoming picture, not just what's
@@ -982,14 +985,15 @@ def build_technician_plan(wb, n_rows=3000, pos_master_notes_col="AK"):
     ws = wb.create_sheet("TECHNICIAN_PLAN")
 
     headers = [
-        "DATUM", "DEN", "TECHNIK", "POS", "NÁZEV PROVOZOVNY",
+        "TYDEN", "DATUM", "DEN", "TECHNIK", "POS", "NÁZEV PROVOZOVNY",
         "ULICE", "MĚSTO", "OBLAST", "AKTIVITA", "POZNÁMKA",
     ]
     for i, h in enumerate(headers):
         ws.cell(1, i + 1, h)
 
     formulas = [
-        lambda r: f'=IF($D{r}="","",MANAGER_PLAN!B{r})',  # DATUM
+        lambda r: f'=IF(MANAGER_PLAN!E{r}="","",MANAGER_PLAN!A{r})',  # TYDEN
+        lambda r: f'=IF($E{r}="","",MANAGER_PLAN!B{r})',  # DATUM
         # DEN: dates.ts's workDays() names Monday-Friday as MON/TUE/WED/THU/FRI
         # (English abbreviations, fine for an internal sheet like MANAGER_PLAN)
         # - translated to Czech here since this sheet is what a technician
@@ -997,22 +1001,22 @@ def build_technician_plan(wb, n_rows=3000, pos_master_notes_col="AK"):
         # unexpected rather than showing blank, so a format change upstream
         # fails loud, not silent.
         lambda r: (
-            f'=IF($D{r}="","",SWITCH(MANAGER_PLAN!C{r},'
+            f'=IF($E{r}="","",SWITCH(MANAGER_PLAN!C{r},'
             f'"MON","Pondělí","TUE","Úterý","WED","Středa","THU","Čtvrtek","FRI","Pátek",'
             f'MANAGER_PLAN!C{r}))'
         ),  # DEN
         lambda r: f'=IF(MANAGER_PLAN!E{r}="","",MANAGER_PLAN!D{r})',  # TECHNIK
         lambda r: f'=IF(MANAGER_PLAN!E{r}="","",MANAGER_PLAN!E{r})',  # POS
-        lambda r: f'=IF($D{r}="","",MANAGER_PLAN!G{r})',  # NAZEV PROVOZOVNY
-        lambda r: f'=IF($D{r}="","",TRIM(MANAGER_PLAN!H{r}&" "&MANAGER_PLAN!I{r}))',  # ULICE (+ CISLO)
-        lambda r: f'=IF($D{r}="","",MANAGER_PLAN!J{r})',  # MESTO
-        lambda r: f'=IF($D{r}="","",MANAGER_PLAN!K{r})',  # OBLAST
+        lambda r: f'=IF($E{r}="","",MANAGER_PLAN!G{r})',  # NAZEV PROVOZOVNY
+        lambda r: f'=IF($E{r}="","",TRIM(MANAGER_PLAN!H{r}&" "&MANAGER_PLAN!I{r}))',  # ULICE (+ CISLO)
+        lambda r: f'=IF($E{r}="","",MANAGER_PLAN!J{r})',  # MESTO
+        lambda r: f'=IF($E{r}="","",MANAGER_PLAN!K{r})',  # OBLAST
         lambda r: (
-            f'=IF($D{r}="","",TRIM(IF(MANAGER_PLAN!N{r}<>"","LOS: "&MANAGER_PLAN!N{r}&" ","")'
+            f'=IF($E{r}="","",TRIM(IF(MANAGER_PLAN!N{r}<>"","LOS: "&MANAGER_PLAN!N{r}&" ","")'
             f'&IF(MANAGER_PLAN!O{r}<>"","LOT: "&MANAGER_PLAN!O{r},"")))'
         ),  # AKTIVITA
         lambda r: (
-            f'=IF($D{r}="","",IFERROR(VLOOKUP($D{r},POS_MASTER!$A:${pos_master_notes_col},'
+            f'=IF($E{r}="","",IFERROR(VLOOKUP($E{r},POS_MASTER!$A:${pos_master_notes_col},'
             f'{pos_master_notes_col_index(pos_master_notes_col)},FALSE),""))'
         ),  # POZNAMKA (manager note from POS_MASTER, not the internal REASON tag)
     ]
@@ -1021,17 +1025,17 @@ def build_technician_plan(wb, n_rows=3000, pos_master_notes_col="AK"):
             ws.cell(r, i + 1, formula_fn(r))
 
     for i, h in enumerate(headers):
-        width = 12 if h in ("DATUM", "DEN", "TECHNIK", "POS") else 20
+        width = 8 if h == "TYDEN" else 12 if h in ("DATUM", "DEN", "TECHNIK", "POS") else 20
         ws.column_dimensions[get_column_letter(i + 1)].width = width
 
-    ws.auto_filter.ref = f"A1:J{n_rows}"
+    ws.auto_filter.ref = f"A1:K{n_rows}"
     apply_banded_rows(ws, 2, n_rows, len(headers))
     # Highlight today's visits - the one row (or handful, one per technician)
     # a technician actually needs when they open this sheet on the day
     # itself, so they don't have to filter/scroll to find it.
     ws.conditional_formatting.add(
-        f"A2:J{n_rows}",
-        FormulaRule(formula=["$A2=TODAY()"], fill=PatternFill("solid", fgColor="FFF2A6")),
+        f"A2:K{n_rows}",
+        FormulaRule(formula=["$B2=TODAY()"], fill=PatternFill("solid", fgColor="FFF2A6")),
     )
     ws.freeze_panes = "A2"
 
