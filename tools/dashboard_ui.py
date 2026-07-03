@@ -58,6 +58,7 @@ TINT_NEUTRAL = WHITE
 
 ICONS = {
     "home": "🏠", "scorecard": "📊", "performance": "📋", "dashboard": "📈", "plan": "🗺",
+    "week": "🗓",
     "good": "✅", "bad": "❌", "warning": "⚠", "celebrate": "🎉",
     "up": "▲", "down": "▼", "flat": "→",
 }
@@ -91,6 +92,7 @@ NAV_RAIL_SHEETS = [
     ("HOME", f"{ICONS['home']} Domů", "404040"),
     ("TECHNICIAN_SCORECARD", f"{ICONS['scorecard']} Scorecard", ACCENT_BLUE),
     ("PERFORMANCE", f"{ICONS['performance']} Performance", ACCENT_BLUE),
+    ("WEEK_DASHBOARD", f"{ICONS['week']} Week Dashboard", ACCENT_BLUE),
     ("DASHBOARD", f"{ICONS['dashboard']} Dashboard", "375623"),
     ("TECHNICIAN_PLAN", f"{ICONS['plan']} Plán týdne", "375623"),
 ]

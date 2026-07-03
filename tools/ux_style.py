@@ -61,6 +61,7 @@ SHEET_GROUPS = [
     ("HOME", "404040"),
     ("TECHNICIAN_SCORECARD", "2E75B6"),
     ("PERFORMANCE", "2E75B6"),
+    ("WEEK_DASHBOARD", "2E75B6"),
     ("DASHBOARD", "375623"),
     ("TECHNICIAN_PLAN", "375623"),
     ("POS_MASTER", "7030A0"),
@@ -91,7 +92,7 @@ SHEET_GROUPS = [
 # Everything else that stays visible (import staging) is a necessary but
 # occasional "mailbox", not part of the daily working set - communicated on
 # HOME, not hidden, because the user must paste into it weekly.
-CORE_DAILY_SHEETS = ["HOME", "TECHNICIAN_SCORECARD", "PERFORMANCE", "DASHBOARD", "TECHNICIAN_PLAN", "POS_MASTER", "ACTIVITY_PLAN", "IMPORT_HUB"]
+CORE_DAILY_SHEETS = ["HOME", "TECHNICIAN_SCORECARD", "PERFORMANCE", "WEEK_DASHBOARD", "DASHBOARD", "TECHNICIAN_PLAN", "POS_MASTER", "ACTIVITY_PLAN", "IMPORT_HUB"]
 IMPORT_UTILITY_SHEETS = ["RAW_DATA", "POS_STATUS_IMPORT", "SALESAPP_IMPORT"]
 
 # Everything not in CORE_DAILY_SHEETS/IMPORT_UTILITY_SHEETS is implementation
@@ -574,7 +575,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     ws = wb.create_sheet("HOME", 0)
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 3
-    for col in "BCDEFGHIJK":
+    for col in "BCDEFGHIJKLM":
         ws.column_dimensions[col].width = 15
 
     # ---- Banner ----
@@ -775,6 +776,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     quick_links = [
         ("SCORECARD", "TECHNICIAN_SCORECARD", "2E75B6"),
         ("PERFORMANCE", "PERFORMANCE", "2E75B6"),
+        ("WEEK DASHBOARD", "WEEK_DASHBOARD", "2E75B6"),
         ("DASHBOARD", "DASHBOARD", "375623"),
         ("TECHNICIAN_PLAN", "TECHNICIAN_PLAN", "375623"),
         ("POS_MASTER", "POS_MASTER", "7030A0"),
@@ -1115,6 +1117,212 @@ def build_performance_sheet(wb, n_rows=60):
         f"M{first_data_row}:M{last_row}",
         IconSetRule(icon_style="3Arrows", type="num", values=[0, -0.001, 0.001], showValue=True, reverse=False),
     )
+
+    return ws
+
+
+def build_week_dashboard(wb, n_tech_rows=60):
+    """WEEK_DASHBOARD: two views. The primary one (product owner, 2026-07-06:
+    "je důležité vždy mít podle kampaně to vyhodnocení, nejdůležitější") is a
+    CAMPAIGN WINDOW summary - totals across every week inside the current
+    campaign's [MIN(ACTIVITY_PLAN.START_WEEK), MAX(ACTIVITY_PLAN.END_WEEK)]
+    range for CONTROL.YEAR, network-wide (all technicians) plus best/worst
+    technician over that whole window. This deliberately does NOT try to
+    attribute a visit to a specific LOS/LOT product - docs/BUSINESS_RULES.md
+    already documents that as blocked on input data (SalesApp doesn't
+    reliably say which campaign a visit serviced), so this is a campaign
+    SEASON rollup, not a per-product breakdown (confirmed with product
+    owner). The secondary view is a single-week selector with a trend vs.
+    the previous week and that week's best/worst technician, matching the
+    architecture doc's original WEEK_DETAIL sketch.
+
+    No engine change and no data model change (explicit product owner
+    instruction, 2026-07-06) - everything here is a live formula over the
+    already-existing TECHNICIAN_PERFORMANCE_LOG/ACTIVITY_PLAN/CONTROL.
+    Per-technician campaign-window aggregation reuses the same bounded,
+    fixed-row-count + SUMPRODUCT technique already proven in
+    build_technician_scorecard() (hidden helper rows, not an untested
+    dynamic-array-criteria trick) - INDEX() walks TECHNICIAN_SCORECARD's
+    already-computed unique-technician spill positionally rather than
+    recomputing UNIQUE/FILTER a second time."""
+    TP = "TECHNICIAN_PERFORMANCE_LOG"
+    if "WEEK_DASHBOARD" in wb.sheetnames:
+        del wb["WEEK_DASHBOARD"]
+    ws = wb.create_sheet("WEEK_DASHBOARD")
+    ws.sheet_view.showGridLines = False
+    for col in "CDEFGHIJKLM":
+        ws.column_dimensions[col].width = 13
+    build_nav_rail(ws, "WEEK_DASHBOARD")
+
+    build_dashboard_banner(
+        ws, "WEEK DASHBOARD", "Aktuální kampaň a jednotlivé týdny",
+        col_start="C", col_end="M",
+    )
+    ws.freeze_panes = "C4"
+
+    # ==========================================================================
+    # HIDDEN FORMULA PLUMBING - never shown to the user.
+    # ==========================================================================
+    # CONTROL's own key text has real trailing whitespace on some rows in
+    # the production workbook (e.g. "YEAR    ") - office-scripts engines
+    # tolerate this via their norm()-based setting() lookup, but Excel's
+    # VLOOKUP does an exact match, so this TRIM-based MATCH is deliberate,
+    # not stylistic.
+    ws["P1"] = "campaignYear"
+    ws["P2"] = '=IFERROR(INDEX(CONTROL!$B:$B,MATCH("YEAR",TRIM(CONTROL!$A:$A),0)),YEAR(TODAY()))'
+    ws["Q1"] = "campaignStartWeek"
+    ws["Q2"] = "=IFERROR(MIN(ACTIVITY_PLAN!$C$2:$C$1000),0)"
+    ws["R1"] = "campaignEndWeek"
+    ws["R2"] = "=IFERROR(MAX(ACTIVITY_PLAN!$D$2:$D$1000),0)"
+
+    # Per-technician campaign-window compliance % - fixed n_tech_rows helper
+    # rows walking TECHNICIAN_SCORECARD's already-computed unique-technician
+    # spill positionally (INDEX(...,ROW()-8)), each with its own plain
+    # SUMPRODUCT ratio over the campaign window. Blank when that technician
+    # has zero planned visits in the window (excluded from best/worst by
+    # MAX/MIN, which ignore blanks/text).
+    tech_first_row = 9
+    for i in range(n_tech_rows):
+        r = tech_first_row + i
+        ws[f"S{r}"] = f'=IFERROR(INDEX(TECHNICIAN_SCORECARD!$P$2#,ROW()-{tech_first_row - 1}),"")'
+        planned_expr = (
+            f'SUMPRODUCT(({TP}!$A$2:$A$5000=$S{r})*({TP}!$B$2:$B$5000=$P$2)*'
+            f'({TP}!$C$2:$C$5000>=$Q$2)*({TP}!$C$2:$C$5000<=$R$2)*{TP}!$E$2:$E$5000)'
+        )
+        realized_expr = (
+            f'SUMPRODUCT(({TP}!$A$2:$A$5000=$S{r})*({TP}!$B$2:$B$5000=$P$2)*'
+            f'({TP}!$C$2:$C$5000>=$Q$2)*({TP}!$C$2:$C$5000<=$R$2)*{TP}!$F$2:$F$5000)'
+        )
+        ws[f"T{r}"] = f'=IF($S{r}="","",IF({planned_expr}=0,"",ROUND({realized_expr}/{planned_expr}*100,1)))'
+    tech_last_row = tech_first_row + n_tech_rows - 1
+    for col in "PQRST":
+        ws.column_dimensions[col].hidden = True
+
+    # Unique (year,week) list across all technicians - the single-week
+    # selector's source (not technician-scoped, unlike TECHNICIAN_SCORECARD's
+    # own list).
+    ws["U1"] = "weeks"
+    ws["U2"] = (
+        f'=IFERROR(SORT(UNIQUE(FILTER(TEXT({TP}!$B$2:$B$5000,"0000")&"-W"&TEXT({TP}!$C$2:$C$5000,"00"),'
+        f'{TP}!$A$2:$A$5000<>""))),"Zatím žádná data")'
+    )
+    ws["V1"] = '=IFERROR(VALUE(LEFT($H$18,4)),0)'   # selected year
+    ws["V2"] = '=IFERROR(VALUE(MID($H$18,7,2)),0)'  # selected week
+    ws["W1"] = (  # previous week on record, network-wide (any gap size) - combined year*100+week key
+        f'=IFERROR(AGGREGATE(14,6,({TP}!$B$2:$B$5000*100+{TP}!$C$2:$C$5000)/'
+        f'((({TP}!$B$2:$B$5000*100+{TP}!$C$2:$C$5000)<($V$1*100+$V$2))*({TP}!$A$2:$A$5000<>"")),1),"")'
+    )
+    prev_week_cond = f'({TP}!$B$2:$B$5000=INT($W$1/100))*({TP}!$C$2:$C$5000=MOD($W$1,100))'
+    ws["W2"] = (  # that previous week's network-wide compliance % (sum realized / sum planned - NOT an average of per-technician %s)
+        f'=IF($W$1="","-",IFERROR(ROUND(SUMPRODUCT({prev_week_cond}*{TP}!$F$2:$F$5000)/'
+        f'SUMPRODUCT({prev_week_cond}*{TP}!$E$2:$E$5000)*100,1),"-"))'
+    )
+    ws.column_dimensions["U"].hidden = True
+    ws.column_dimensions["V"].hidden = True
+    ws.column_dimensions["W"].hidden = True
+
+    dashboard_ui.define_named_range(ws, "WeekList", "WEEK_DASHBOARD!$U$2#")
+
+    # ==========================================================================
+    # CAMPAIGN WINDOW SUMMARY - the primary view.
+    # ==========================================================================
+    build_section_header(ws, "C5", "AKTUÁLNÍ KAMPAŇ")
+    ws.merge_cells("F5:M5")
+    ws["F5"] = '="Týdny "&$Q$2&"–"&$R$2&" / "&$P$2&" (dle ACTIVITY_PLAN, bez rozlišení LOS/LOT)"'
+    ws["F5"].font = NOTE_FONT
+    ws["F5"].alignment = Alignment(horizontal="right", vertical="center")
+
+    campaign_cond = f'({TP}!$B$2:$B$5000=$P$2)*({TP}!$C$2:$C$5000>=$Q$2)*({TP}!$C$2:$C$5000<=$R$2)'
+    campaign_planned = f'SUMPRODUCT({campaign_cond}*{TP}!$E$2:$E$5000)'
+    campaign_realized = f'SUMPRODUCT({campaign_cond}*{TP}!$F$2:$F$5000)'
+    cards = [
+        ("C", "D", "Naplánováno", f'={campaign_planned}', NAVY, WHITE),
+        ("E", "F", "Realizováno", f'={campaign_realized}', NAVY, WHITE),
+        ("G", "H", "Splněno (včas+pozdě)", f'=SUMPRODUCT({campaign_cond}*({TP}!$G$2:$G$5000+{TP}!$H$2:$H$5000))', STATUS_GOOD, dashboard_ui.TINT_GOOD),
+        ("I", "J", "Nesplněno", f'=SUMPRODUCT({campaign_cond}*{TP}!$I$2:$I$5000)', STATUS_CRITICAL, dashboard_ui.TINT_CRITICAL),
+        ("K", "L", "Návštěvy navíc", f'=SUMPRODUCT({campaign_cond}*{TP}!$J$2:$J$5000)', STATUS_WARNING, dashboard_ui.TINT_WARNING),
+        ("M", "M", "Compliance %", f'=IFERROR(ROUND({campaign_realized}/{campaign_planned}*100,1),0)', NAVY, WHITE),
+    ]
+    compliance_cell = build_kpi_card_row(ws, cards, label_row=6, value_row_start=7, value_row_end=9)[5]  # "M7"
+    apply_severity_conditional_formatting(
+        ws, "M7:M9", compliance_cell,
+        thresholds=[(90, STATUS_GOOD), (70, STATUS_WARNING), (50, STATUS_SERIOUS)],
+        below_color=STATUS_CRITICAL,
+    )
+
+    best_tech_ref = build_kpi_card(
+        ws, "C", "F", 11, 12, 13, "Nejlepší technik (kampaň)",
+        f'=IFERROR(INDEX($S${tech_first_row}:$S${tech_last_row},MATCH(MAX($T${tech_first_row}:$T${tech_last_row}),$T${tech_first_row}:$T${tech_last_row},0))'
+        f'&" ("&TEXT(MAX($T${tech_first_row}:$T${tech_last_row}),"0.0")&"%)","Zatím žádná data")',
+        value_color=STATUS_GOOD, fill_color=dashboard_ui.TINT_GOOD,
+    )
+    ws[best_tech_ref].font = font_card_value(size=14, color=STATUS_GOOD)
+    worst_tech_ref = build_kpi_card(
+        ws, "G", "M", 11, 12, 13, "Nejslabší technik (kampaň)",
+        f'=IFERROR(INDEX($S${tech_first_row}:$S${tech_last_row},MATCH(MIN($T${tech_first_row}:$T${tech_last_row}),$T${tech_first_row}:$T${tech_last_row},0))'
+        f'&" ("&TEXT(MIN($T${tech_first_row}:$T${tech_last_row}),"0.0")&"%)","Zatím žádná data")',
+        value_color=STATUS_CRITICAL, fill_color=dashboard_ui.TINT_CRITICAL,
+    )
+    ws[worst_tech_ref].font = font_card_value(size=14, color=STATUS_CRITICAL)
+
+    # ==========================================================================
+    # SINGLE WEEK VIEW - secondary, matches the architecture doc's original
+    # WEEK_DETAIL sketch (per-week slice + trend vs. previous week).
+    # ==========================================================================
+    build_section_header(ws, "C16", "JEDNOTLIVÉ TÝDNY")
+    build_filter_bar_background(ws, 18, "C", "M")
+    build_filter_dropdown(ws, "C18", "TÝDEN", "H18:J18", "=WeekList", default_formula='=IFERROR(INDEX(WeekList,1),"")')
+
+    week_cond = f'({TP}!$B$2:$B$5000=$V$1)*({TP}!$C$2:$C$5000=$V$2)'
+    week_planned = f'SUMPRODUCT({week_cond}*{TP}!$E$2:$E$5000)'
+    week_realized = f'SUMPRODUCT({week_cond}*{TP}!$F$2:$F$5000)'
+    week_cards = [
+        ("C", "D", "Naplánováno", f'={week_planned}', NAVY, WHITE),
+        ("E", "F", "Realizováno", f'={week_realized}', NAVY, WHITE),
+        ("G", "H", "Nesplněno", f'=SUMPRODUCT({week_cond}*{TP}!$I$2:$I$5000)', STATUS_CRITICAL, dashboard_ui.TINT_CRITICAL),
+        ("I", "J", "Compliance %", f'=IFERROR(ROUND({week_realized}/{week_planned}*100,1),0)', NAVY, WHITE),
+        ("K", "M", "Trend proti minulému týdnu",
+         f'=IF($W$1="","Zatím není s čím srovnat",'
+         f'"("&TEXT($W$1,"0")&")")',  # placeholder replaced below with the real delta formula
+         NAVY, WHITE),
+    ]
+    week_value_cells = build_kpi_card_row(ws, week_cards, label_row=19, value_row_start=20, value_row_end=21)
+    week_compliance_cell = week_value_cells[3]  # "I20"
+    apply_severity_conditional_formatting(
+        ws, "I20:J21", week_compliance_cell,
+        thresholds=[(90, STATUS_GOOD), (70, STATUS_WARNING), (50, STATUS_SERIOUS)],
+        below_color=STATUS_CRITICAL, font_size=22,
+    )
+    # Real trend formula (needs week_compliance_cell, only known after the
+    # card row above is built) - overwrite the placeholder card value. $W$2
+    # is the previous week's network-wide compliance %, computed correctly
+    # as sum(realized)/sum(planned) - see the W2 formula above.
+    trend_cell_ref = week_value_cells[4]  # "K20"
+    ws[trend_cell_ref] = (
+        f'=IF($W$1="","Zatím není s čím srovnat",'
+        f'IF({week_compliance_cell}>$W$2,"▲ "&TEXT({week_compliance_cell}-$W$2,"+0.0")&" p.b.",'
+        f'IF({week_compliance_cell}<$W$2,"▼ "&TEXT({week_compliance_cell}-$W$2,"+0.0;-0.0")&" p.b.","→ beze změny")))'
+    )
+    ws[trend_cell_ref].font = font_card_value(size=13)
+    build_status_badge_conditional(ws, f"{trend_cell_ref}:M21", trend_cell_ref, rules=[
+        ("▲", None, STATUS_GOOD),
+        ("▼", None, STATUS_CRITICAL),
+    ])
+
+    best_week_tech_ref = build_kpi_card(
+        ws, "C", "F", 23, 24, 25, "Nejlepší technik (tento týden)",
+        f'=IFERROR(INDEX({TP}!$A$2:$A$5000,MATCH(1,{week_cond}*'
+        f'({TP}!$K$2:$K$5000=IFERROR(AGGREGATE(14,6,{TP}!$K$2:$K$5000/({week_cond}),1),-1)),0)),"Zatím žádná data")',
+        value_color=STATUS_GOOD, fill_color=dashboard_ui.TINT_GOOD,
+    )
+    ws[best_week_tech_ref].font = font_card_value(size=14, color=STATUS_GOOD)
+    worst_week_tech_ref = build_kpi_card(
+        ws, "G", "M", 23, 24, 25, "Nejslabší technik (tento týden)",
+        f'=IFERROR(INDEX({TP}!$A$2:$A$5000,MATCH(1,{week_cond}*'
+        f'({TP}!$K$2:$K$5000=IFERROR(AGGREGATE(15,6,{TP}!$K$2:$K$5000/({week_cond}),1),-1)),0)),"Zatím žádná data")',
+        value_color=STATUS_CRITICAL, fill_color=dashboard_ui.TINT_CRITICAL,
+    )
+    ws[worst_week_tech_ref].font = font_card_value(size=14, color=STATUS_CRITICAL)
 
     return ws
 
@@ -1622,6 +1830,11 @@ def apply_all(wb, control_rows):
         build_technician_scorecard(wb)
     if "TECHNICIAN_PERFORMANCE_SUMMARY" in wb.sheetnames:
         build_performance_sheet(wb)
+    if "TECHNICIAN_PERFORMANCE_LOG" in wb.sheetnames and "TECHNICIAN_SCORECARD" in wb.sheetnames:
+        # Must run after build_technician_scorecard() - reuses its unique-
+        # technician spill (TECHNICIAN_SCORECARD!$P$2#) rather than
+        # recomputing UNIQUE/FILTER a second time.
+        build_week_dashboard(wb)
     if "POS_MASTER" in wb.sheetnames:
         apply_banded_rows(wb["POS_MASTER"], 2, 500, wb["POS_MASTER"].max_column or 39)
         enhance_pos_master(wb)
@@ -1639,6 +1852,8 @@ def apply_all(wb, control_rows):
             continue  # build_technician_scorecard already fully styled it
         if sheet_name == "PERFORMANCE":
             continue  # build_performance_sheet already fully styled it (native Table)
+        if sheet_name == "WEEK_DASHBOARD":
+            continue  # build_week_dashboard already fully styled it
         if sheet_name == "ACTIVITY_PLAN":
             # freeze_below=False: redesign_activity_plan() already set
             # freeze_panes="C2" (keep TYPE+ACTIVITY visible while scrolling
