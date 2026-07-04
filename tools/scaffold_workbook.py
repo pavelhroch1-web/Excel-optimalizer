@@ -328,7 +328,8 @@ def main(ref_path, out_path):
          "updatedAt",
          "kmMon", "kmTue", "kmWed", "kmThu", "kmFri",
          "otherVisits",
-         "posListMon", "posListTue", "posListWed", "posListThu", "posListFri"],
+         "posListMon", "posListTue", "posListWed", "posListThu", "posListFri",
+         "monthKey"],
         [],
     )
 

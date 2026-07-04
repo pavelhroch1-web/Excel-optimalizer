@@ -994,6 +994,26 @@ def build_technician_scorecard(wb):
             f'=IF($W{i}="","",SUMPRODUCT(({TP}!$A$2:$A$5000=$D$5)*'
             f'(({TP}!$B$2:$B$5000*100+{TP}!$C$2:$C$5000)=$W{i})*{TP}!$K$2:$K$5000))'
         )
+    # long-term monthly trend data block (Z=resolved monthKey, AA=label,
+    # AB=avg compliance) - product owner, 2026-07-06, after the weekly/
+    # 4-week views above: "je pro mě i důležitý dlouhodobý pohled" - wants
+    # compliance trend across months/campaigns, not just the last 6 weeks.
+    # Same AGGREGATE-LARGE-k pattern as the 6-week block above, but grouping
+    # by PerformanceEngine.ts's monthKey (TP!AC, YYYYMM) instead of raw week -
+    # a technician can have several weeks in the same month, so this
+    # averages compliancePercent across all of that technician's rows for
+    # each of their last 12 distinct months on record, oldest to newest.
+    for i in range(1, 13):
+        k = 13 - i
+        ws[f"Z{i}"] = (
+            f'=IFERROR(AGGREGATE(14,6,{TP}!$AC$2:$AC$5000/({TP}!$A$2:$A$5000=$D$5),{k}),"")'
+        )
+        ws[f"AA{i}"] = f'=IF($Z{i}="","",INT($Z{i}/100)&"/"&TEXT(MOD($Z{i},100),"00"))'
+        ws[f"AB{i}"] = (
+            f'=IF($Z{i}="","",AVERAGEIFS({TP}!$K$2:$K$5000,{TP}!$A$2:$A$5000,$D$5,'
+            f'{TP}!$AC$2:$AC$5000,$Z{i}))'
+        )
+
     # route-efficiency (km) data block - product owner, 2026-07-06: "číslo
     # kolik najel km třeba mezi těmi pos a semafor" - estimated daily
     # driving distance between visited POS, from PerformanceEngine.ts's
@@ -1010,7 +1030,7 @@ def build_technician_scorecard(wb):
         )
     ws["Y6"] = "=SUM($Y$1:$Y$5)"
 
-    for col in "PQRSTUVWXY":
+    for col in ["P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "AA", "AB"]:
         ws.column_dimensions[col].hidden = True
 
     # Named Ranges over the hidden spill formulas above - the standard
@@ -1126,40 +1146,50 @@ def build_technician_scorecard(wb):
     ws.add_chart(make_line_chart(t_cats, t_data, color=dashboard_ui.ACCENT_BLUE), "I21")
 
     # ==========================================================================
+    # DLOUHODOBÝ TREND (12 měsíců) - product owner, 2026-07-06, after the
+    # weekly/4-week views above: "je pro mě i důležitý dlouhodobý pohled" -
+    # compliance trend across months/campaigns, not just the last 6 weeks.
+    # ==========================================================================
+    build_section_header(ws, "C31", "DLOUHODOBÝ TREND (posl. 12 měsíců)")
+    m_cats = Reference(ws, min_col=27, min_row=1, max_row=12)  # AA1:AA12
+    m_data = Reference(ws, min_col=28, min_row=1, max_row=12)  # AB1:AB12
+    ws.add_chart(make_line_chart(m_cats, m_data, color=dashboard_ui.ACCENT_BLUE), "C32")
+
+    # ==========================================================================
     # TRASA / EFEKTIVITA JÍZD - odhad km mezi navštívenými POS + semafor.
     # No real GPS/timestamp tracking exists in this system (see
     # PerformanceEngine.ts's routeKmForDay header comment): this is an
     # estimate based on the technician's planned visit order for that date,
     # not measured driving distance.
     # ==========================================================================
-    build_section_header(ws, "C31", "TRASA / EFEKTIVITA JÍZD (odhad km mezi POS)")
-    style_dashboard_table_header(ws, 32, "CDEFGHI", ["Po", "Út", "St", "Čt", "Pá", "Týden celkem", "Ostatní návštěvy"])
-    km_cells = [("C33", "Y1"), ("D33", "Y2"), ("E33", "Y3"), ("F33", "Y4"), ("G33", "Y5")]
+    build_section_header(ws, "C42", "TRASA / EFEKTIVITA JÍZD (odhad km mezi POS)")
+    style_dashboard_table_header(ws, 43, "CDEFGHI", ["Po", "Út", "St", "Čt", "Pá", "Týden celkem", "Ostatní návštěvy"])
+    km_cells = [("C44", "Y1"), ("D44", "Y2"), ("E44", "Y3"), ("F44", "Y4"), ("G44", "Y5")]
     for target, source in km_cells:
         ws[target] = f"={source}"
         ws[target].number_format = '0.0" km"'
         ws[target].font = Font(bold=True, size=12)
         ws[target].alignment = Alignment(horizontal="center", vertical="center")
         ws[target].border = CARD_BORDER
-    ws["H33"] = "=$Y$6"
-    ws["H33"].number_format = '0.0" km"'
-    ws["H33"].font = font_card_value(size=14, color=NAVY)
-    ws["H33"].fill = PatternFill("solid", fgColor=WHITE)
-    ws["H33"].alignment = Alignment(horizontal="center", vertical="center")
-    ws["H33"].border = CARD_BORDER
+    ws["H44"] = "=$Y$6"
+    ws["H44"].number_format = '0.0" km"'
+    ws["H44"].font = font_card_value(size=14, color=NAVY)
+    ws["H44"].fill = PatternFill("solid", fgColor=WHITE)
+    ws["H44"].alignment = Alignment(horizontal="center", vertical="center")
+    ws["H44"].border = CARD_BORDER
     # Ostatní návštěvy (otherVisits, TP!W) - informational only, not part of
     # the compliance/campaign gate (see PerformanceEngine.ts's "SIXTH OUTPUT
     # ADDITION" header comment): visits at that technician's POS with a
     # non-campaign SalesApp purpose (restocking, lottery ticket downloads...).
     # Neutral gray styling on purpose - this is context, not a KPI to chase.
-    ws["I33"] = f'=SUMPRODUCT({tp_cond}*{TP}!$W$2:$W$5000)'
-    ws["I33"].font = font_card_value(size=14, color=NAVY)
-    ws["I33"].fill = PatternFill("solid", fgColor=dashboard_ui.LIGHT_GREY)
-    ws["I33"].alignment = Alignment(horizontal="center", vertical="center")
-    ws["I33"].border = CARD_BORDER
-    ws.row_dimensions[33].height = 20
-    for col, cell in (("C", "C33"), ("D", "D33"), ("E", "E33"), ("F", "F33"), ("G", "G33")):
-        rng = f"{col}33"
+    ws["I44"] = f'=SUMPRODUCT({tp_cond}*{TP}!$W$2:$W$5000)'
+    ws["I44"].font = font_card_value(size=14, color=NAVY)
+    ws["I44"].fill = PatternFill("solid", fgColor=dashboard_ui.LIGHT_GREY)
+    ws["I44"].alignment = Alignment(horizontal="center", vertical="center")
+    ws["I44"].border = CARD_BORDER
+    ws.row_dimensions[44].height = 20
+    for col, cell in (("C", "C44"), ("D", "D44"), ("E", "E44"), ("F", "F44"), ("G", "G44")):
+        rng = f"{col}44"
         ws.conditional_formatting.add(
             rng, FormulaRule(formula=[f"{cell}<=$X$1"], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_GOOD),
                               font=Font(bold=True, size=12, color=STATUS_GOOD), stopIfTrue=True),
@@ -1182,9 +1212,9 @@ def build_technician_scorecard(wb):
     # (TP!X..AB) - comma-separated "id - name" text, one FILTER lookup per
     # day since each day's list is a single wide text value, not a range.
     # ==========================================================================
-    build_section_header(ws, "C36", "POS PO DNECH (v pořadí trasy)")
+    build_section_header(ws, "C47", "POS PO DNECH (v pořadí trasy)")
     day_pos_list_cols = [("Po", "X"), ("Út", "Y"), ("St", "Z"), ("Čt", "AA"), ("Pá", "AB")]
-    row = 37
+    row = 48
     for label, tp_col in day_pos_list_cols:
         ws.cell(row, 3, label).font = Font(bold=True, size=10, color=NAVY)
         ws.cell(row, 3).alignment = Alignment(horizontal="center", vertical="center")
@@ -1203,12 +1233,12 @@ def build_technician_scorecard(wb):
     # ==========================================================================
     # TOP PROBLÉMOVÉ POS - deduped, engine-computed (see PerformanceEngine.ts).
     # ==========================================================================
-    build_section_header(ws, "C43", "TOP PROBLÉMOVÉ POS")
-    style_dashboard_table_header(ws, 44, "CDEF", ["POS", "Název", "Region", "Nesplněno (celkem)"])
-    ws["C45"] = f'=IFERROR(FILTER({TI}!$C$2:$F$1000,{TI}!$A$2:$A$1000=$D$5),{{"—","Žádné problémy 🎉","",0}})'
-    apply_table_borders(ws, 45, 49, "CDEF")
+    build_section_header(ws, "C54", "TOP PROBLÉMOVÉ POS")
+    style_dashboard_table_header(ws, 55, "CDEF", ["POS", "Název", "Region", "Nesplněno (celkem)"])
+    ws["C56"] = f'=IFERROR(FILTER({TI}!$C$2:$F$1000,{TI}!$A$2:$A$1000=$D$5),{{"—","Žádné problémy 🎉","",0}})'
+    apply_table_borders(ws, 56, 60, "CDEF")
     ws.conditional_formatting.add(
-        "F45:F49", DataBarRule(start_type="num", start_value=0, end_type="num", end_value=10, color=STATUS_CRITICAL),
+        "F56:F60", DataBarRule(start_type="num", start_value=0, end_type="num", end_value=10, color=STATUS_CRITICAL),
     )
 
     return ws

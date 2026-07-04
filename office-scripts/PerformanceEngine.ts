@@ -150,6 +150,16 @@
 // scan "who's slacking" across the whole team) and as a status badge on
 // TECHNICIAN_SCORECARD.
 //
+// NINTH OUTPUT ADDITION - monthKey (YYYYMM) on TECHNICIAN_PERFORMANCE_LOG:
+// the calendar month of each (technician, ISO week) row, computed via
+// isoMonday() + JS Date arithmetic rather than an Excel formula approximating
+// week-to-month conversion (this project already treats that class of
+// boundary math as an engine responsibility, not a spreadsheet one). Feeds
+// TECHNICIAN_SCORECARD's long-term monthly trend chart - product owner
+// (2026-07-06), after the weekly/4-week views above: "je pro mě i důležitý
+// dlouhodobý pohled" - wants compliance trend across months/campaigns, not
+// just the last 6 weeks.
+//
 // NOT IN THIS VERSION: WHICH LOS/LOT campaign a visit serviced (still
 // blocked on ambiguous free-text data - see BUSINESS_RULES.md section 12).
 // GPS-based map data remains deferred too.
@@ -660,6 +670,17 @@ function main(workbook: ExcelScript.Workbook) {
         .map((id) => id + (posName[id] ? " - " + posName[id] : ""))
         .join(", ")
     );
+    // monthKey (YYYYMM, e.g. 202607) - the calendar month of this ISO week's
+    // Monday, computed once here via JS Date arithmetic rather than
+    // approximated with fragile Excel date formulas over raw ISO week
+    // numbers (this project already treats week/month/year boundary math as
+    // something to get right in engine code, not in spreadsheet formulas -
+    // see isoWeekNumber/isoMonday's own header comments). Feeds
+    // TECHNICIAN_SCORECARD's long-term monthly trend chart (product owner,
+    // 2026-07-06: "je pro mě i důležitý dlouhodobý pohled" - vývoj
+    // compliance za měsíce/kampaně, not just the last 6 weeks).
+    const monthDate = isoMonday(b.year, b.week);
+    const monthKey = monthDate.getFullYear() * 100 + (monthDate.getMonth() + 1);
     outRows.push([
       b.technician, b.year, b.week, topArea,
       b.plannedVisits, b.realizedVisits,
@@ -670,6 +691,7 @@ function main(workbook: ExcelScript.Workbook) {
       kmByDay[0], kmByDay[1], kmByDay[2], kmByDay[3], kmByDay[4],
       b.otherVisits,
       posListByDay[0], posListByDay[1], posListByDay[2], posListByDay[3], posListByDay[4],
+      monthKey,
     ]);
   }
 
@@ -683,9 +705,10 @@ function main(workbook: ExcelScript.Workbook) {
     "kmMon", "kmTue", "kmWed", "kmThu", "kmFri",
     "otherVisits",
     "posListMon", "posListTue", "posListWed", "posListThu", "posListFri",
+    "monthKey",
   ];
   const outWs = workbook.getWorksheet("TECHNICIAN_PERFORMANCE_LOG");
-  outWs.getRange("A2:AB100000").clear(ExcelScript.ClearApplyTo.contents);
+  outWs.getRange("A2:AC100000").clear(ExcelScript.ClearApplyTo.contents);
   outWs.getRangeByIndexes(0, 0, 1, headerRow.length).setValues([headerRow]);
   if (outRows.length > 0) {
     outWs.getRangeByIndexes(1, 0, outRows.length, headerRow.length).setValues(outRows);

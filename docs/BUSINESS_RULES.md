@@ -515,6 +515,17 @@ territory is ~530 POS as of 2026-07-06); a technician count or single territory 
 cap would silently truncate, logged in `ReportingEngine.ts`'s console output.
 STATUS: CONFIRMED (product owner, 2026-07-06).
 
+**RULE: Long-term (monthly) compliance trend**
+CONDITION: product owner asked for a longer-term view than the existing 6-week trend chart -
+"je pro mě i důležitý dlouhodobý pohled" - vývoj compliance za měsíce/kampaně.
+ACTION: `PerformanceEngine.ts` writes `monthKey` (YYYYMM, e.g. 202607) on
+`TECHNICIAN_PERFORMANCE_LOG` - the calendar month of each row's ISO week (via `isoMonday()` + JS
+Date, not an Excel formula approximation). `TECHNICIAN_SCORECARD` adds a "DLOUHODOBÝ TREND (posl.
+12 měsíců)" line chart averaging `compliancePercent` per calendar month, for the selected
+technician's last 12 distinct months on record (a technician can have several weeks in the same
+month - those are averaged, not double-counted).
+STATUS: CONFIRMED (product owner, 2026-07-06).
+
 ## 13. Advisor Engine
 
 Never writes to the plan. Reads POS_MASTER + COMPLIANCE_LOG + SCORE_LOG, writes to ADVISOR_LOG.
