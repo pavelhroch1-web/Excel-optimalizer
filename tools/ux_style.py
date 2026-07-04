@@ -1017,12 +1017,23 @@ def build_technician_scorecard(wb):
     build_filter_dropdown(ws, "C5", "TECHNIK", "D5:F5", "=TechnicianList", default_formula='=IFERROR(INDEX(TechnicianList,1),"")')
     build_filter_dropdown(ws, "G5", "TÝDEN", "H5:J5", "=TechnicianWeekList", default_formula='=IFERROR(INDEX(TechnicianWeekList,1),"")')
     ws.merge_cells("K5:N5")
+    # "Flaká riziko" badge appended to the region line (product owner,
+    # 2026-07-06: "chci aby mi to ukazalo ktery z nich flaka a ktery ne" -
+    # see PerformanceEngine.ts's "EIGHTH OUTPUT ADDITION" header comment).
+    # Technician-level (not week-scoped, unlike the region lookup), so it's
+    # looked up from TECHNICIAN_PERFORMANCE_SUMMARY by technician alone.
     ws["K5"] = (
         f'=IFERROR("Region: "&INDEX({TP}!$D$2:$D$5000,MATCH(1,({TP}!$A$2:$A$5000=$D$5)*'
-        f'({TP}!$B$2:$B$5000=$R$1)*({TP}!$C$2:$C$5000=$R$2),0)),"-")'
+        f'({TP}!$B$2:$B$5000=$R$1)*({TP}!$C$2:$C$5000=$R$2),0)),"-")&'
+        f'IF(IFERROR(INDEX(TECHNICIAN_PERFORMANCE_SUMMARY!$O:$O,MATCH($D$5,TECHNICIAN_PERFORMANCE_SUMMARY!$A:$A,0)),"Ne")="Ano",'
+        f'"  ⚠ RIZIKO FLÁKÁNÍ","")'
     )
     ws["K5"].font = Font(italic=True, size=10, color="595959")
     ws["K5"].alignment = Alignment(vertical="center", horizontal="right", indent=1)
+    ws.conditional_formatting.add(
+        "K5:N5",
+        FormulaRule(formula=['ISNUMBER(SEARCH("FLÁKÁNÍ",K5))'], font=Font(italic=True, bold=True, size=10, color=STATUS_CRITICAL)),
+    )
 
     # ==========================================================================
     # KPI CARD ROW - 6 cards, each a 2-column-wide tile.
@@ -1214,13 +1225,13 @@ def build_performance_sheet(wb, n_rows=60):
         del wb["PERFORMANCE"]
     ws = wb.create_sheet("PERFORMANCE")
     ws.sheet_view.showGridLines = False
-    for col in "CDEFGHIJKLM":
+    for col in "CDEFGHIJKLMN":
         ws.column_dimensions[col].width = 13
     build_nav_rail(ws, "PERFORMANCE")
 
     build_dashboard_banner(
         ws, "PERFORMANCE", "Srovnání všech techniků - řaď a filtruj přímo v tabulce (Excel AutoFilter)",
-        col_start="C", col_end="M",
+        col_start="C", col_end="N",
     )
     ws.freeze_panes = "C9"
 
@@ -1249,21 +1260,21 @@ def build_performance_sheet(wb, n_rows=60):
     header_row = 10
     headers = [
         "Technik", "Region", "Naplánováno", "Realizováno", "Splněno včas", "Splněno pozdě",
-        "Nesplněno", "Navíc", "Compliance %", "Dlouhodobý průměr", "Trend",
+        "Nesplněno", "Navíc", "Compliance %", "Dlouhodobý průměr", "Trend", "Flaká riziko",
     ]
-    for col, label in zip("CDEFGHIJKLM", headers):
+    for col, label in zip("CDEFGHIJKLMN", headers):
         ws[f"{col}{header_row}"] = label
 
-    src_cols = "ABEFGHIJKLM"  # TECHNICIAN_PERFORMANCE_SUMMARY column per table column, in order
+    src_cols = "ABEFGHIJKLMO"  # TECHNICIAN_PERFORMANCE_SUMMARY column per table column, in order
     first_data_row = header_row + 1
     for i in range(n_rows):
         r = first_data_row + i
         sr = i + 2  # TECHNICIAN_PERFORMANCE_SUMMARY row (header is row 1 there)
-        for col, src_col in zip("CDEFGHIJKLM", src_cols):
+        for col, src_col in zip("CDEFGHIJKLMN", src_cols):
             ws[f"{col}{r}"] = f'=IF({TS}!$A${sr}="","",{TS}!{src_col}{sr})'
 
     last_row = first_data_row + n_rows - 1
-    table_ref = f"C{header_row}:M{last_row}"
+    table_ref = f"C{header_row}:N{last_row}"
     table = Table(displayName="PerformanceTable", ref=table_ref)
     table.tableStyleInfo = TableStyleInfo(
         name="TableStyleMedium2", showFirstColumn=False, showLastColumn=False,
@@ -1289,6 +1300,19 @@ def build_performance_sheet(wb, n_rows=60):
     ws.conditional_formatting.add(
         f"M{first_data_row}:M{last_row}",
         IconSetRule(icon_style="3Arrows", type="num", values=[0, 0, 0.0001], showValue=True, reverse=False),
+    )
+
+    # Flaká riziko badge (product owner, 2026-07-06: "chci aby mi to ukazalo
+    # ktery z nich flaka a ktery ne" - see PerformanceEngine.ts's "EIGHTH
+    # OUTPUT ADDITION" header comment for the underlying rule: 2+ of the last
+    # 4 tracked weeks below 70% compliance, a repeated pattern, not one bad
+    # week). "Ano" in red draws the eye when scanning the whole team; "Ne" is
+    # left neutral (not green) - not-flagged is the expected default, not an
+    # achievement to highlight.
+    ws.conditional_formatting.add(
+        f"N{first_data_row}:N{last_row}",
+        FormulaRule(formula=[f'N{first_data_row}="Ano"'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_CRITICAL),
+                    font=Font(bold=True, color=STATUS_CRITICAL)),
     )
 
     return ws

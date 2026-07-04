@@ -482,6 +482,21 @@ návštěvy" - neutral/gray styling, not a KPI to optimize against.
 STATUS: CONFIRMED (product owner, 2026-07-06) - does not change compliance classification,
 `COMPLIANCE_LOG`, or `PLAN_LIFECYCLE` in any way; purely an additional informational count.
 
+**RULE: "Flaká riziko" - persistent-underperformance flag (technician-level only)**
+CONDITION: product owner asked, after reviewing the manager screens, for a direct signal of
+"which technician is slacking and which isn't" - explicitly scoped to the technician only, not a
+POS-level systemic-vs-personal split (considered and declined: "mě zajímá technik ne POS").
+ACTION: `PerformanceEngine.ts` looks at a technician's last `CONTROL.FLAKANI_WINDOW_WEEKS`
+(default 4) tracked weeks on `TECHNICIAN_PERFORMANCE_LOG`, counts how many had `compliancePercent`
+below `CONTROL.FLAKANI_BAD_WEEK_THRESHOLD_PERCENT` (default 70), and sets `flakaRiziko` = "Ano" on
+`TECHNICIAN_PERFORMANCE_SUMMARY` only once at least `CONTROL.FLAKANI_BAD_WEEKS_COUNT` (default 2)
+of those were bad - a repeated pattern, not a single bad week (confirmed: "2+ ze 4 posledních
+týdnů pod 70 %"). With fewer tracked weeks of history than the bad-weeks-count, the flag can never
+fire. Shown on `PERFORMANCE` (network-wide comparison - scan the whole team at once) and as a
+badge next to the region line on `TECHNICIAN_SCORECARD`.
+STATUS: CONFIRMED (product owner, 2026-07-06); thresholds (4 weeks / 70% / 2 bad weeks) are the
+confirmed definition, not a placeholder default like the km thresholds above.
+
 ## 13. Advisor Engine
 
 Never writes to the plan. Reads POS_MASTER + COMPLIANCE_LOG + SCORE_LOG, writes to ADVISOR_LOG.

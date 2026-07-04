@@ -63,6 +63,9 @@ def main(ref_path, out_path):
     control_ws.append(["ADVISOR_VOLUME_THRESHOLD_PERCENT", 25, "Planning Cycle Advisor v1: trailing-vs-baseline deviation (%) that triggers a VOLUME_TREND_SIGNAL alert. Proposed default, not a confirmed business rule - tune once a real season of history exists."])
     control_ws.append(["ROUTE_KM_WARNING_KM", 80, "Proposed default (not a confirmed business rule): daily route-efficiency estimate (PerformanceEngine.ts kmMon..kmFri) above this shows the WARNING semafor color on TECHNICIAN_SCORECARD. Tune on real data - product owner requested the metric 2026-07-06, thresholds are a starting guess."])
     control_ws.append(["ROUTE_KM_CRITICAL_KM", 150, "Proposed default (not a confirmed business rule): daily route-efficiency estimate above this shows the CRITICAL semafor color. Tune on real data."])
+    control_ws.append(["FLAKANI_WINDOW_WEEKS", 4, "Confirmed (product owner, 2026-07-06): how many of a technician's most recent tracked weeks PerformanceEngine.ts looks at for the 'flaka riziko' (persistent-underperformance) flag on TECHNICIAN_PERFORMANCE_SUMMARY/PERFORMANCE."])
+    control_ws.append(["FLAKANI_BAD_WEEK_THRESHOLD_PERCENT", 70, "Confirmed (product owner, 2026-07-06): a week counts as 'bad' for the flaka-riziko flag when compliancePercent falls below this. Same cutoff as the existing WARNING semafor elsewhere in the workbook."])
+    control_ws.append(["FLAKANI_BAD_WEEKS_COUNT", 2, "Confirmed (product owner, 2026-07-06): a technician is flagged 'flaka riziko' when at least this many of their last FLAKANI_WINDOW_WEEKS tracked weeks are 'bad' (see FLAKANI_BAD_WEEK_THRESHOLD_PERCENT) - requires a repeated pattern, not a single bad week."])
 
     # CATEGORY_RULES: copy reference rows + add explicit confirmed default row
     cat_ws = src_wb["CATEGORY_RULES"]
@@ -329,7 +332,8 @@ def main(ref_path, out_path):
         dst_wb, "TECHNICIAN_PERFORMANCE_SUMMARY",
         ["technician", "region", "latestYear", "latestWeek",
          "plannedVisits", "realizedVisits", "splnenoVcas", "splnenoPozde", "nesplneno", "navicEvidovano",
-         "compliancePercent", "longRunAvgCompliance", "trendDelta"],
+         "compliancePercent", "longRunAvgCompliance", "trendDelta",
+         "badWeeksInWindow", "flakaRiziko"],
         [],
     )
 

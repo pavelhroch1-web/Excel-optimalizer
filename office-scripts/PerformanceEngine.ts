@@ -134,6 +134,22 @@
 // see WHAT a technician actually did that day, not only how many.
 // Informational only, same tracking gate as everything else.
 //
+// EIGHTH OUTPUT ADDITION - badWeeksInWindow / flakaRiziko on
+// TECHNICIAN_PERFORMANCE_SUMMARY: a persistent-underperformance flag.
+// Product owner (2026-07-06), reviewing the manager screens: "chci aby mi
+// to ukazalo ktery z nich flaka a ktery ne" - explicitly scoped to the
+// TECHNICIAN only (not a POS-level systemic-vs-personal split, which was
+// considered and declined - "me zajima technik ne POS"). Counts how many of
+// a technician's last CONTROL.FLAKANI_WINDOW_WEEKS tracked weeks had
+// compliancePercent below CONTROL.FLAKANI_BAD_WEEK_THRESHOLD_PERCENT;
+// flakaRiziko = "Ano" only once at least CONTROL.FLAKANI_BAD_WEEKS_COUNT of
+// those were bad - deliberately requires a repeated pattern (confirmed
+// definition: 2+ of the last 4 weeks), not a single bad week, so one rough
+// week (illness, an unusually hard week) doesn't mislabel someone. Displayed
+// on PERFORMANCE (the network-wide comparison screen - the natural place to
+// scan "who's slacking" across the whole team) and as a status badge on
+// TECHNICIAN_SCORECARD.
+//
 // NOT IN THIS VERSION: WHICH LOS/LOT campaign a visit serviced (still
 // blocked on ambiguous free-text data - see BUSINESS_RULES.md section 12).
 // GPS-based map data remains deferred too.
@@ -283,6 +299,10 @@ function main(workbook: ExcelScript.Workbook) {
   // reconstruct PLAN_LIFECYCLE's own (year, rawWeek) key for the tracking
   // gate, not for compliance classification.
   const CONTROL_YEAR = setting("YEAR", new Date().getFullYear());
+  // "Flaka riziko" flag settings (see EIGHTH OUTPUT ADDITION below).
+  const FLAKANI_WINDOW_WEEKS = setting("FLAKANI_WINDOW_WEEKS", 4);
+  const FLAKANI_BAD_WEEK_THRESHOLD_PERCENT = setting("FLAKANI_BAD_WEEK_THRESHOLD_PERCENT", 70);
+  const FLAKANI_BAD_WEEKS_COUNT = setting("FLAKANI_BAD_WEEKS_COUNT", 2);
 
   // ==========================================================================
   // PLAN_LIFECYCLE -> which (CONTROL_YEAR, rawWeek) weeks has the manager
@@ -710,20 +730,35 @@ function main(workbook: ExcelScript.Workbook) {
     const prev = weeks.length > 1 ? weeks[1] : null;
     const longRunAvgCompliance = Math.round((weeks.reduce((s, w) => s + w.compliancePercent, 0) / weeks.length) * 10) / 10;
     const trendDelta = prev ? Math.round((latest.compliancePercent - prev.compliancePercent) * 10) / 10 : "";
+    // "Flaka riziko" (persistent-underperformance flag) - product owner,
+    // 2026-07-06: "chci aby mi to ukazalo ktery z nich flaka a ktery ne" -
+    // wants a repeated pattern over several weeks, not a single bad week
+    // (which could be a fluke: illness, a one-off hard week, a temporarily
+    // overloaded territory). Counts "bad" weeks (compliancePercent below
+    // FLAKANI_BAD_WEEK_THRESHOLD_PERCENT) within the last FLAKANI_WINDOW_WEEKS
+    // tracked weeks on record for this technician; flagged only once at
+    // least FLAKANI_BAD_WEEKS_COUNT of those are bad. With fewer than
+    // FLAKANI_BAD_WEEKS_COUNT weeks of history at all, this can never fire -
+    // correctly waits for enough data rather than guessing from one week.
+    const recentWeeks = weeks.slice(0, FLAKANI_WINDOW_WEEKS);
+    const badWeeksInWindow = recentWeeks.filter((w) => w.compliancePercent < FLAKANI_BAD_WEEK_THRESHOLD_PERCENT).length;
+    const flakaRiziko = badWeeksInWindow >= FLAKANI_BAD_WEEKS_COUNT ? "Ano" : "Ne";
     summaryRows.push([
       tech, latest.region, latest.year, latest.week,
       latest.plannedVisits, latest.realizedVisits,
       latest.splnenoVcas, latest.splnenoPozde, latest.nesplneno, latest.navicEvidovano,
       latest.compliancePercent, longRunAvgCompliance, trendDelta,
+      badWeeksInWindow, flakaRiziko,
     ]);
   }
   const summaryHeaderRow = [
     "technician", "region", "latestYear", "latestWeek",
     "plannedVisits", "realizedVisits", "splnenoVcas", "splnenoPozde", "nesplneno", "navicEvidovano",
     "compliancePercent", "longRunAvgCompliance", "trendDelta",
+    "badWeeksInWindow", "flakaRiziko",
   ];
   const summaryWs = workbook.getWorksheet("TECHNICIAN_PERFORMANCE_SUMMARY");
-  summaryWs.getRange("A2:M100000").clear(ExcelScript.ClearApplyTo.contents);
+  summaryWs.getRange("A2:O100000").clear(ExcelScript.ClearApplyTo.contents);
   summaryWs.getRangeByIndexes(0, 0, 1, summaryHeaderRow.length).setValues([summaryHeaderRow]);
   if (summaryRows.length > 0) {
     summaryWs.getRangeByIndexes(1, 0, summaryRows.length, summaryHeaderRow.length).setValues(summaryRows);
