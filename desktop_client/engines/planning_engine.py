@@ -16,12 +16,14 @@ from typing import Optional
 
 from .core_logic import (
     CadenceRule,
+    GeoClusterConfig,
     GpsBonusConfig,
     POSItem,
     ScoreWeights,
     add_gps_bonus,
     apply_premium_tier,
     category_rule,
+    compute_geo_cluster_bonus,
     compute_score,
     geo_days,
     is_overdue_for_cadence_rule,
@@ -92,6 +94,14 @@ def run(workbook: MockWorkbook) -> str:
         enabled=setting("GPS_EXTRA_ENABLED", 0) == 1,
         radiusMeters=setting("GPS_EXTRA_RADIUS_METERS", 300),
         maxVisits=int(setting("GPS_EXTRA_MAX_VISITS", 5)),
+    )
+    # Geo cluster bonus config - see core_logic.py's compute_geo_cluster_bonus
+    # docstring / PlanningEngine.ts's identical comment (product owner,
+    # 2026-07-06).
+    GEO_CLUSTER_CONFIG = GeoClusterConfig(
+        radiusKm=setting("GEO_CLUSTER_RADIUS_KM", 3),
+        bonusFactor=setting("GEO_CLUSTER_BONUS_FACTOR", 0.01),
+        maxBonus=setting("GEO_CLUSTER_MAX_BONUS", 5000),
     )
 
     # PLAN LIFECYCLE: locked weeks (Published/Active/Closed) are never
@@ -321,6 +331,15 @@ def run(workbook: MockWorkbook) -> str:
         item.reason += gap_reason
 
         groups.setdefault(tech, []).append(item)
+
+    # GEO CLUSTER BONUS - all bonuses computed from each item's BASE score
+    # first, THEN applied, so a bonus never leaks into another item's bonus
+    # calculation within the same pass (matches PlanningEngine.ts's identical
+    # two-pass comment).
+    for tech in groups:
+        bonuses = [compute_geo_cluster_bonus(item, groups[tech], GEO_CLUSTER_CONFIG) for item in groups[tech]]
+        for item, bonus in zip(groups[tech], bonuses):
+            item.score += bonus
 
     # PREMIUM / PARETO TOP-20% (PER_TECHNICIAN)
     for tech in groups:

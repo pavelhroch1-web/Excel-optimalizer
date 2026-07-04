@@ -123,6 +123,31 @@ def compute_score(item: POSItem, weights: ScoreWeights, min_gap: float, neglecte
     return score, gap_reason
 
 
+@dataclass
+class GeoClusterConfig:
+    radiusKm: float
+    bonusFactor: float
+    maxBonus: float
+
+
+def compute_geo_cluster_bonus(item: POSItem, all_items_for_tech: list[POSItem], config: GeoClusterConfig) -> float:
+    """Small score nudge toward geographic clustering - see core.ts's
+    computeGeoClusterBonus() for the full rationale (product owner,
+    2026-07-06: "chci tourplany, co davaji smysl z hlediska prinosu i trasy").
+    Must be called AFTER every item in a technician's pool has its base
+    compute_score() already set - bonuses reflect neighbors' real base value,
+    not a moving target."""
+    if item.x == 0 and item.y == 0:
+        return 0.0  # no GPS on record - can't judge proximity, no bonus
+    bonus = 0.0
+    for other in all_items_for_tech:
+        if other.pos == item.pos or (other.x == 0 and other.y == 0):
+            continue
+        if distance_km(item.x, item.y, other.x, other.y) <= config.radiusKm:
+            bonus += other.score * config.bonusFactor
+    return min(bonus, config.maxBonus)
+
+
 def apply_premium_tier(items: list[POSItem], premium_percent: float) -> None:
     sorted_items = sorted(items, key=lambda i: -i.score)
     limit = math.ceil((len(sorted_items) * premium_percent) / 100)

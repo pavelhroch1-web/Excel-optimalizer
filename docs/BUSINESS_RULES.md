@@ -230,6 +230,34 @@ freely-regenerated MANAGER_PLAN - this was the explicit product-owner requiremen
 Only one week is published per PublishEngine.ts run (the earliest Draft week), matching the real
 weekly ritual rather than publishing the whole rolling horizon at once.
 
+## 6c. Geo cluster bonus - implemented
+
+**RULE: Small score nudge toward geographic clustering at selection time**
+CONDITION: product owner (2026-07-06), during the manager-analytics review: "chci tourplany, co
+davaji smysl z hlediska prinosu i trasy" - reviewed real generated plans and found the daily
+route length (POS visited in planned order) had a p90 of ~118km and a worst case of 311km for 9
+visits, because `selectWeekPOS()` picks candidates purely by `score` (business value) with zero
+geographic awareness - route efficiency only entered the picture afterward, in `geoDays()`'s
+per-day nearest-neighbor clustering of whatever was already selected.
+ACTION: `computeGeoClusterBonus()` (`office-scripts/shared/core.ts`, ported to
+`desktop_client/engines/core_logic.py`) adds a small bonus to a candidate's score equal to the
+sum of `CONTROL.GEO_CLUSTER_BONUS_FACTOR` (default 1%) times each OTHER candidate's own base
+score within `CONTROL.GEO_CLUSTER_RADIUS_KM` (default 3km) for the same technician, capped at
+`CONTROL.GEO_CLUSTER_MAX_BONUS` (default 5000). Applied once per technician's full candidate pool,
+after every item's base `computeScore()` is set (so bonuses reflect neighbors' real value, not a
+moving target), before Premium/Pareto tiering and selection.
+CONFIRMED SCOPE (product owner, 2026-07-06): a small nudge on VALUE-BASED SELECTION, not a
+route-first redesign - value stays the primary driver. The bonus cap (5000) is kept well below the
+smallest meaningful score tier (`NEGLECTED_BONUS`=50000), so it can only break near-ties among
+otherwise-similar candidates, never override being CORE, classification A, or neglected.
+VERIFIED (2026-07-06): re-ran Planning Engine against real production POS_MASTER data - p90 daily
+route dropped from 117.8km to 113.0km, worst case from 311.3km to 201.4km (-35%), average
+essentially unchanged (56.0km to 55.1km) - the bonus mainly reins in extreme outlier scattering,
+as intended by "small nudge", not a bulk redesign. Cross-language equivalence
+(`tools/sim/compare_engines.py`) confirmed the TypeScript and Python ports produce identical
+output on the same real seed.
+STATUS: CONFIRMED (product owner, 2026-07-06), implemented and tested.
+
 ## 7. GPS / Weekly composition
 
 **RULE: GPS shapes the week, not individual tie-breaks**

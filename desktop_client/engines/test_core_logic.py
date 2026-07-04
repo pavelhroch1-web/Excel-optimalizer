@@ -12,6 +12,7 @@ import sys
 
 from core_logic import (
     CadenceRule,
+    GeoClusterConfig,
     GpsBonusConfig,
     POSItem,
     ScoreWeights,
@@ -19,6 +20,7 @@ from core_logic import (
     add_gps_bonus,
     apply_premium_tier,
     category_rule,
+    compute_geo_cluster_bonus,
     compute_score,
     distance_km,
     geo_days,
@@ -80,6 +82,45 @@ check("computeScore neglected reason tagged", "NEGLECTED" in reason3)
 item_force = make_item("P4", weeks=1, force=True)
 score4, _ = compute_score(item_force, weights, min_gap=8, neglected_after=26)
 check("computeScore forceInclude bypasses minGap penalty", score4 == 0)
+
+# --- computeGeoClusterBonus ---
+geo_config = GeoClusterConfig(radiusKm=3, bonusFactor=0.01, maxBonus=5000)
+
+item_no_gps = make_item("A", x=0, y=0, score=100)
+neighbor_ok = make_item("B", x=14.0, y=50.0, score=100000)
+check("computeGeoClusterBonus: no GPS on item gets no bonus",
+      compute_geo_cluster_bonus(item_no_gps, [item_no_gps, neighbor_ok], geo_config) == 0)
+
+item_a = make_item("A", x=14.0, y=50.0, score=100)
+neighbor_no_gps = make_item("B", x=0, y=0, score=100000)
+check("computeGeoClusterBonus: neighbor with no GPS is ignored",
+      compute_geo_cluster_bonus(item_a, [item_a, neighbor_no_gps], geo_config) == 0)
+
+item_a2 = make_item("A", x=14.0, y=50.0, score=100)
+near = make_item("B", x=14.001, y=50.0, score=1000)
+check("computeGeoClusterBonus: single nearby neighbor contributes bonusFactor * score",
+      compute_geo_cluster_bonus(item_a2, [item_a2, near], geo_config) == 10)
+
+item_a3 = make_item("A", x=14.0, y=50.0, score=100)
+far = make_item("B", x=14.5, y=50.0, score=1000000)
+check("computeGeoClusterBonus: neighbor beyond radiusKm contributes nothing",
+      compute_geo_cluster_bonus(item_a3, [item_a3, far], geo_config) == 0)
+
+item_a4 = make_item("A", x=14.0, y=50.0, score=0)
+n1 = make_item("B", x=14.001, y=50.0, score=1000)
+n2 = make_item("C", x=14.002, y=50.0, score=2000)
+check("computeGeoClusterBonus: multiple neighbors sum contributions",
+      compute_geo_cluster_bonus(item_a4, [item_a4, n1, n2], geo_config) == 30)
+
+item_a5 = make_item("A", x=14.0, y=50.0, score=0)
+many_neighbors = [make_item(f"N{i}", x=14.0 + i * 0.0001, y=50.0, score=1000000) for i in range(1, 6)]
+check("computeGeoClusterBonus: bonus capped at maxBonus",
+      compute_geo_cluster_bonus(item_a5, [item_a5, *many_neighbors], geo_config) == 5000)
+
+item_a6 = make_item("A", x=14.0, y=50.0, score=999999)
+item_a6_copy = make_item("A", x=14.0, y=50.0, score=999999)
+check("computeGeoClusterBonus: itself excluded by pos, not object identity",
+      compute_geo_cluster_bonus(item_a6, [item_a6, item_a6_copy], geo_config) == 0)
 
 # --- applyPremiumTier ---
 items = [make_item(f"P{i}", score=100 - i) for i in range(10)]

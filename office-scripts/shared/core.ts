@@ -110,6 +110,48 @@ export function computeScore(item: POSItem, weights: ScoreWeights, minGap: numbe
   return { score, gapReason };
 }
 
+export interface GeoClusterConfig {
+  radiusKm: number;
+  bonusFactor: number;
+  maxBonus: number;
+}
+
+// Small score nudge toward geographic clustering - product owner (2026-07-06,
+// after reviewing real generated plans: p90 daily route was ~118km, worst
+// case 311km for 9 visits): "chci tourplany, co davaji smysl z hlediska
+// prinosu i trasy". Confirmed approach: a SMALL bonus for being near other
+// valuable candidates, not a route-first redesign - value stays the primary
+// driver (see docs/BUSINESS_RULES.md).
+//
+// Must be called AFTER every item in a technician's candidate pool has its
+// base computeScore() already set - "nearby" bonuses are based on neighbors'
+// REAL base value, not inflated by their own cluster bonus (that would
+// double-count clustering as clusters formed, snowballing without bound).
+// maxBonus caps the total so this can only break near-ties within the same
+// core/classification/premium tier - it can never outweigh being CORE
+// (weights.core) or classification A (weights.kategorizaceA), only nudge
+// selection order among otherwise-similar candidates toward ones that keep
+// the technician's day tighter.
+export function computeGeoClusterBonus(
+  item: POSItem,
+  allItemsForTech: POSItem[],
+  config: GeoClusterConfig
+): number {
+  if (item.x == 0 && item.y == 0) {
+    return 0; // no GPS on record - can't judge proximity, no bonus
+  }
+  let bonus = 0;
+  for (const other of allItemsForTech) {
+    if (other.pos == item.pos || (other.x == 0 && other.y == 0)) {
+      continue;
+    }
+    if (distanceKm(item.x, item.y, other.x, other.y) <= config.radiusKm) {
+      bonus += other.score * config.bonusFactor;
+    }
+  }
+  return Math.min(bonus, config.maxBonus);
+}
+
 export function applyPremiumTier(items: POSItem[], premiumPercent: number): void {
   const sorted = [...items].sort((a, b) => b.score - a.score);
   const limit = Math.ceil((sorted.length * premiumPercent) / 100);

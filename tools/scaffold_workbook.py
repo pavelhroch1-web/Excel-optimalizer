@@ -66,6 +66,9 @@ def main(ref_path, out_path):
     control_ws.append(["FLAKANI_WINDOW_WEEKS", 4, "Confirmed (product owner, 2026-07-06): how many of a technician's most recent tracked weeks PerformanceEngine.ts looks at for the 'flaka riziko' (persistent-underperformance) flag on TECHNICIAN_PERFORMANCE_SUMMARY/PERFORMANCE."])
     control_ws.append(["FLAKANI_BAD_WEEK_THRESHOLD_PERCENT", 70, "Confirmed (product owner, 2026-07-06): a week counts as 'bad' for the flaka-riziko flag when compliancePercent falls below this. Same cutoff as the existing WARNING semafor elsewhere in the workbook."])
     control_ws.append(["FLAKANI_BAD_WEEKS_COUNT", 2, "Confirmed (product owner, 2026-07-06): a technician is flagged 'flaka riziko' when at least this many of their last FLAKANI_WINDOW_WEEKS tracked weeks are 'bad' (see FLAKANI_BAD_WEEK_THRESHOLD_PERCENT) - requires a repeated pattern, not a single bad week."])
+    control_ws.append(["GEO_CLUSTER_RADIUS_KM", 3, "Confirmed (product owner, 2026-07-06): PlanningEngine.ts's geo cluster bonus - a candidate POS within this radius of another valuable candidate for the same technician gets a small score bonus (see GEO_CLUSTER_BONUS_FACTOR/GEO_CLUSTER_MAX_BONUS), nudging selection toward tighter daily routes without overriding value as the primary driver."])
+    control_ws.append(["GEO_CLUSTER_BONUS_FACTOR", 0.01, "Confirmed (product owner, 2026-07-06): fraction of a nearby neighbor's own score added as this candidate's geo cluster bonus (1% by default)."])
+    control_ws.append(["GEO_CLUSTER_MAX_BONUS", 5000, "Confirmed (product owner, 2026-07-06): cap on the total geo cluster bonus a single candidate can accumulate - kept well below the smallest meaningful score tier (NEGLECTED_BONUS=50000) so this can only break near-ties, never outweigh being CORE/classification A/neglected."])
 
     # CATEGORY_RULES: copy reference rows + add explicit confirmed default row
     cat_ws = src_wb["CATEGORY_RULES"]

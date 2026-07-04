@@ -21,6 +21,14 @@
 //   - GPS bonus: corrected spec (docs/BUSINESS_RULES.md 6a) - bounded,
 //     capacity-aware overflow, tagged "GPS BONUS", every selected POS is
 //     guaranteed a day slot (fixes the V10.5.5 addNearby() silent-loss bug).
+//   - Geo cluster bonus (added 2026-07-06): a small score nudge toward
+//     candidates near OTHER valuable candidates for the same technician -
+//     product owner, after real generated plans showed a p90 daily route of
+//     ~118km (worst case 311km/9 visits): "chci tourplany, co davaji smysl
+//     z hlediska prinosu i trasy". Value stays the primary selection driver
+//     (see computeGeoClusterBonus's own comment for why the bonus is capped
+//     small) - this only nudges which near-tied candidates get picked, it
+//     does not reorder core/classification/neglected priority.
 //   - Capacity: CAPACITY_OVERRIDE table if present, else workDays x
 //     TARGET_VISITS_DAY (holiday-adjusted, no external calendar).
 //   - Output: MANAGER_PLAN only, with a REASON text column (structured
@@ -217,6 +225,48 @@ function main(workbook: ExcelScript.Workbook) {
       item.ppt * weights.ppt +
       gapAdjustment;
     return { score, gapReason };
+  }
+
+  interface GeoClusterConfig {
+    radiusKm: number;
+    bonusFactor: number;
+    maxBonus: number;
+  }
+
+  // Small score nudge toward geographic clustering - product owner (2026-07-06,
+  // after reviewing real generated plans: p90 daily route was ~118km, worst
+  // case 311km for 9 visits): "chci tourplany, co davaji smysl z hlediska
+  // prinosu i trasy". Confirmed approach: a SMALL bonus for being near other
+  // valuable candidates, not a route-first redesign - value stays the primary
+  // driver (see docs/BUSINESS_RULES.md).
+  //
+  // Must be called AFTER every item in a technician's candidate pool has its
+  // base computeScore() already set - "nearby" bonuses are based on neighbors'
+  // REAL base value, not inflated by their own cluster bonus (that would
+  // double-count clustering as clusters formed, snowballing without bound).
+  // maxBonus caps the total so this can only break near-ties within the same
+  // core/classification/premium tier - it can never outweigh being CORE
+  // (weights.core) or classification A (weights.kategorizaceA), only nudge
+  // selection order among otherwise-similar candidates toward ones that keep
+  // the technician's day tighter.
+  function computeGeoClusterBonus(
+    item: POSItem,
+    allItemsForTech: POSItem[],
+    config: GeoClusterConfig
+  ): number {
+    if (item.x == 0 && item.y == 0) {
+      return 0; // no GPS on record - can't judge proximity, no bonus
+    }
+    let bonus = 0;
+    for (const other of allItemsForTech) {
+      if (other.pos == item.pos || (other.x == 0 && other.y == 0)) {
+        continue;
+      }
+      if (distanceKm(item.x, item.y, other.x, other.y) <= config.radiusKm) {
+        bonus += other.score * config.bonusFactor;
+      }
+    }
+    return Math.min(bonus, config.maxBonus);
   }
 
   function applyPremiumTier(items: POSItem[], premiumPercent: number): void {
@@ -475,6 +525,16 @@ function main(workbook: ExcelScript.Workbook) {
     enabled: setting("GPS_EXTRA_ENABLED", 0) === 1,
     radiusMeters: setting("GPS_EXTRA_RADIUS_METERS", 300),
     maxVisits: setting("GPS_EXTRA_MAX_VISITS", 5),
+  };
+  // GEO_CLUSTER config (see computeGeoClusterBonus's comment above) -
+  // confirmed defaults (product owner, 2026-07-06): 3km radius, 1% of a
+  // neighbor's own score per neighbor, capped well below the smallest
+  // meaningful score tier (neglectedBonus=50000) so it only nudges selection
+  // order among near-ties, never overrides core/classification/neglected.
+  const GEO_CLUSTER_CONFIG: GeoClusterConfig = {
+    radiusKm: setting("GEO_CLUSTER_RADIUS_KM", 3),
+    bonusFactor: setting("GEO_CLUSTER_BONUS_FACTOR", 0.01),
+    maxBonus: setting("GEO_CLUSTER_MAX_BONUS", 5000),
   };
 
   // PLAN LIFECYCLE: a week that has been Published/Active/Closed is locked -
@@ -759,6 +819,18 @@ function main(workbook: ExcelScript.Workbook) {
       groups[tech] = [];
     }
     groups[tech].push(item);
+  }
+
+  // GEO CLUSTER BONUS (see computeGeoClusterBonus's comment above) - all
+  // bonuses are computed from each item's BASE score first, THEN applied,
+  // so a bonus never leaks into another item's bonus calculation within the
+  // same pass (order-independent, matches the function's own "must be
+  // called after base score is set" contract).
+  for (const tech of Object.keys(groups)) {
+    const bonuses = groups[tech].map((item) => computeGeoClusterBonus(item, groups[tech], GEO_CLUSTER_CONFIG));
+    groups[tech].forEach((item, i) => {
+      item.score += bonuses[i];
+    });
   }
 
   // PREMIUM / PARETO TOP-20% (PER_TECHNICIAN, preserves V10.5.5 behaviour)

@@ -9,6 +9,7 @@ import {
   CadenceRule,
   categoryRule,
   computeScore,
+  computeGeoClusterBonus,
   applyPremiumTier,
   matchesCadenceRuleScope,
   isOverdueForCadenceRule,
@@ -141,6 +142,55 @@ test("null weeksSinceLastVisit (new POS, no history) gets no gap adjustment at a
   const item = makeItem({ weeksSinceLastVisit: null, ppt: 500 });
   const { score } = computeScore(item, weights, 8, 26);
   assert.strictEqual(score, 500);
+});
+
+// ==========================================================================
+console.log("computeGeoClusterBonus()");
+// ==========================================================================
+
+const geoConfig = { radiusKm: 3, bonusFactor: 0.01, maxBonus: 5000 };
+
+test("no GPS on record (0,0) gets no bonus regardless of neighbors", () => {
+  const item = makeItem({ pos: "A", x: 0, y: 0, score: 100 });
+  const neighbor = makeItem({ pos: "B", x: 14.0, y: 50.0, score: 100000 });
+  assert.strictEqual(computeGeoClusterBonus(item, [item, neighbor], geoConfig), 0);
+});
+test("a neighbor with no GPS on record is ignored, not treated as co-located", () => {
+  const item = makeItem({ pos: "A", x: 14.0, y: 50.0, score: 100 });
+  const neighbor = makeItem({ pos: "B", x: 0, y: 0, score: 100000 });
+  assert.strictEqual(computeGeoClusterBonus(item, [item, neighbor], geoConfig), 0);
+});
+test("a single nearby neighbor contributes bonusFactor * neighbor.score", () => {
+  const item = makeItem({ pos: "A", x: 14.0, y: 50.0, score: 100 });
+  const neighbor = makeItem({ pos: "B", x: 14.001, y: 50.0, score: 1000 }); // ~0.1km away
+  assert.strictEqual(computeGeoClusterBonus(item, [item, neighbor], geoConfig), 10);
+});
+test("a neighbor beyond radiusKm contributes nothing", () => {
+  const item = makeItem({ pos: "A", x: 14.0, y: 50.0, score: 100 });
+  const far = makeItem({ pos: "B", x: 14.5, y: 50.0, score: 1000000 }); // ~55km away
+  assert.strictEqual(computeGeoClusterBonus(item, [item, far], geoConfig), 0);
+});
+test("multiple nearby neighbors sum their contributions", () => {
+  const item = makeItem({ pos: "A", x: 14.0, y: 50.0, score: 0 });
+  const n1 = makeItem({ pos: "B", x: 14.001, y: 50.0, score: 1000 });
+  const n2 = makeItem({ pos: "C", x: 14.002, y: 50.0, score: 2000 });
+  assert.strictEqual(computeGeoClusterBonus(item, [item, n1, n2], geoConfig), 30);
+});
+test("bonus is capped at maxBonus even with many high-score neighbors", () => {
+  const item = makeItem({ pos: "A", x: 14.0, y: 50.0, score: 0 });
+  const neighbors = [1, 2, 3, 4, 5].map((i) =>
+    makeItem({ pos: "N" + i, x: 14.0 + i * 0.0001, y: 50.0, score: 1000000 })
+  );
+  assert.strictEqual(computeGeoClusterBonus(item, [item, ...neighbors], geoConfig), 5000);
+});
+test("itself is excluded from its own neighbor sum (matched by pos, not object identity)", () => {
+  const item = makeItem({ pos: "A", x: 14.0, y: 50.0, score: 999999 });
+  const itemCopy = makeItem({ pos: "A", x: 14.0, y: 50.0, score: 999999 }); // same pos, different object
+  assert.strictEqual(computeGeoClusterBonus(item, [item, itemCopy], geoConfig), 0);
+});
+test("empty candidate pool gets no bonus, no crash", () => {
+  const item = makeItem({ pos: "A", x: 14.0, y: 50.0, score: 100 });
+  assert.strictEqual(computeGeoClusterBonus(item, [item], geoConfig), 0);
 });
 
 // ==========================================================================
