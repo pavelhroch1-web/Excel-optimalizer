@@ -554,6 +554,15 @@ technician's last 12 distinct months on record (a technician can have several we
 month - those are averaged, not double-counted).
 STATUS: CONFIRMED (product owner, 2026-07-06).
 
+**RULE: HOME shows "kdo flaká" at a glance**
+CONDITION: product owner asked for "přehled o všem" (an overview of everything) directly on HOME,
+not something a manager has to navigate to PERFORMANCE to discover.
+ACTION: HOME (`tools/ux_style.py`'s `build_home()`) shows a single callout line, right below the
+network KPI cards: if any technician has `flakaRiziko="Ano"` (`TECHNICIAN_PERFORMANCE_SUMMARY`),
+names them; otherwise a green "no one flagged" message. Also fixed: the MAP screen was missing
+from HOME's own quick-navigation row (it was added to the shared nav rail but not here).
+STATUS: CONFIRMED (product owner, 2026-07-06).
+
 ## 13. Advisor Engine
 
 Never writes to the plan. Reads POS_MASTER + COMPLIANCE_LOG + SCORE_LOG, writes to ADVISOR_LOG.

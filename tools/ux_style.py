@@ -680,7 +680,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     # reads the actual sheet the stage produces/consumes, not a static
     # instruction. Row numbers are fixed here so the "DALŠÍ KROK" callout
     # above can reference them even though it's written first. ----
-    PIPE_FIRST_ROW = 18
+    PIPE_FIRST_ROW = 19  # shifted +1 from 18 by the new "KDO FLAKÁ" callout above
     stages = [
         # (num, name, description, status formula, target sheet or None, color)
         (
@@ -723,10 +723,38 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
         "5) Spusť Compliance a Advisor Engine - vyhodnotí skutečné návštěvy proti plánu",
     ]
 
+    # ---- "KDO FLAKÁ" callout - product owner, 2026-07-06: "chci mit o
+    # všem přehled" - a manager opening HOME should see at a glance whether
+    # anyone is currently flagged (PerformanceEngine.ts's flakaRiziko, see
+    # BUSINESS_RULES.md), without having to navigate to PERFORMANCE first.
+    # Same single-callout-line pattern as "DALŠÍ KROK"/the pre-publish check
+    # below, not a full table - this is a headline, not a report. ----
+    r = 10
+    ws.cell(r, 3, "KDO FLAKÁ").font = SECTION_FONT
+    r += 1
+    ws.merge_cells(f"C{r}:J{r+1}")
+    flaka_summary_cell = ws.cell(r, 3)
+    flaka_summary_cell.value = (
+        '=IFERROR(IF(COUNTIF(TECHNICIAN_PERFORMANCE_SUMMARY!$O:$O,"Ano")=0,'
+        '"✅ Žádný technik není aktuálně v riziku flákání",'
+        '"⚠ "&COUNTIF(TECHNICIAN_PERFORMANCE_SUMMARY!$O:$O,"Ano")&" technik(ů) v riziku: "&'
+        'TEXTJOIN(", ",TRUE,FILTER(TECHNICIAN_PERFORMANCE_SUMMARY!$A:$A,TECHNICIAN_PERFORMANCE_SUMMARY!$O:$O="Ano"))),'
+        '"Zatím žádná data")'
+    )
+    flaka_summary_cell.font = Font(bold=True, size=13, color=NAVY)
+    flaka_summary_cell.fill = PatternFill("solid", fgColor="FFF2CC")
+    flaka_summary_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1, wrap_text=True)
+    ws.row_dimensions[r].height = 20
+    ws.row_dimensions[r + 1].height = 20
+    build_status_badge_conditional(ws, flaka_summary_cell.coordinate, flaka_summary_cell.coordinate, rules=[
+        ("✅", "E2EFDA", None),
+        ("⚠", STATUS_SERIOUS, None),
+    ])
+    r += 3
+
     # ---- "DALŠÍ KROK" callout: one live sentence, always the first
     # incomplete pipeline stage - this is the answer to "what do I do now",
     # not a checklist the user has to read themselves. ----
-    r = 13
     ws.cell(r, 3, "DALŠÍ KROK").font = SECTION_FONT
     r += 1
     ws.merge_cells(f"C{r}:J{r+1}")
@@ -865,6 +893,10 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
         ("SCORECARD", "TECHNICIAN_SCORECARD", "2E75B6"),
         ("PERFORMANCE", "PERFORMANCE", "2E75B6"),
         ("WEEK DASHBOARD", "WEEK_DASHBOARD", "2E75B6"),
+        # BUG FIX (found 2026-07-06 during a full test pass): MAP was added
+        # to the shared nav rail (dashboard_ui.NAV_RAIL_SHEETS) but never
+        # added here, so HOME's own quick-nav row was missing it.
+        ("MAPA ÚZEMÍ", "MAP", "2E75B6"),
         ("DASHBOARD", "DASHBOARD", "375623"),
         ("TECHNICIAN_PLAN", "TECHNICIAN_PLAN", "375623"),
         ("POS_MASTER", "POS_MASTER", "7030A0"),
