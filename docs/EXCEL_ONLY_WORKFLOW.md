@@ -134,7 +134,8 @@ dropdown + Print), bez appky.
    počet návštěv mimo kampaň (zásobování, stahování losů…), jen pro kontext,
    nepočítá se do compliance.
 5. Automatizace → `office-scripts/ReportingEngine.ts` → Spustit — aktuální
-   `DASHBOARD`.
+   `DASHBOARD` a list `MAP` (území techniků podle GPS, barevně po technikovi
+   — odhad z GPS souřadnic, ne skutečná mapa s ulicemi, viz list `MAP`).
 
 ## Pořadí, které nesmíš přehodit
 

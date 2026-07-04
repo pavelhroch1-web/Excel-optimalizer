@@ -36,6 +36,12 @@
 //   - Advisor summary: counts from the MOST RECENT AdvisorEngine.ts run only
 //     (ADVISOR_LOG is append-only for trend history - a dashboard should
 //     show current alerts, not every alert ever raised).
+//   - POS_MAP_DATA: one (X, Y) column pair per technician (Active POS with
+//     GPS coordinates, grouped by current assignedTechnician/
+//     managerOverrideTechnician) - feeds the MAP sheet's territory-overview
+//     scatter chart (tools/ux_style.py). Added 2026-07-06 after the
+//     manager-analytics review; see the WRITE POS_MAP_DATA section below for
+//     the fixed-size/column-orientation details.
 //
 // ALL SECTIONS BELOW ARE PURE AGGREGATION of numbers already decided by
 // PlanningEngine/ComplianceEngine/AdvisorEngine - this file does not
@@ -696,5 +702,78 @@ function main(workbook: ExcelScript.Workbook) {
     );
   }
 
-  console.log("Reporting Engine: dashboard refreshed, " + output.length + " detail rows + 4 KPI tiles + 3 chart data blocks written.");
+  // ==========================================================================
+  // WRITE POS_MAP_DATA - one (X, Y) column pair per technician, feeding the
+  // MAP sheet's XY scatter chart (tools/ux_style.py) - a territory overview
+  // colored by technician (product owner, 2026-07-06, after the manager-
+  // analytics review: "území techniků, barva = technik"). No real basemap:
+  // this project has no online map service (architecture mandate: no
+  // external APIs), so it's a flat scatter of GPS coordinates, same
+  // flat-earth approximation already used for distanceKm().
+  //
+  // Fixed-size (MAX_MAP_TECHS slots x MAX_POS_PER_TECH rows each), same
+  // "clear + rewrite a fixed range" pattern as the DASHBOARD chart data
+  // blocks above - a real Excel chart cannot be bound to a variable-length
+  // range. Technician order is alphabetical and stable across runs, so a
+  // given technician keeps the same series color/legend position week to
+  // week instead of reshuffling.
+  //
+  // Chart X = POS_MASTER.gpsY, chart Y = POS_MASTER.gpsX - POS_MASTER's own
+  // gpsX/gpsY columns are latitude/longitude respectively (see
+  // PlanningEngine.ts/PerformanceEngine.ts's distanceKm(): the "*111" factor
+  // is invariant per-degree LATITUDE, applied to the first argument), the
+  // reverse of what the column names might suggest - swapped here so the
+  // chart reads as a normal north-up map (longitude rightward, latitude
+  // upward), not a sideways one.
+  // ==========================================================================
+
+  const MAX_MAP_TECHS = 40;
+  const MAX_POS_PER_TECH = 700; // real data's largest single territory is ~530 (2026-07-06)
+
+  const mHeadersForMap = (posMaster[0] as string[]).map((h) => String(h));
+  const mIdxForMap = (name: string) => mHeadersForMap.indexOf(name);
+  let posByTechForMap: { [tech: string]: { x: number; y: number }[] } = {};
+  for (let i = 1; i < posMaster.length; i++) {
+    const row = posMaster[i];
+    if (String(row[mIdxForMap("status")]) != "Active") {
+      continue;
+    }
+    const lat = Number(row[mIdxForMap("gpsX")]);
+    const lon = Number(row[mIdxForMap("gpsY")]);
+    if (isNaN(lat) || isNaN(lon) || (lat == 0 && lon == 0)) {
+      continue; // no GPS on record - skip, don't guess a position
+    }
+    const override = String(row[mIdxForMap("managerOverrideTechnician")] ?? "");
+    const tech = override || String(row[mIdxForMap("assignedTechnician")] ?? "");
+    if (!tech) {
+      continue;
+    }
+    if (!posByTechForMap[tech]) {
+      posByTechForMap[tech] = [];
+    }
+    posByTechForMap[tech].push({ x: lon, y: lat });
+  }
+
+  const allMapTechs = Object.keys(posByTechForMap).sort();
+  const mapTechs = allMapTechs.slice(0, MAX_MAP_TECHS);
+
+  const mapWs = workbook.getWorksheet("POS_MAP_DATA");
+  mapWs.getRangeByIndexes(0, 0, 1 + MAX_POS_PER_TECH, MAX_MAP_TECHS * 2).clear(ExcelScript.ClearApplyTo.contents);
+  for (let slot = 0; slot < mapTechs.length; slot++) {
+    const tech = mapTechs[slot];
+    const points = posByTechForMap[tech].slice(0, MAX_POS_PER_TECH);
+    mapWs.getRangeByIndexes(0, slot * 2, 1, 1).setValue(tech);
+    if (points.length > 0) {
+      mapWs.getRangeByIndexes(1, slot * 2, points.length, 2).setValues(points.map((p) => [p.x, p.y]));
+    }
+  }
+
+  console.log(
+    "Reporting Engine: dashboard refreshed, " + output.length + " detail rows + 4 KPI tiles + 3 chart data blocks written. " +
+      "POS_MAP_DATA refreshed (" + mapTechs.length + " technician territories" +
+      (allMapTechs.length > MAX_MAP_TECHS
+        ? ", " + (allMapTechs.length - MAX_MAP_TECHS) + " technician(s) beyond the " + MAX_MAP_TECHS + "-slot cap not shown"
+        : "") +
+      ")."
+  );
 }

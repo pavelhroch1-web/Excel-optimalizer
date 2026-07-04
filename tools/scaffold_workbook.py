@@ -308,6 +308,13 @@ def main(ref_path, out_path):
     # DASHBOARD (Reporting Engine output - written fresh on every run)
     write_table(dst_wb, "DASHBOARD", ["", "", "", "", "", ""], [])
 
+    # POS_MAP_DATA (Reporting Engine output - written fresh on every run):
+    # fixed-size (MAX_MAP_TECHS=40 slots x 2 columns) X/Y coordinate pairs
+    # per technician, feeding the MAP sheet's territory scatter chart. Empty
+    # headers here are just placeholders - the engine writes each slot's
+    # technician name into row 1 on first run.
+    write_table(dst_wb, "POS_MAP_DATA", [""] * 80, [])
+
     # TECHNICIAN_PERFORMANCE_LOG (Performance Engine output - full rebuild
     # every run, one row per technician/ISO-week - see
     # docs/MANAGER_UX_ARCHITECTURE.md section 1)

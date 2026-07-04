@@ -497,6 +497,24 @@ badge next to the region line on `TECHNICIAN_SCORECARD`.
 STATUS: CONFIRMED (product owner, 2026-07-06); thresholds (4 weeks / 70% / 2 bad weeks) are the
 confirmed definition, not a placeholder default like the km thresholds above.
 
+**RULE: Territory map - GPS scatter colored by technician**
+CONDITION: product owner asked for a geographic view of technician territories, to visually
+verify POS selection/coverage makes sense (the whole reason for this manager-analytics review:
+"pro me je nejdulezitejsi aby byly vhodne vybrane ty POS").
+ACTION: `ReportingEngine.ts` writes `POS_MAP_DATA` (one X/Y coordinate-pair column per technician,
+Active POS with GPS only), rebuilt fresh every run. The `MAP` sheet (`tools/ux_style.py`) plots it
+as a flat XY scatter chart, one series per technician, distinctly colored, chart X = longitude,
+chart Y = latitude (POS_MASTER's own `gpsX`/`gpsY` columns are latitude/longitude respectively -
+swapped for the chart so it reads as a normal north-up map).
+CONFIRMED SCOPE (product owner, 2026-07-06): colored by technician (territory view, not by
+compliance/neglect status), whole network at once (not filtered to one technician).
+CAVEAT: NOT a real street map - this project has no online map service (architecture mandate: no
+external APIs, no online sync), so it is a flat-earth GPS scatter, the same approximation already
+used by `distanceKm()`. Fixed-size grid (40 technician slots x 700 rows each - real data's largest
+territory is ~530 POS as of 2026-07-06); a technician count or single territory size beyond that
+cap would silently truncate, logged in `ReportingEngine.ts`'s console output.
+STATUS: CONFIRMED (product owner, 2026-07-06).
+
 ## 13. Advisor Engine
 
 Never writes to the plan. Reads POS_MASTER + COMPLIANCE_LOG + SCORE_LOG, writes to ADVISOR_LOG.

@@ -65,7 +65,8 @@ main risk of this pattern.
    `TECHNICIAN_SCORECARD`/`PERFORMANCE`/`WEEK_DASHBOARD`). Only includes weeks where tracking has
    been started (step 5); also computes an estimated daily route distance (kmMon..kmFri) between
    that day's realized POS, ordered by the technician's planned visit sequence.
-10. `ReportingEngine.ts` — run any time for an updated DASHBOARD.
+10. `ReportingEngine.ts` — run any time for an updated DASHBOARD and MAP (territory
+    overview colored by technician, from GPS coordinates - not a real street map).
 
 ## What's intentionally NOT here yet
 

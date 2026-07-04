@@ -24,7 +24,9 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter, column_index_from_string
 from openpyxl.comments import Comment
-from openpyxl.chart import LineChart, BarChart, Reference
+from openpyxl.chart import LineChart, BarChart, ScatterChart, Series, Reference
+from openpyxl.chart.series import SeriesLabel
+from openpyxl.chart.data_source import StrRef
 import dashboard_ui
 from dashboard_ui import (
     NAVY, WHITE, STATUS_GOOD, STATUS_WARNING, STATUS_SERIOUS, STATUS_CRITICAL,
@@ -62,6 +64,7 @@ SHEET_GROUPS = [
     ("TECHNICIAN_SCORECARD", "2E75B6"),
     ("PERFORMANCE", "2E75B6"),
     ("WEEK_DASHBOARD", "2E75B6"),
+    ("MAP", "2E75B6"),
     ("DASHBOARD", "375623"),
     ("TECHNICIAN_PLAN", "375623"),
     ("POS_MASTER", "7030A0"),
@@ -109,6 +112,13 @@ HIDDEN_SHEETS = {
     # manager UX sheets (docs/MANAGER_UX_ARCHITECTURE.md), not something a
     # manager reads directly, same treatment as COMPLIANCE_LOG/ADVISOR_LOG.
     "TECHNICIAN_PERFORMANCE_LOG", "TECHNICIAN_PERFORMANCE_SUMMARY", "TECHNICIAN_TOP_ISSUES",
+    # BUG FIX (found 2026-07-06 during a full test pass): added alongside
+    # VISIT_HISTORY_ACTUAL when OTHER_VISIT_LOG was introduced, but never
+    # added here - it sat visible in the tab bar as raw unstyled engine data.
+    "OTHER_VISIT_LOG",
+    # POS_MAP_DATA: ReportingEngine.ts's raw X/Y-per-technician grid feeding
+    # the MAP sheet's chart - a manager reads MAP, never this directly.
+    "POS_MAP_DATA",
 }
 
 # Sheets an engine writes to programmatically - never real-protected, see
@@ -118,6 +128,7 @@ ENGINE_WRITABLE = {
     "POS_MASTER", "MANAGER_PLAN", "MANAGER_PLAN_PUBLISHED", "PLAN_LIFECYCLE",
     "COMPLIANCE_LOG", "ADVISOR_LOG", "VISIT_HISTORY_ACTUAL", "DASHBOARD",
     "TECHNICIAN_PERFORMANCE_LOG", "TECHNICIAN_PERFORMANCE_SUMMARY", "TECHNICIAN_TOP_ISSUES",
+    "OTHER_VISIT_LOG", "POS_MAP_DATA",
 }
 
 # A third category, distinct from both of the above: dashboard screens that
@@ -1318,6 +1329,82 @@ def build_performance_sheet(wb, n_rows=60):
     return ws
 
 
+def _distinct_color(i, n):
+    """Evenly-spaced hue around the color wheel - up to ~40 technicians on
+    one scatter chart need genuinely distinguishable colors, not Excel's
+    default ~10-color theme cycle repeating (which would make two different
+    technicians' territories look identical on the map)."""
+    import colorsys
+    hue = (i / max(n, 1)) % 1.0
+    r, g, b = colorsys.hsv_to_rgb(hue, 0.65, 0.82)
+    return "%02X%02X%02X" % (int(r * 255), int(g * 255), int(b * 255))
+
+
+def build_pos_map(wb, max_techs=40, max_rows=700):
+    """MAP: territory overview - all Active POS plotted by GPS position,
+    colored by assigned technician (product owner, 2026-07-06, from the
+    manager-analytics review: "území techniků, barva = technik" - want to
+    verify territories make geographic sense, spot overlaps/gaps, as part of
+    "vhodně vybrané POS" - the whole reason for this review).
+
+    No real basemap: this project has no online map service (architecture
+    mandate - no external APIs, no online sync), so this is a flat XY
+    scatter of GPS coordinates - the same flat-earth approximation already
+    used by distanceKm() for route-km, not a street map. Chart X = longitude,
+    chart Y = latitude (see ReportingEngine.ts's WRITE POS_MAP_DATA section
+    for why POS_MASTER's own gpsX/gpsY columns need swapping to read as a
+    normal north-up map).
+
+    A real Excel chart can't bind to a variable-length range, so
+    ReportingEngine.ts writes a FIXED max_techs x max_rows grid of (X, Y)
+    column pairs every run (one pair per technician SLOT, not per actual
+    technician) - this function pre-builds exactly that many chart series;
+    slots beyond the real technician count are simply empty/unused series,
+    harmless (Excel just shows nothing for them)."""
+    DATA_SHEET = "POS_MAP_DATA"
+    if "MAP" in wb.sheetnames:
+        del wb["MAP"]
+    ws = wb.create_sheet("MAP")
+    ws.sheet_view.showGridLines = False
+    build_nav_rail(ws, "MAP")
+
+    build_dashboard_banner(
+        ws, "MAPA ÚZEMÍ", "Aktivní POS podle technika - odhad z GPS souřadnic, není to skutečná mapa s ulicemi",
+        col_start="C", col_end="N",
+    )
+
+    data_ws = wb[DATA_SHEET] if DATA_SHEET in wb.sheetnames else None
+    chart = ScatterChart()
+    chart.style = 13
+    chart.height = 26
+    chart.width = 44
+    chart.scatterStyle = "marker"
+    chart.x_axis.title = "Zeměpisná délka (odhad)"
+    chart.y_axis.title = "Zeměpisná šířka (odhad)"
+    chart.x_axis.delete = False
+    chart.y_axis.delete = False
+    chart.legend.position = "r"
+
+    if data_ws is not None:
+        for slot in range(max_techs):
+            col_x = slot * 2 + 1  # 1-based column index for this slot's X column
+            col_y = col_x + 1
+            xvalues = Reference(data_ws, min_col=col_x, min_row=2, max_row=1 + max_rows)
+            yvalues = Reference(data_ws, min_col=col_y, min_row=2, max_row=1 + max_rows)
+            series = Series(yvalues, xvalues, title_from_data=False)
+            series.marker.symbol = "circle"
+            series.marker.size = 5
+            series.marker.graphicalProperties.solidFill = _distinct_color(slot, max_techs)
+            series.marker.graphicalProperties.ln.noFill = True
+            series.graphicalProperties.line.noFill = True  # points only, no connecting line
+            series.tx = SeriesLabel(strRef=StrRef(f"'{DATA_SHEET}'!${get_column_letter(col_x)}$1"))
+            chart.series.append(series)
+
+    ws.add_chart(chart, "C6")
+    ws.cell(4, 3, "Barva = přiřazený technik (max. 40 technických slotů, viz ReportingEngine.ts).").font = NOTE_FONT
+    return ws
+
+
 def build_week_dashboard(wb, n_tech_rows=60):
     """WEEK_DASHBOARD: two views. The primary one (product owner, 2026-07-06:
     "je důležité vždy mít podle kampaně to vyhodnocení, nejdůležitější") is a
@@ -2115,6 +2202,8 @@ def apply_all(wb, control_rows):
         # having actually rebuilt it - found during a post-build QA pass,
         # 2026-07-06).
         build_week_dashboard(wb)
+    if "POS_MAP_DATA" in wb.sheetnames:
+        build_pos_map(wb)
     if "POS_MASTER" in wb.sheetnames:
         apply_banded_rows(wb["POS_MASTER"], 2, 500, wb["POS_MASTER"].max_column or 39)
         enhance_pos_master(wb)
@@ -2133,6 +2222,8 @@ def apply_all(wb, control_rows):
             continue  # build_performance_sheet already fully styled it (native Table)
         if sheet_name == "WEEK_DASHBOARD":
             continue  # build_week_dashboard already fully styled it
+        if sheet_name == "MAP":
+            continue  # build_pos_map already fully styled it
         if sheet_name == "ACTIVITY_PLAN":
             # freeze_below=False: redesign_activity_plan() already set
             # freeze_panes="C2" (keep TYPE+ACTIVITY visible while scrolling
