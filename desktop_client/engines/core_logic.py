@@ -258,22 +258,73 @@ class PlacedVisit:
 
 
 def geo_days(items: list[POSItem], days: list[WorkDay]) -> list[PlacedVisit]:
-    remaining = list(items)
+    """Day assignment (mirrors office-scripts/shared/core.ts's geoDays()).
+
+    The technician's own start point each day is not known (product owner,
+    2026-07-06: "ja nevim odkud bude vyjizdet"), so a true route-ordering
+    (nearest-neighbor chain) cannot be computed reliably - deliberately NOT
+    attempted here. What CAN be improved without knowing the start point is
+    which POS get grouped onto the SAME day: a prior version picked each
+    day's anchor sequentially (highest score still remaining) and grabbed
+    whatever was nearest to only that one anchor, so day 2's anchor could be
+    anywhere and day 1 could already have swept up the points that would
+    have made day 2's cluster tight, stranding leftovers across whichever
+    days still had room ("litaji jako blbci" per product owner, 2026-07-06).
+
+    Fixed by keeping value/PPT as the ONLY thing deciding which POS become
+    day-anchors (anchors are simply the top-scoring items, one per day -
+    value stays the primary driver), then assigning every other POS via a
+    capacitated nearest-anchor match considered GLOBALLY across all days at
+    once (sort every (point, day-anchor) pair by distance ascending, greedily
+    assign each point to its nearest anchor that still has room) instead of
+    day-by-day sequentially - the standard capacitated nearest-centroid
+    heuristic. Not the mathematically optimal partition, but a point is never
+    stuck on a distant day just because a closer day happened to fill first.
+    """
+    if len(days) == 0 or len(items) == 0:
+        return []
+    per_day_target = math.ceil(len(items) / len(days))
+    sorted_items = sorted(items, key=lambda p: -p.score)
+    num_days = min(len(days), len(items))
+    anchors = sorted_items[:num_days]
+    rest = sorted_items[num_days:]
+
+    day_capacity = [max(per_day_target - 1, 0) for _ in anchors]
+    day_items: list[list[POSItem]] = [[a] for a in anchors]
+
+    candidates = []
+    for item_idx, item in enumerate(rest):
+        for day_idx, anchor in enumerate(anchors):
+            candidates.append((distance_km(item.x, item.y, anchor.x, anchor.y), item_idx, day_idx))
+    candidates.sort(key=lambda c: c[0])
+
+    assigned = [False] * len(rest)
+    for _distance, item_idx, day_idx in candidates:
+        if assigned[item_idx] or day_capacity[day_idx] <= 0:
+            continue
+        day_items[day_idx].append(rest[item_idx])
+        day_capacity[day_idx] -= 1
+        assigned[item_idx] = True
+
+    # Every day's capacity can be exhausted before every point is assigned
+    # (per_day_target is a ceiling, so total capacity can undershoot
+    # len(items) by up to num_days-1) - remaining points must still be
+    # placed somewhere, so they overflow onto whichever day still has room,
+    # or the last day.
+    for item_idx, item in enumerate(rest):
+        if assigned[item_idx]:
+            continue
+        target = next((i for i, c in enumerate(day_capacity) if c > 0), -1)
+        if target == -1:
+            target = num_days - 1
+        else:
+            day_capacity[target] -= 1
+        day_items[target].append(item)
+
     result: list[PlacedVisit] = []
-    group = 1
-    per_day_target = math.ceil(len(items) / len(days)) if len(days) > 0 else 0
-    for d in days:
-        if len(remaining) == 0:
-            break
-        remaining.sort(key=lambda p: -p.score)
-        anchor = remaining.pop(0)
-        result.append(PlacedVisit(pos=anchor, day=d.day, dateIso=d.dateIso, group=group))
-        remaining.sort(key=lambda p: distance_km(anchor.x, anchor.y, p.x, p.y))
-        take = min(per_day_target - 1, len(remaining))
-        for _ in range(max(take, 0)):
-            near = remaining.pop(0)
-            result.append(PlacedVisit(pos=near, day=d.day, dateIso=d.dateIso, group=group))
-        group += 1
+    for day_idx in range(num_days):
+        for p in day_items[day_idx]:
+            result.append(PlacedVisit(pos=p, day=days[day_idx].day, dateIso=days[day_idx].dateIso, group=day_idx + 1))
     return result
 
 

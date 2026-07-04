@@ -258,6 +258,39 @@ as intended by "small nudge", not a bulk redesign. Cross-language equivalence
 output on the same real seed.
 STATUS: CONFIRMED (product owner, 2026-07-06), implemented and tested.
 
+## 6d. Day-clustering fix (geoDays) - implemented
+
+**RULE: day assignment uses a global capacitated nearest-anchor match, not sequential per-day greedy**
+CONDITION: product owner (2026-07-06), asked to think further about tour-plan assembly. Proposed
+fix: re-sequence each day's stops into a true nearest-neighbor DRIVING ORDER. Product owner
+declined ("ja nevim odkud bude vyjizdet takze nn") - the technician's actual daily departure point
+is unknown, so an anchor-relative route sequence isn't reliable. Product owner then specified
+priority explicitly: "dulezite je PPT a pak to shlukovani, aby mi tam nelitali jako blbci" - i.e.
+value/PPT stays the primary driver (unchanged, see 6c), but day-to-day GEOGRAPHIC GROUPING (which
+POS land on the SAME day, not what order within the day) should be tightened so technicians aren't
+crossing the territory back and forth across the week.
+PROBLEM FOUND: the old `geoDays()` picked each day's anchor sequentially (highest score still
+remaining) and filled that day only from whatever was nearest to that ONE anchor, one day at a
+time. A day with a small remaining capacity could "steal" nearby points and leave a geographically
+tight cluster split across two later, unrelated days - not because of value or distance, but purely
+because of which day happened to run its greedy pass first.
+ACTION: `geoDays()` (`office-scripts/shared/core.ts`, synced into `PlanningEngine.ts`, ported to
+`desktop_client/engines/core_logic.py`) now picks the same day-anchors as before (top-scoring items,
+one per day - value/PPT unchanged as the sole driver of WHICH POS become anchors), then assigns
+every other candidate via a capacitated nearest-anchor match considered across ALL days at once:
+every (point, day-anchor) pair is sorted by distance ascending, and each point is greedily given to
+its nearest anchor that still has capacity. This is the standard capacitated nearest-centroid
+heuristic - not a mathematically optimal partition, but a point is never stranded on a distant day
+just because a closer day filled up first.
+VERIFIED (2026-07-06): re-ran Planning Engine against real production POS_MASTER data (540 real
+technician/week/day groups) and measured each day-group's internal geographic spread (max pairwise
+distance among that day's POS): median 27.9km, p90 72.4km, worst case 128.3km - well below the
+whole-day-route-length numbers measured for the geo-cluster-bonus feature alone (6c: p90 113km,
+worst 201km; not a directly identical metric, but same real seed, same direction of improvement).
+Cross-language (`tools/sim/compare_engines.py`) and unit tests (`tests/core.test.ts`,
+`desktop_client/engines/test_core_logic.py`) both updated and passing.
+STATUS: CONFIRMED (product owner, 2026-07-06), implemented and tested.
+
 ## 7. GPS / Weekly composition
 
 **RULE: GPS shapes the week, not individual tie-breaks**

@@ -397,35 +397,87 @@ function main(workbook: ExcelScript.Workbook) {
     dateIso: string;
   }
 
+  // Day assignment: the technician's own start point each day is not known
+  // (product owner, 2026-07-06: "ja nevim odkud bude vyjizdet"), so a true
+  // route-ordering (nearest-neighbor chain) cannot be computed reliably -
+  // deliberately NOT attempted here. What CAN be improved without knowing the
+  // start point is which POS get grouped onto the SAME day: the previous
+  // version picked each day's anchor sequentially (highest score still
+  // remaining) and then grabbed whatever was nearest to only that one anchor -
+  // so day 2's anchor could be anywhere, and day 1 could easily have already
+  // grabbed the points that would have made day 2's cluster tight, leaving
+  // leftover points scattered across whichever days still had room ("litaji
+  // jako blbci" per product owner, 2026-07-06).
+  //
+  // Fixed by keeping value/PPT as the ONLY thing that decides which POS become
+  // day-anchors (unchanged: anchors are simply the top-scoring items, one per
+  // day - value stays the primary driver), but then assigning every other POS
+  // via a capacitated nearest-anchor match considered GLOBALLY across all days
+  // at once (sort every (point, day-anchor) pair by distance, ascending, and
+  // greedily assign each point to its nearest anchor that still has room) -
+  // instead of day-by-day sequentially. This is the standard capacitated
+  // nearest-centroid heuristic: it does not guarantee the mathematically
+  // optimal partition, but it means a point is never stuck on a distant day
+  // just because a closer day happened to fill up first.
   function geoDays(
     list: POSItem[],
     days: WorkDay[]
   ): { pos: POSItem; day: string; dateIso: string; group: number }[] {
-    let remaining = [...list];
-    let result: { pos: POSItem; day: string; dateIso: string; group: number }[] = [];
-    let group = 1;
-    const perDayTarget = days.length > 0 ? Math.ceil(list.length / days.length) : 0;
-    for (const d of days) {
-      if (remaining.length == 0) {
-        break;
+    if (days.length == 0 || list.length == 0) {
+      return [];
+    }
+    const perDayTarget = Math.ceil(list.length / days.length);
+    const sorted = [...list].sort((a, b) => b.score - a.score);
+    const numDays = Math.min(days.length, list.length);
+    const anchors = sorted.slice(0, numDays);
+    const rest = sorted.slice(numDays);
+
+    const dayCapacity: number[] = anchors.map(() => Math.max(perDayTarget - 1, 0));
+    const dayItems: POSItem[][] = anchors.map((a) => [a]);
+
+    const candidates: { itemIdx: number; dayIdx: number; distance: number }[] = [];
+    for (let itemIdx = 0; itemIdx < rest.length; itemIdx++) {
+      for (let dayIdx = 0; dayIdx < numDays; dayIdx++) {
+        candidates.push({
+          itemIdx,
+          dayIdx,
+          distance: distanceKm(rest[itemIdx].x, rest[itemIdx].y, anchors[dayIdx].x, anchors[dayIdx].y),
+        });
       }
-      remaining.sort((a, b) => b.score - a.score);
-      const anchor = remaining.shift();
-      if (!anchor) {
-        break;
+    }
+    candidates.sort((a, b) => a.distance - b.distance);
+
+    const assigned = new Array(rest.length).fill(false);
+    for (const c of candidates) {
+      if (assigned[c.itemIdx] || dayCapacity[c.dayIdx] <= 0) {
+        continue;
       }
-      result.push({ pos: anchor, day: d.day, dateIso: d.dateIso, group });
-      remaining.sort(
-        (a, b) => distanceKm(anchor.x, anchor.y, a.x, a.y) - distanceKm(anchor.x, anchor.y, b.x, b.y)
-      );
-      const take = Math.min(perDayTarget - 1, remaining.length);
-      for (let i = 0; i < take; i++) {
-        const near = remaining.shift();
-        if (near) {
-          result.push({ pos: near, day: d.day, dateIso: d.dateIso, group });
-        }
+      dayItems[c.dayIdx].push(rest[c.itemIdx]);
+      dayCapacity[c.dayIdx]--;
+      assigned[c.itemIdx] = true;
+    }
+    // Every day's capacity can be exhausted before every point is assigned
+    // (perDayTarget is a ceiling, so total capacity can undershoot list.length
+    // by up to numDays-1) - remaining points must still be placed somewhere,
+    // so they overflow onto whichever day still has room, or the last day.
+    for (let itemIdx = 0; itemIdx < rest.length; itemIdx++) {
+      if (assigned[itemIdx]) {
+        continue;
       }
-      group++;
+      let target = dayCapacity.findIndex((c) => c > 0);
+      if (target == -1) {
+        target = numDays - 1;
+      } else {
+        dayCapacity[target]--;
+      }
+      dayItems[target].push(rest[itemIdx]);
+    }
+
+    const result: { pos: POSItem; day: string; dateIso: string; group: number }[] = [];
+    for (let dayIdx = 0; dayIdx < numDays; dayIdx++) {
+      for (const p of dayItems[dayIdx]) {
+        result.push({ pos: p, day: days[dayIdx].day, dateIso: days[dayIdx].dateIso, group: dayIdx + 1 });
+      }
     }
     return result;
   }

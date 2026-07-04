@@ -160,6 +160,26 @@ placed = geo_days(geo_pool, days)
 check("geoDays places all items", len(placed) == 4)
 check("geoDays anchor is highest score", placed[0].pos.pos == "G0")
 
+days2 = [WorkDay(day="MON", dateIso="27.7.2026"), WorkDay(day="TUE", dateIso="28.7.2026")]
+items_stranded = [
+    make_item("A-anchor", score=100, x=50.0, y=14.0),
+    make_item("B-anchor", score=90, x=50.5, y=14.5),
+    make_item("A2", score=10, x=50.001, y=14.001),
+]
+placed_stranded = geo_days(items_stranded, days2)
+a2_day = next(p.day for p in placed_stranded if p.pos.pos == "A2")
+check("geoDays global assignment keeps A2 on MON (near A-anchor), not stranded on TUE", a2_day == "MON")
+
+cluster_a = [make_item(f"A{i}", score=100 - i * 2, x=50 + i * 0.001, y=14) for i in range(5)]
+cluster_b = [make_item(f"B{i}", score=99 - i * 2, x=55 + i * 0.001, y=18) for i in range(5)]
+placed_balanced = geo_days(cluster_a + cluster_b, days2)
+mon_pos = [p.pos.pos for p in placed_balanced if p.day == "MON"]
+tue_pos = [p.pos.pos for p in placed_balanced if p.day == "TUE"]
+check("geoDays balanced clusters: MON is 5 items", len(mon_pos) == 5)
+check("geoDays balanced clusters: TUE is 5 items", len(tue_pos) == 5)
+check("geoDays balanced clusters: MON is all cluster A", all(p.startswith("A") for p in mon_pos))
+check("geoDays balanced clusters: TUE is all cluster B", all(p.startswith("B") for p in tue_pos))
+
 gps_selected = [make_item("Anchor", score=100, x=0, y=0)]
 gps_pool = [make_item("Near", score=50, x=0.001, y=0), make_item("Far", score=90, x=10, y=10)]
 config = GpsBonusConfig(enabled=True, radiusMeters=300, maxVisits=5)

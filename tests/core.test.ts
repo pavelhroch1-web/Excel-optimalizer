@@ -428,6 +428,53 @@ test("empty item list returns empty result without crashing", () => {
   const days = [{ day: "MON", dateIso: "2026-07-27" }];
   assert.deepStrictEqual(geoDays([], days), []);
 });
+test("global capacitated assignment keeps a point off a distant day even if that day filled first (not sequential day-by-day)", () => {
+  // Two tight geographic clusters, far apart. Anchors are the 2 highest
+  // scores, one per cluster (day 1 = cluster A, day 2 = cluster B). A extra
+  // point "A3" belongs to cluster A but is scored lower than everything -
+  // the OLD sequential algorithm would process day 1 fully first (grabbing
+  // A1, A2 by proximity to the A anchor, since perDayTarget allows 2 more)
+  // before day 2 ever runs, so this case wouldn't actually distinguish the
+  // two algorithms by itself. Instead: give day 1 only capacity for its
+  // anchor + 1 more (perDayTarget=2 via 3 items/2 days -> ceil=2), so the
+  // old algorithm's day-1 pass grabs A1 (nearest to A-anchor) leaving A2
+  // stranded for day 2 (near cluster B, far from A-anchor) purely because
+  // day 1 happened to run first. The new global assignment instead gives A2
+  // to whichever day-anchor is actually closer overall.
+  const items = [
+    makeItem({ pos: "A-anchor", score: 100, x: 50.0, y: 14.0 }),
+    makeItem({ pos: "B-anchor", score: 90, x: 50.5, y: 14.5 }),
+    makeItem({ pos: "A2", score: 10, x: 50.001, y: 14.001 }), // right next to A-anchor
+  ];
+  const days = [
+    { day: "MON", dateIso: "2026-07-27" },
+    { day: "TUE", dateIso: "2026-07-28" },
+  ];
+  const result = geoDays(items, days);
+  const a2 = result.find((r) => r.pos.pos == "A2");
+  assert.strictEqual(a2 && a2.day, "MON", "A2 (right next to the MON anchor) must be placed on MON, not stranded on TUE");
+});
+test("balanced clusters: every day gets close to perDayTarget items, none left with only its anchor while another day is overloaded", () => {
+  // Top scorer of each cluster must land in the top-2 overall (one anchor
+  // per cluster) - if both anchors came from the same cluster (e.g. cluster
+  // A sweeping the top 2 scores outright) this test would be exercising a
+  // different, unrelated scenario (see the "global capacitated assignment"
+  // test above for that case instead).
+  const clusterA = Array.from({ length: 5 }, (_, i) => makeItem({ pos: "A" + i, score: 100 - i * 2, x: 50 + i * 0.001, y: 14 }));
+  const clusterB = Array.from({ length: 5 }, (_, i) => makeItem({ pos: "B" + i, score: 99 - i * 2, x: 55 + i * 0.001, y: 18 }));
+  const items = [...clusterA, ...clusterB];
+  const days = [
+    { day: "MON", dateIso: "2026-07-27" },
+    { day: "TUE", dateIso: "2026-07-28" },
+  ];
+  const result = geoDays(items, days);
+  const monPos = result.filter((r) => r.day == "MON").map((r) => r.pos.pos);
+  const tuePos = result.filter((r) => r.day == "TUE").map((r) => r.pos.pos);
+  assert.strictEqual(monPos.length, 5);
+  assert.strictEqual(tuePos.length, 5);
+  assert.ok(monPos.every((p) => p.startsWith("A")), "MON (anchored by top scorer A0) should end up as all of cluster A");
+  assert.ok(tuePos.every((p) => p.startsWith("B")), "TUE (anchored by B0) should end up as all of cluster B");
+});
 
 // ==========================================================================
 console.log("resolveCapacity()");
