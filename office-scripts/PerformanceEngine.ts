@@ -311,6 +311,17 @@ function main(workbook: ExcelScript.Workbook) {
   // ==========================================================================
 
   let trackingStartedRawWeeks: { [key: string]: boolean } = {};
+  // True-ISO equivalent of trackingStartedRawWeeks, computed directly from
+  // PLAN_LIFECYCLE's own raw (year, rawWeek) key - independent of whether
+  // any MANAGER_PLAN_PUBLISHED row for that week happens to exist. BUG FIX
+  // (found 2026-07-06 during a full test pass): this used to be built
+  // opportunistically inside the MANAGER_PLAN_PUBLISHED loop below, so a week
+  // with a manager-started PLAN_LIFECYCLE row but ZERO planned visits (e.g.
+  // a week made up entirely of Navic_evidovano/OTHER_VISIT_LOG activity)
+  // would never be marked as tracking-started, silently hiding that week's
+  // Nesplneno/otherVisits from every manager dashboard even after the
+  // manager explicitly started tracking it.
+  let trueIsoTrackingStarted: { [key: string]: boolean } = {};
   if (planLifecycle.length >= 2) {
     const plHeaders = (planLifecycle[0] as string[]).map((h) => String(h));
     const plIdx = (name: string) => plHeaders.indexOf(name);
@@ -319,7 +330,11 @@ function main(workbook: ExcelScript.Workbook) {
       for (let i = 1; i < planLifecycle.length; i++) {
         const row = planLifecycle[i];
         if (String(row[trackingCol] ?? "") !== "") {
-          trackingStartedRawWeeks[row[plIdx("year")] + "|" + row[plIdx("week")]] = true;
+          const rawYear = Number(row[plIdx("year")]);
+          const rawWeek = Number(row[plIdx("week")]);
+          trackingStartedRawWeeks[rawYear + "|" + rawWeek] = true;
+          const { week, year } = isoWeekNumber(isoMonday(rawYear, rawWeek));
+          trueIsoTrackingStarted[year + "|" + week] = true;
         }
       }
     }
@@ -404,7 +419,6 @@ function main(workbook: ExcelScript.Workbook) {
 
   const mpHeaders = managerPlanPublished.length > 0 ? (managerPlanPublished[0] as string[]).map((h) => String(h)) : [];
   const mpIdx = (name: string) => mpHeaders.indexOf(name);
-  let trueIsoTrackingStarted: { [key: string]: boolean } = {};
   let plannedOrderByTechDate: { [key: string]: string[] } = {};
   // (posId, true-ISO week, true-ISO year) -> the technician that POS was
   // planned for that week - used to attribute OTHER_VISIT_LOG rows (which
@@ -430,9 +444,6 @@ function main(workbook: ExcelScript.Workbook) {
     plannedTechByPosWeek[posId + "|" + week + "|" + year] = tech;
     const rawWeek = Number(row[mpIdx("WEEK")]);
     const trackingStarted = trackingStartedRawWeeks[CONTROL_YEAR + "|" + rawWeek] === true;
-    if (trackingStarted) {
-      trueIsoTrackingStarted[year + "|" + week] = true;
-    }
     if (!trackingStarted) {
       continue; // week not yet started tracking - see file header ("TRACKING GATE")
     }
@@ -728,7 +739,16 @@ function main(workbook: ExcelScript.Workbook) {
     const weeks = byTechWeeks[tech].sort((a, b) => b.year * 100 + b.week - (a.year * 100 + a.week));
     const latest = weeks[0];
     const prev = weeks.length > 1 ? weeks[1] : null;
-    const longRunAvgCompliance = Math.round((weeks.reduce((s, w) => s + w.compliancePercent, 0) / weeks.length) * 10) / 10;
+    // BUG FIX (found 2026-07-06 during a full test pass): a week with ZERO
+    // plannedVisits forces compliancePercent to 0 (see the divide-by-zero
+    // guard above), which would otherwise drag this average down for a week
+    // where there was nothing planned to fail at (e.g. a week with only
+    // unplanned/Navic_evidovano activity) - same root cause as the
+    // flaka-riziko fix just below, excluded here too.
+    const weeksWithPlan = weeks.filter((w) => w.plannedVisits > 0);
+    const longRunAvgCompliance = weeksWithPlan.length > 0
+      ? Math.round((weeksWithPlan.reduce((s, w) => s + w.compliancePercent, 0) / weeksWithPlan.length) * 10) / 10
+      : 0;
     const trendDelta = prev ? Math.round((latest.compliancePercent - prev.compliancePercent) * 10) / 10 : "";
     // "Flaka riziko" (persistent-underperformance flag) - product owner,
     // 2026-07-06: "chci aby mi to ukazalo ktery z nich flaka a ktery ne" -
@@ -740,7 +760,11 @@ function main(workbook: ExcelScript.Workbook) {
     // least FLAKANI_BAD_WEEKS_COUNT of those are bad. With fewer than
     // FLAKANI_BAD_WEEKS_COUNT weeks of history at all, this can never fire -
     // correctly waits for enough data rather than guessing from one week.
-    const recentWeeks = weeks.slice(0, FLAKANI_WINDOW_WEEKS);
+    // weeksWithPlan (computed above for longRunAvgCompliance) is reused here
+    // too - a week with ZERO plannedVisits would otherwise unfairly count as
+    // a "bad" week (compliancePercent forced to 0) for a week where there
+    // was nothing planned to fail at.
+    const recentWeeks = weeksWithPlan.slice(0, FLAKANI_WINDOW_WEEKS);
     const badWeeksInWindow = recentWeeks.filter((w) => w.compliancePercent < FLAKANI_BAD_WEEK_THRESHOLD_PERCENT).length;
     const flakaRiziko = badWeeksInWindow >= FLAKANI_BAD_WEEKS_COUNT ? "Ano" : "Ne";
     summaryRows.push([
