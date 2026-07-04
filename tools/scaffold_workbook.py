@@ -316,7 +316,9 @@ def main(ref_path, out_path):
          "compliancePercent",
          "visitsMon", "visitsTue", "visitsWed", "visitsThu", "visitsFri",
          "updatedAt",
-         "kmMon", "kmTue", "kmWed", "kmThu", "kmFri"],
+         "kmMon", "kmTue", "kmWed", "kmThu", "kmFri",
+         "otherVisits",
+         "posListMon", "posListTue", "posListWed", "posListThu", "posListFri"],
         [],
     )
 

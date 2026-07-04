@@ -1152,14 +1152,41 @@ def build_technician_scorecard(wb):
         )
 
     # ==========================================================================
+    # POS PO DNECH - which POS the technician actually visited each day, in
+    # the same order the km estimate above was computed from (product owner,
+    # 2026-07-06: "na tady mě to zajímá až na dny, zda jezdil efektivně,
+    # kolik jich udělal a pos" - wants the concrete POS list per day, not just
+    # a count/km number). Reads PerformanceEngine.ts's posListMon..posListFri
+    # (TP!X..AB) - comma-separated "id - name" text, one FILTER lookup per
+    # day since each day's list is a single wide text value, not a range.
+    # ==========================================================================
+    build_section_header(ws, "C36", "POS PO DNECH (v pořadí trasy)")
+    day_pos_list_cols = [("Po", "X"), ("Út", "Y"), ("St", "Z"), ("Čt", "AA"), ("Pá", "AB")]
+    row = 37
+    for label, tp_col in day_pos_list_cols:
+        ws.cell(row, 3, label).font = Font(bold=True, size=10, color=NAVY)
+        ws.cell(row, 3).alignment = Alignment(horizontal="center", vertical="center")
+        ws.merge_cells(start_row=row, start_column=4, end_row=row, end_column=14)
+        cell = ws.cell(row, 4)
+        cell.value = (
+            f'=IFERROR(INDEX(FILTER({TP}!${tp_col}$2:${tp_col}$5000,{tp_cond}),1),"Žádné návštěvy")'
+        )
+        cell.font = Font(size=10)
+        cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        for col in range(3, 15):
+            ws.cell(row, col).border = CARD_BORDER
+        ws.row_dimensions[row].height = 30
+        row += 1
+
+    # ==========================================================================
     # TOP PROBLÉMOVÉ POS - deduped, engine-computed (see PerformanceEngine.ts).
     # ==========================================================================
-    build_section_header(ws, "C36", "TOP PROBLÉMOVÉ POS")
-    style_dashboard_table_header(ws, 37, "CDEF", ["POS", "Název", "Region", "Nesplněno (celkem)"])
-    ws["C38"] = f'=IFERROR(FILTER({TI}!$C$2:$F$1000,{TI}!$A$2:$A$1000=$D$5),{{"—","Žádné problémy 🎉","",0}})'
-    apply_table_borders(ws, 38, 42, "CDEF")
+    build_section_header(ws, "C43", "TOP PROBLÉMOVÉ POS")
+    style_dashboard_table_header(ws, 44, "CDEF", ["POS", "Název", "Region", "Nesplněno (celkem)"])
+    ws["C45"] = f'=IFERROR(FILTER({TI}!$C$2:$F$1000,{TI}!$A$2:$A$1000=$D$5),{{"—","Žádné problémy 🎉","",0}})'
+    apply_table_borders(ws, 45, 49, "CDEF")
     ws.conditional_formatting.add(
-        "F38:F42", DataBarRule(start_type="num", start_value=0, end_type="num", end_value=10, color=STATUS_CRITICAL),
+        "F45:F49", DataBarRule(start_type="num", start_value=0, end_type="num", end_value=10, color=STATUS_CRITICAL),
     )
 
     return ws

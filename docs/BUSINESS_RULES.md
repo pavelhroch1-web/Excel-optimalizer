@@ -451,6 +451,16 @@ the same way `TECHNICIAN_PERFORMANCE_LOG` already is (rebuilt every run from the
 STATUS: CONFIRMED intent (product owner, 2026-07-06); thresholds (80/150 km) are a starting
 guess, explicitly flagged in `CONTROL` as tunable on real data, not a confirmed business rule.
 
+**RULE: Daily POS list, not just a count**
+CONDITION: after seeing the daily km/visit-count breakdown, product owner asked for the actual
+POS list per day ("na tady mě to zajímá až na dny, zda jezdil efektivně, kolik jich udělal a
+pos"), not just a number.
+ACTION: `PerformanceEngine.ts` writes `posListMon..posListFri` to `TECHNICIAN_PERFORMANCE_LOG` -
+that day's realized POS as "id - name", comma-separated, in the SAME order used to compute the
+km estimate (technician's planned visiting sequence for that date). Displayed on
+`TECHNICIAN_SCORECARD` in a new "POS PO DNECH" section, one row per weekday.
+STATUS: CONFIRMED (product owner, 2026-07-06); informational only.
+
 **RULE: "Merch" and "Visibility" are the same signal - and "Ostatní" (other) visit count**
 CONDITION/DISCOVERED: after reviewing the real SalesApp export together (2026-07-06), product
 owner confirmed that "Merch" and "Visibility" - originally proposed as two separate breakdown

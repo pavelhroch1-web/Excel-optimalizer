@@ -125,6 +125,15 @@
 // assignment (same pattern as Navic_evidovano) when a POS wasn't planned
 // that week; gated by the same tracking-started check as everything else.
 //
+// SEVENTH OUTPUT ADDITION - posListMon..posListFri: the actual list of that
+// day's realized POS ("id - name", comma-separated), in the same order
+// orderedPosForDay() computed the km estimate from. Product owner
+// (2026-07-06), after seeing the daily km/visit-count breakdown: "na tady mě
+// to zajímá až na dny, zda jezdil efektivně, kolik jich udělal a pos" -
+// wanted the concrete POS list per day, not just a count, so a manager can
+// see WHAT a technician actually did that day, not only how many.
+// Informational only, same tracking gate as everything else.
+//
 // NOT IN THIS VERSION: WHICH LOS/LOT campaign a visit serviced (still
 // blocked on ambiguous free-text data - see BUSINESS_RULES.md section 12).
 // GPS-based map data remains deferred too.
@@ -545,16 +554,21 @@ function main(workbook: ExcelScript.Workbook) {
   // the end, sorted by posId, so the result is still deterministic. Returns
   // 0 when fewer than 2 GPS-resolvable stops are visited that day (no
   // "route" to measure) rather than a misleading number.
-  function routeKmForDay(technician: string, year: number, week: number, dayIndex: number, posIds: string[]): number {
-    if (posIds.length < 2) {
-      return 0;
-    }
+  // Orders one bucket-day's (deduplicated) realized posIds by their position
+  // in the technician's PLANNED sequence for that exact calendar date - the
+  // same "assume the visiting order matched the plan" approximation used by
+  // routeKmForDay below, extracted here so the POS-list display (see file
+  // header, product owner 2026-07-06: "kolik jich udelal a pos" - wants the
+  // actual POS list per day, not just a count) shows POS in the same order
+  // the km figure was computed from.
+  function orderedPosForDay(technician: string, year: number, week: number, dayIndex: number, posIds: string[]): string[] {
     const monday = isoMonday(year, week);
     const visitDate = new Date(monday);
     visitDate.setDate(monday.getDate() + dayIndex);
     const dateKey = visitDate.toISOString().slice(0, 10);
     const plannedOrder = plannedOrderByTechDate[technician + "|" + dateKey] || [];
-    const sorted = [...posIds].sort((a, b) => {
+    const unique = [...new Set(posIds)];
+    return unique.sort((a, b) => {
       const ai = plannedOrder.indexOf(a);
       const bi = plannedOrder.indexOf(b);
       if (ai >= 0 && bi >= 0) {
@@ -568,6 +582,13 @@ function main(workbook: ExcelScript.Workbook) {
       }
       return a < b ? -1 : a > b ? 1 : 0;
     });
+  }
+
+  function routeKmForDay(technician: string, year: number, week: number, dayIndex: number, posIds: string[]): number {
+    if (posIds.length < 2) {
+      return 0;
+    }
+    const sorted = orderedPosForDay(technician, year, week, dayIndex, posIds);
     let totalKm = 0;
     let resolvedStops = 0;
     let prev: { x: number; y: number } | null = null;
@@ -599,6 +620,15 @@ function main(workbook: ExcelScript.Workbook) {
     }
     const compliancePercent = b.plannedVisits > 0 ? Math.round((b.realizedVisits / b.plannedVisits) * 1000) / 10 : 0;
     const kmByDay = b.possByDay.map((posIds, dayIdx) => routeKmForDay(b.technician, b.year, b.week, dayIdx, posIds));
+    // Display list of that day's realized POS, in the same order the km
+    // figure above was computed from (see orderedPosForDay's comment) - "id
+    // - name" per stop, comma-separated, so a manager can see WHICH POS a
+    // technician actually visited each day, not just a count.
+    const posListByDay = b.possByDay.map((posIds, dayIdx) =>
+      orderedPosForDay(b.technician, b.year, b.week, dayIdx, posIds)
+        .map((id) => id + (posName[id] ? " - " + posName[id] : ""))
+        .join(", ")
+    );
     outRows.push([
       b.technician, b.year, b.week, topArea,
       b.plannedVisits, b.realizedVisits,
@@ -608,6 +638,7 @@ function main(workbook: ExcelScript.Workbook) {
       now,
       kmByDay[0], kmByDay[1], kmByDay[2], kmByDay[3], kmByDay[4],
       b.otherVisits,
+      posListByDay[0], posListByDay[1], posListByDay[2], posListByDay[3], posListByDay[4],
     ]);
   }
 
@@ -620,9 +651,10 @@ function main(workbook: ExcelScript.Workbook) {
     "updatedAt",
     "kmMon", "kmTue", "kmWed", "kmThu", "kmFri",
     "otherVisits",
+    "posListMon", "posListTue", "posListWed", "posListThu", "posListFri",
   ];
   const outWs = workbook.getWorksheet("TECHNICIAN_PERFORMANCE_LOG");
-  outWs.getRange("A2:W100000").clear(ExcelScript.ClearApplyTo.contents);
+  outWs.getRange("A2:AB100000").clear(ExcelScript.ClearApplyTo.contents);
   outWs.getRangeByIndexes(0, 0, 1, headerRow.length).setValues([headerRow]);
   if (outRows.length > 0) {
     outWs.getRangeByIndexes(1, 0, outRows.length, headerRow.length).setValues(outRows);
