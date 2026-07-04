@@ -681,7 +681,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     # reads the actual sheet the stage produces/consumes, not a static
     # instruction. Row numbers are fixed here so the "DALŠÍ KROK" callout
     # above can reference them even though it's written first. ----
-    PIPE_FIRST_ROW = 19  # shifted +1 from 18 by the new "KDO FLAKÁ" callout above
+    PIPE_FIRST_ROW = 23  # shifted +1 (KDO FLAKÁ) +4 (KDO JEZDÍ NEEFEKTIVNĚ) from 18
     stages = [
         # (num, name, description, status formula, target sheet or None, color)
         (
@@ -748,6 +748,39 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     ws.row_dimensions[r].height = 20
     ws.row_dimensions[r + 1].height = 20
     build_status_badge_conditional(ws, flaka_summary_cell.coordinate, flaka_summary_cell.coordinate, rules=[
+        ("✅", "E2EFDA", None),
+        ("⚠", STATUS_SERIOUS, None),
+    ])
+    r += 3
+
+    # ---- "KDO JEZDÍ NEEFEKTIVNĚ" callout - found missing during a final
+    # full test pass (2026-07-06): route efficiency (km/semafor,
+    # PerformanceEngine.ts's maxKmDay) only ever existed per-technician on
+    # TECHNICIAN_SCORECARD, with no network-wide "who had a bad day" view -
+    # same gap PERFORMANCE's new "Km/den (nejhorší)" column just closed;
+    # this is the HOME-level headline for the same signal, same pattern as
+    # "KDO FLAKÁ" above. Reuses the same CONTROL.ROUTE_KM_CRITICAL_KM
+    # threshold PERFORMANCE/TECHNICIAN_SCORECARD already use.
+    ws.cell(r, 3, "KDO JEZDÍ NEEFEKTIVNĚ").font = SECTION_FONT
+    r += 1
+    ws.merge_cells(f"C{r}:J{r+1}")
+    route_summary_cell = ws.cell(r, 3)
+    route_summary_cell.value = (
+        '=IFERROR(IF(COUNTIF(TECHNICIAN_PERFORMANCE_SUMMARY!$P:$P,'
+        '">"&IFERROR(VLOOKUP("ROUTE_KM_CRITICAL_KM",CONTROL!$A:$B,2,FALSE),150))=0,'
+        '"✅ Žádný technik nemá kritický den (km)",'
+        '"⚠ "&COUNTIF(TECHNICIAN_PERFORMANCE_SUMMARY!$P:$P,'
+        '">"&IFERROR(VLOOKUP("ROUTE_KM_CRITICAL_KM",CONTROL!$A:$B,2,FALSE),150))&'
+        '" technik(ů) s kritickým dnem: "&TEXTJOIN(", ",TRUE,FILTER(TECHNICIAN_PERFORMANCE_SUMMARY!$A:$A,'
+        'TECHNICIAN_PERFORMANCE_SUMMARY!$P:$P>IFERROR(VLOOKUP("ROUTE_KM_CRITICAL_KM",CONTROL!$A:$B,2,FALSE),150)))),'
+        '"Zatím žádná data")'
+    )
+    route_summary_cell.font = Font(bold=True, size=13, color=NAVY)
+    route_summary_cell.fill = PatternFill("solid", fgColor="FFF2CC")
+    route_summary_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1, wrap_text=True)
+    ws.row_dimensions[r].height = 20
+    ws.row_dimensions[r + 1].height = 20
+    build_status_badge_conditional(ws, route_summary_cell.coordinate, route_summary_cell.coordinate, rules=[
         ("✅", "E2EFDA", None),
         ("⚠", STATUS_SERIOUS, None),
     ])
@@ -938,7 +971,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     for text in [
         "1) Otevři tento sešit v Excelu na webu (OneDrive/SharePoint) - Office Scripts to vyžadují.",
         "2) Záložka Automatizace → New Script → vlož obsah office-scripts/ImportEngine.ts → Spustit.",
-        "3) Opakuj pro PlanningEngine.ts, PublishEngine.ts, ComplianceEngine.ts, AdvisorEngine.ts, ReportingEngine.ts.",
+        "3) Opakuj pro PlanningEngine.ts, PublishEngine.ts, StartTrackingEngine.ts, ComplianceEngine.ts, AdvisorEngine.ts, PerformanceEngine.ts, ReportingEngine.ts.",
     ]:
         ws.merge_cells(f"D{r}:J{r}")
         ws.cell(r, 4, text).font = Font(size=10)
@@ -1301,13 +1334,13 @@ def build_performance_sheet(wb, n_rows=60):
     ws = wb.create_sheet("PERFORMANCE")
     ws.sheet_view.showGridLines = False
     ws.sheet_view.showRowColHeaders = False
-    for col in "CDEFGHIJKLMN":
+    for col in "CDEFGHIJKLMNO":
         ws.column_dimensions[col].width = 13
     build_nav_rail(ws, "PERFORMANCE")
 
     build_dashboard_banner(
         ws, "PERFORMANCE", "Srovnání všech techniků - řaď a filtruj přímo v tabulce (Excel AutoFilter)",
-        col_start="C", col_end="N",
+        col_start="C", col_end="O",
     )
     ws.freeze_panes = "C9"
 
@@ -1337,20 +1370,21 @@ def build_performance_sheet(wb, n_rows=60):
     headers = [
         "Technik", "Region", "Naplánováno", "Realizováno", "Splněno včas", "Splněno pozdě",
         "Nesplněno", "Navíc", "Compliance %", "Dlouhodobý průměr", "Trend", "Flaká riziko",
+        "Km/den (nejhorší)",
     ]
-    for col, label in zip("CDEFGHIJKLMN", headers):
+    for col, label in zip("CDEFGHIJKLMNO", headers):
         ws[f"{col}{header_row}"] = label
 
-    src_cols = "ABEFGHIJKLMO"  # TECHNICIAN_PERFORMANCE_SUMMARY column per table column, in order
+    src_cols = "ABEFGHIJKLMOP"  # TECHNICIAN_PERFORMANCE_SUMMARY column per table column, in order
     first_data_row = header_row + 1
     for i in range(n_rows):
         r = first_data_row + i
         sr = i + 2  # TECHNICIAN_PERFORMANCE_SUMMARY row (header is row 1 there)
-        for col, src_col in zip("CDEFGHIJKLMN", src_cols):
+        for col, src_col in zip("CDEFGHIJKLMNO", src_cols):
             ws[f"{col}{r}"] = f'=IF({TS}!$A${sr}="","",{TS}!{src_col}{sr})'
 
     last_row = first_data_row + n_rows - 1
-    table_ref = f"C{header_row}:N{last_row}"
+    table_ref = f"C{header_row}:O{last_row}"
     table = Table(displayName="PerformanceTable", ref=table_ref)
     table.tableStyleInfo = TableStyleInfo(
         name="TableStyleMedium2", showFirstColumn=False, showLastColumn=False,
@@ -1389,6 +1423,29 @@ def build_performance_sheet(wb, n_rows=60):
         f"N{first_data_row}:N{last_row}",
         FormulaRule(formula=[f'N{first_data_row}="Ano"'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_CRITICAL),
                     font=Font(bold=True, color=STATUS_CRITICAL)),
+    )
+
+    # Km/den (nejhorší) semaphore - same CONTROL.ROUTE_KM_WARNING_KM/
+    # CRITICAL_KM thresholds already used on TECHNICIAN_SCORECARD's route-
+    # efficiency table, so the two screens agree on what counts as a bad
+    # day. Found missing during a final full test pass (2026-07-06): route
+    # efficiency had no network-wide view at all before this - only
+    # per-technician on TECHNICIAN_SCORECARD.
+    ws["Q1"] = '=IFERROR(VLOOKUP("ROUTE_KM_WARNING_KM",CONTROL!$A:$B,2,FALSE),80)'
+    ws["Q2"] = '=IFERROR(VLOOKUP("ROUTE_KM_CRITICAL_KM",CONTROL!$A:$B,2,FALSE),150)'
+    ws.column_dimensions["Q"].hidden = True
+    o_rng = f"O{first_data_row}:O{last_row}"
+    ws.conditional_formatting.add(
+        o_rng, FormulaRule(formula=[f"O{first_data_row}<=$Q$1"], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_GOOD),
+                            font=Font(color=STATUS_GOOD), stopIfTrue=True),
+    )
+    ws.conditional_formatting.add(
+        o_rng, FormulaRule(formula=[f"O{first_data_row}<=$Q$2"], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_WARNING),
+                            font=Font(color=STATUS_WARNING), stopIfTrue=True),
+    )
+    ws.conditional_formatting.add(
+        o_rng, FormulaRule(formula=[f"O{first_data_row}>$Q$2"], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_CRITICAL),
+                            font=Font(bold=True, color=STATUS_CRITICAL), stopIfTrue=True),
     )
 
     return ws

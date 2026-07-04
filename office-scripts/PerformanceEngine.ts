@@ -160,6 +160,15 @@
 // dlouhodobý pohled" - wants compliance trend across months/campaigns, not
 // just the last 6 weeks.
 //
+// TENTH OUTPUT ADDITION - maxKmDay on TECHNICIAN_PERFORMANCE_SUMMARY: the
+// worst single day's route-km (see routeKmForDay above) in a technician's
+// most recent tracked week. Found missing during a final full test pass
+// (2026-07-06): route efficiency (km + semafor) only ever existed
+// per-technician on TECHNICIAN_SCORECARD - there was no way to scan the
+// whole team at once for who had a bad day, unlike compliance/flaka-riziko
+// which are both visible on the network-wide PERFORMANCE screen. Same
+// tracking-gate as everything else.
+//
 // NOT IN THIS VERSION: WHICH LOS/LOT campaign a visit serviced (still
 // blocked on ambiguous free-text data - see BUSINESS_RULES.md section 12).
 // GPS-based map data remains deferred too.
@@ -732,6 +741,7 @@ function main(workbook: ExcelScript.Workbook) {
     plannedVisits: number; realizedVisits: number;
     splnenoVcas: number; splnenoPozde: number; nesplneno: number; navicEvidovano: number;
     compliancePercent: number;
+    maxKmDay: number;
   }
   let byTechWeeks: { [tech: string]: TechWeekEntry[] } = {};
   for (const key of Object.keys(buckets)) {
@@ -745,6 +755,13 @@ function main(workbook: ExcelScript.Workbook) {
       }
     }
     const compliancePercent = b.plannedVisits > 0 ? Math.round((b.realizedVisits / b.plannedVisits) * 1000) / 10 : 0;
+    // Worst single day's route-km that week (see routeKmForDay above) - the
+    // network-wide PERFORMANCE comparison had no route-efficiency signal at
+    // all before this (found during a final full test pass, 2026-07-06):
+    // km/semafor only existed per-technician on TECHNICIAN_SCORECARD, with
+    // no way to scan the whole team for who had a bad day.
+    const kmByDayForSummary = b.possByDay.map((posIds, dayIdx) => routeKmForDay(b.technician, b.year, b.week, dayIdx, posIds));
+    const maxKmDay = Math.max(...kmByDayForSummary);
     if (!byTechWeeks[b.technician]) {
       byTechWeeks[b.technician] = [];
     }
@@ -753,7 +770,7 @@ function main(workbook: ExcelScript.Workbook) {
       plannedVisits: b.plannedVisits, realizedVisits: b.realizedVisits,
       splnenoVcas: b.splnenoVcas, splnenoPozde: b.splnenoPozde,
       nesplneno: b.nesplneno, navicEvidovano: b.navicEvidovano,
-      compliancePercent,
+      compliancePercent, maxKmDay,
     });
   }
 
@@ -795,17 +812,17 @@ function main(workbook: ExcelScript.Workbook) {
       latest.plannedVisits, latest.realizedVisits,
       latest.splnenoVcas, latest.splnenoPozde, latest.nesplneno, latest.navicEvidovano,
       latest.compliancePercent, longRunAvgCompliance, trendDelta,
-      badWeeksInWindow, flakaRiziko,
+      badWeeksInWindow, flakaRiziko, latest.maxKmDay,
     ]);
   }
   const summaryHeaderRow = [
     "technician", "region", "latestYear", "latestWeek",
     "plannedVisits", "realizedVisits", "splnenoVcas", "splnenoPozde", "nesplneno", "navicEvidovano",
     "compliancePercent", "longRunAvgCompliance", "trendDelta",
-    "badWeeksInWindow", "flakaRiziko",
+    "badWeeksInWindow", "flakaRiziko", "maxKmDay",
   ];
   const summaryWs = workbook.getWorksheet("TECHNICIAN_PERFORMANCE_SUMMARY");
-  summaryWs.getRange("A2:O100000").clear(ExcelScript.ClearApplyTo.contents);
+  summaryWs.getRange("A2:P100000").clear(ExcelScript.ClearApplyTo.contents);
   summaryWs.getRangeByIndexes(0, 0, 1, summaryHeaderRow.length).setValues([summaryHeaderRow]);
   if (summaryRows.length > 0) {
     summaryWs.getRangeByIndexes(1, 0, summaryRows.length, summaryHeaderRow.length).setValues(summaryRows);

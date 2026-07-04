@@ -344,7 +344,7 @@ def main(ref_path, out_path):
         ["technician", "region", "latestYear", "latestWeek",
          "plannedVisits", "realizedVisits", "splnenoVcas", "splnenoPozde", "nesplneno", "navicEvidovano",
          "compliancePercent", "longRunAvgCompliance", "trendDelta",
-         "badWeeksInWindow", "flakaRiziko"],
+         "badWeeksInWindow", "flakaRiziko", "maxKmDay"],
         [],
     )
 

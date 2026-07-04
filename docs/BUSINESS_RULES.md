@@ -563,6 +563,27 @@ names them; otherwise a green "no one flagged" message. Also fixed: the MAP scre
 from HOME's own quick-navigation row (it was added to the shared nav rail but not here).
 STATUS: CONFIRMED (product owner, 2026-07-06).
 
+**RULE: Route efficiency needed a network-wide view, not just per-technician**
+CONDITION: found during a final full test pass (2026-07-06): route efficiency (km + semafor)
+only ever existed on `TECHNICIAN_SCORECARD` for one technician at a time - `PERFORMANCE` (the
+network-wide comparison table) and `HOME` had no route-efficiency signal at all, unlike
+compliance and flaká riziko which are both visible network-wide.
+ACTION: `PerformanceEngine.ts` adds `maxKmDay` (the worst single day's route-km that week) to
+`TECHNICIAN_PERFORMANCE_SUMMARY`. `PERFORMANCE` gets a new "Km/den (nejhorší)" column with the
+same green/orange/red semaphore (`CONTROL.ROUTE_KM_WARNING_KM`/`ROUTE_KM_CRITICAL_KM`) already
+used on `TECHNICIAN_SCORECARD`. `HOME` gets a matching "KDO JEZDÍ NEEFEKTIVNĚ" callout (same
+pattern as "KDO FLAKÁ") naming any technician whose worst day exceeded the CRITICAL threshold.
+STATUS: CONFIRMED (found+fixed during final review, 2026-07-06) - consistent with the existing
+confirmed route-efficiency thresholds, not a new business rule.
+
+**RULE: First-run instructions must list every deployable engine**
+CONDITION: found during a final full test pass: HOME's "PRVNÍ SPUŠTĚNÍ" (first-run) instructions
+listed only 5 of the 8 deployable engines, missing `StartTrackingEngine.ts` and
+`PerformanceEngine.ts` - a first-time user following those instructions literally would never
+discover either step, leaving `TECHNICIAN_PERFORMANCE_LOG` permanently empty.
+ACTION: instructions now list all 8 engines in deployment order.
+STATUS: bug fix, no behavior change.
+
 ## 13. Advisor Engine
 
 Never writes to the plan. Reads POS_MASTER + COMPLIANCE_LOG + SCORE_LOG, writes to ADVISOR_LOG.
