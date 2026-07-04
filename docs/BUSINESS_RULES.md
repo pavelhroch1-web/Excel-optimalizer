@@ -606,6 +606,18 @@ Confirmed alert types (all data-driven from mechanisms already defined above, no
 
 STATUS: mechanism CONFIRMED; two-tier warning threshold ★ OPEN
 
+**RULE: ACTIVITY_PLAN's LOS/LOT campaigns as a live 2-line chart**
+CONDITION: product owner (2026-07-06): "chci aby aktivity plan byl i vizualizovany jako 2 čáry a
+dynamicky se měnil podle toho co zadam" - the existing per-row heatmap timeline shows detail but
+not an at-a-glance "is LOS/LOT running right now, or is there a gap" view.
+ACTION: `redesign_activity_plan()` (`tools/ux_style.py`) adds two hidden rows spanning the same
+week-timeline columns the heatmap already uses, computing a 0/1 "is any LOS (or LOT) row active
+this week" flag via `SUMPRODUCT` over the live `$A`/`$C`/`$D` columns, then a native line chart
+(two series, LOS/LOT, not smoothed - this is an on/off flag, not a curve) plotting them. Fully
+formula-driven off the same editable columns as the heatmap, so it updates the moment a row's
+TYPE/START_WEEK/END_WEEK is edited - no engine involved.
+STATUS: CONFIRMED (product owner, 2026-07-06).
+
 ## 14. Seasonal / strategy configuration
 
 ```

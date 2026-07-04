@@ -1848,6 +1848,60 @@ def redesign_activity_plan(wb, tech_column_letter):
             "Souběh dvou kampaní ve stejném týdnu = obě barvy vidíš ve stejném sloupci u různých řádků "
             "(porovnej řádky svisle).").font = NOTE_FONT
 
+    # ---- LOS/LOT activity as two lines - product owner, 2026-07-06: "chci
+    # aby aktivity plan byl i vizualizovany jako 2 čáry a dynamicky se
+    # měnil podle toho co zadam". The heatmap above shows per-row detail;
+    # this collapses it to a single "is LOS/LOT running this week, or is
+    # there a gap" line each, over the same week timeline - a step chart a
+    # manager can read at a glance, live off the same $A/$C/$D columns the
+    # heatmap already reads, so it updates the moment a row is edited, no
+    # engine involved. ----
+    los_row = n_rows + 9
+    lot_row = n_rows + 10
+    ws.cell(los_row, 11, "LOS aktivní (1/0)").font = NOTE_FONT
+    ws.cell(lot_row, 11, "LOT aktivní (1/0)").font = NOTE_FONT
+    for i, week in enumerate(range(week_start, week_end + 1)):
+        col = timeline_first_col + i
+        col_letter = get_column_letter(col)
+        week_ref = f"{col_letter}$1"
+        ws.cell(los_row, col).value = (
+            f'=IF(SUMPRODUCT(($A$2:$A${n_rows}="LOS")*({week_ref}>=$C$2:$C${n_rows})*'
+            f'({week_ref}<=$D$2:$D${n_rows}))>0,1,0)'
+        )
+        ws.cell(lot_row, col).value = (
+            f'=IF(SUMPRODUCT(($A$2:$A${n_rows}="LOT")*({week_ref}>=$C$2:$C${n_rows})*'
+            f'({week_ref}<=$D$2:$D${n_rows}))>0,1,0)'
+        )
+    for row in (los_row, lot_row):
+        ws.row_dimensions[row].hidden = True
+
+    chart_cats = Reference(ws, min_col=timeline_first_col, max_col=timeline_first_col + (week_end - week_start),
+                            min_row=1, max_row=1)
+    los_values = Reference(ws, min_col=timeline_first_col, max_col=timeline_first_col + (week_end - week_start),
+                            min_row=los_row, max_row=los_row)
+    lot_values = Reference(ws, min_col=timeline_first_col, max_col=timeline_first_col + (week_end - week_start),
+                            min_row=lot_row, max_row=lot_row)
+    activity_chart = LineChart()
+    activity_chart.style = 2
+    activity_chart.height = 7
+    activity_chart.width = 30
+    activity_chart.title = "LOS / LOT aktivita v čase"
+    los_series = Series(los_values, title="LOS")
+    los_series.graphicalProperties.line.solidFill = LOS_FILL
+    los_series.graphicalProperties.line.width = 25000
+    los_series.smooth = False  # this is a 0/1 on-off flag, not a curve - smoothing would draw misleading arcs
+    lot_series = Series(lot_values, title="LOT")
+    lot_series.graphicalProperties.line.solidFill = LOT_FILL
+    lot_series.graphicalProperties.line.width = 25000
+    lot_series.smooth = False
+    activity_chart.series.append(los_series)
+    activity_chart.series.append(lot_series)
+    activity_chart.set_categories(chart_cats)
+    activity_chart.y_axis.scaling.min = 0
+    activity_chart.y_axis.scaling.max = 1.2
+    activity_chart.y_axis.delete = True
+    ws.add_chart(activity_chart, f"L{n_rows + 12}")
+
     # AutoFilter + banded rows on the editable data table (A:G, including
     # the live estimate column) - a campaign list spanning many months is
     # only actually usable if it can be filtered/sorted like the working
