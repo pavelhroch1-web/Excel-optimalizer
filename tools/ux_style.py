@@ -604,6 +604,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
             del wb[old_name]
     ws = wb.create_sheet("HOME", 0)
     ws.sheet_view.showGridLines = False
+    ws.sheet_view.showRowColHeaders = False
     for col in "CDEFGHIJKLMNO":
         ws.column_dimensions[col].width = 15
     build_nav_rail(ws, "HOME")
@@ -972,6 +973,7 @@ def build_technician_scorecard(wb):
         del wb["TECHNICIAN_SCORECARD"]
     ws = wb.create_sheet("TECHNICIAN_SCORECARD")
     ws.sheet_view.showGridLines = False
+    ws.sheet_view.showRowColHeaders = False
     for col in "CDEFGHIJKLMN":
         ws.column_dimensions[col].width = 12
     build_nav_rail(ws, "TECHNICIAN_SCORECARD")
@@ -1298,6 +1300,7 @@ def build_performance_sheet(wb, n_rows=60):
         del wb["PERFORMANCE"]
     ws = wb.create_sheet("PERFORMANCE")
     ws.sheet_view.showGridLines = False
+    ws.sheet_view.showRowColHeaders = False
     for col in "CDEFGHIJKLMN":
         ws.column_dimensions[col].width = 13
     build_nav_rail(ws, "PERFORMANCE")
@@ -1428,6 +1431,7 @@ def build_pos_map(wb, max_techs=40, max_rows=700):
         del wb["MAP"]
     ws = wb.create_sheet("MAP")
     ws.sheet_view.showGridLines = False
+    ws.sheet_view.showRowColHeaders = False
     build_nav_rail(ws, "MAP")
 
     build_dashboard_banner(
@@ -1496,6 +1500,7 @@ def build_week_dashboard(wb, n_tech_rows=60):
         del wb["WEEK_DASHBOARD"]
     ws = wb.create_sheet("WEEK_DASHBOARD")
     ws.sheet_view.showGridLines = False
+    ws.sheet_view.showRowColHeaders = False
     for col in "CDEFGHIJKLM":
         ws.column_dimensions[col].width = 13
     build_nav_rail(ws, "WEEK_DASHBOARD")
@@ -1856,6 +1861,7 @@ def build_technician_plan(wb, n_rows=260, pos_master_notes_col="AK", pos_master_
         del wb["TECHNICIAN_PLAN"]
     ws = wb.create_sheet("TECHNICIAN_PLAN")
     ws.sheet_view.showGridLines = False
+    ws.sheet_view.showRowColHeaders = False
     for col in "CDEFGHIJKLMN":
         ws.column_dimensions[col].width = 14
     ws.column_dimensions["C"].width = 8
@@ -2024,6 +2030,7 @@ def build_dashboard_template(wb):
     correctly across every future engine run with no further Python step."""
     ws = wb["DASHBOARD"]
     ws.sheet_view.showGridLines = False
+    ws.sheet_view.showRowColHeaders = False
     ws.column_dimensions["A"].width = 22
     for col in "BCDEF":
         ws.column_dimensions[col].width = 18
