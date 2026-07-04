@@ -282,6 +282,18 @@ def main(ref_path, out_path):
         [],
     )
 
+    # OTHER_VISIT_LOG (append-only, dedup by uid - see ComplianceEngine.ts):
+    # Completed/Finalized SalesApp visits whose purpose is NOT the campaign
+    # ("MCHD - Nabeh kampane") signal - real visits (restocking, lottery
+    # ticket downloads, etc.) that don't count toward compliance, logged here
+    # purely so PerformanceEngine.ts can surface an informational "Ostatní
+    # návštěvy" count on TECHNICIAN_SCORECARD (product owner, 2026-07-06).
+    write_table(
+        dst_wb, "OTHER_VISIT_LOG",
+        ["posId", "date", "week", "year", "executor", "salesAppUid"],
+        [],
+    )
+
     # COMPLIANCE_LOG (append-only, one row per planned-visit evaluation)
     write_table(
         dst_wb, "COMPLIANCE_LOG",

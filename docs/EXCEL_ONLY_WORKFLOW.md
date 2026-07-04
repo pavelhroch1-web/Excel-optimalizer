@@ -115,9 +115,11 @@ dropdown + Print), bez appky.
    počítají jako splněná kampaňová návštěva.
 2. Automatizace → `office-scripts/ComplianceEngine.ts` → Spustit. Počítá
    jako splněnou návštěvu jen řádek se stavem Completed/Finalized **a**
-   "MCHD - Náběh kampaně" = Ano — jiné návštěvy (zásobování, stahování
-   losů…) se ignorují úplně, i když v SalesApp reálně proběhly. Porovná
-   se jen proti `MANAGER_PLAN_PUBLISHED` (nikdy proti Draft), posune
+   "MCHD - Náběh kampaně" = Ano ("Merch"/"Visibility" — je to stejný sloupec,
+   viz `docs/BUSINESS_RULES.md` sekce 12a) — jiné návštěvy (zásobování,
+   stahování losů…) se do compliance nepočítají, ale od 2026-07-06 se
+   zapisují do `OTHER_VISIT_LOG` (informativně, viz níže). Porovná se jen
+   proti `MANAGER_PLAN_PUBLISHED` (nikdy proti Draft), posune
    `PLAN_LIFECYCLE` (Published → Active → Closed), doplní `POS_MASTER`.
 3. Automatizace → `office-scripts/AdvisorEngine.ts` → Spustit — diagnostická
    upozornění (zanedbané POS, přetížení techniků, rozjetý publikovaný plán
@@ -128,7 +130,9 @@ dropdown + Print), bez appky.
    sledování (krok 3b) — a spočítá i odhad denní ujeté vzdálenosti mezi
    navštívenými POS (`kmMon..kmFri`, viz `TECHNICIAN_SCORECARD` sekce
    "Trasa / efektivita jízd"). Jde o odhad z plánovaného pořadí návštěv, ne
-   reálné GPS/časové sledování.
+   reálné GPS/časové sledování. Ve stejné sekci je i "Ostatní návštěvy" —
+   počet návštěv mimo kampaň (zásobování, stahování losů…), jen pro kontext,
+   nepočítá se do compliance.
 5. Automatizace → `office-scripts/ReportingEngine.ts` → Spustit — aktuální
    `DASHBOARD`.
 

@@ -110,10 +110,24 @@
 // proposed defaults - see docs/BACKLOG.md) and are applied in
 // tools/ux_style.py, not here - this engine only computes the raw km.
 //
-// NOT IN THIS VERSION (docs/MANAGER_UX_ARCHITECTURE.md, explicitly deferred
-// by product owner 2026-07-03, reconfirmed 2026-07-06 pending real SalesApp
-// data verification): Merch/Visibility visit-purpose breakdown. GPS-based
-// map data remains deferred too.
+// SIXTH OUTPUT ADDITION - otherVisits: count of Completed/Finalized SalesApp
+// visits whose purpose was NOT the campaign ("MCHD - Nabeh kampane") signal
+// - real visits (restocking, lottery ticket downloads, etc.) that never
+// count toward compliance (see ComplianceEngine.ts's file header), logged to
+// OTHER_VISIT_LOG and aggregated here purely as manager context, alongside
+// the campaign-visit numbers. Product owner (2026-07-06), after reviewing
+// the real SalesApp export with the assistant: "Merch" and "Visibility" are
+// the SAME single MCHD-Nabeh-kampane signal already used for compliance, not
+// two separate breakdowns - this otherVisits count is the actual remaining
+// ask ("dalsi navstevy jsou typu ostatni"). Technician attribution uses the
+// same (posId, true-ISO week/year) -> planned technician lookup as the
+// tracking-gate/route-km logic above, falling back to POS_MASTER's current
+// assignment (same pattern as Navic_evidovano) when a POS wasn't planned
+// that week; gated by the same tracking-started check as everything else.
+//
+// NOT IN THIS VERSION: WHICH LOS/LOT campaign a visit serviced (still
+// blocked on ambiguous free-text data - see BUSINESS_RULES.md section 12).
+// GPS-based map data remains deferred too.
 // ============================================================================
 
 function main(workbook: ExcelScript.Workbook) {
@@ -242,6 +256,7 @@ function main(workbook: ExcelScript.Workbook) {
   const posMaster = readTable("POS_MASTER");
   const managerPlanPublished = readTable("MANAGER_PLAN_PUBLISHED");
   const complianceLog = readTable("COMPLIANCE_LOG");
+  const otherVisitLog = readTable("OTHER_VISIT_LOG");
   const control = readTable("CONTROL");
   const planLifecycle = readTable("PLAN_LIFECYCLE");
 
@@ -324,6 +339,7 @@ function main(workbook: ExcelScript.Workbook) {
     splnenoPozde: number;
     nesplneno: number;
     navicEvidovano: number;
+    otherVisits: number;
     visitsByDay: number[]; // [Mon, Tue, Wed, Thu, Fri]
     possByDay: string[][]; // realized posIds per weekday, unsorted until output time
   }
@@ -343,6 +359,7 @@ function main(workbook: ExcelScript.Workbook) {
         splnenoPozde: 0,
         nesplneno: 0,
         navicEvidovano: 0,
+        otherVisits: 0,
         visitsByDay: [0, 0, 0, 0, 0],
         possByDay: [[], [], [], [], []],
       };
@@ -360,6 +377,11 @@ function main(workbook: ExcelScript.Workbook) {
   const mpIdx = (name: string) => mpHeaders.indexOf(name);
   let trueIsoTrackingStarted: { [key: string]: boolean } = {};
   let plannedOrderByTechDate: { [key: string]: string[] } = {};
+  // (posId, true-ISO week, true-ISO year) -> the technician that POS was
+  // planned for that week - used to attribute OTHER_VISIT_LOG rows (which
+  // carry no technician of their own) to a technician below, same idea as
+  // ComplianceEngine.ts's plannedSet.
+  let plannedTechByPosWeek: { [key: string]: string } = {};
   for (let i = 1; i < managerPlanPublished.length; i++) {
     const row = managerPlanPublished[i];
     const tech = String(row[mpIdx("TECHNICIAN")] ?? "");
@@ -376,6 +398,7 @@ function main(workbook: ExcelScript.Workbook) {
     plannedOrderByTechDate[orderKey].push(posId);
 
     const { week, year } = isoWeekNumber(dateVal);
+    plannedTechByPosWeek[posId + "|" + week + "|" + year] = tech;
     const rawWeek = Number(row[mpIdx("WEEK")]);
     const trackingStarted = trackingStartedRawWeeks[CONTROL_YEAR + "|" + rawWeek] === true;
     if (trackingStarted) {
@@ -481,6 +504,33 @@ function main(workbook: ExcelScript.Workbook) {
   }
 
   // ==========================================================================
+  // OTHER_VISIT_LOG -> otherVisits per (technician, year, week), tracking-
+  // gated the same as everything else above. No dedup needed here (each
+  // OTHER_VISIT_LOG row is already a unique SalesApp UID, appended once by
+  // ComplianceEngine.ts - see that file's header).
+  // ==========================================================================
+
+  const ovHeaders = otherVisitLog.length > 0 ? (otherVisitLog[0] as string[]).map((h) => String(h)) : [];
+  const ovIdx = (name: string) => ovHeaders.indexOf(name);
+  for (let i = 1; i < otherVisitLog.length; i++) {
+    const row = otherVisitLog[i];
+    const posId = String(row[ovIdx("posId")]);
+    const week = Number(row[ovIdx("week")]);
+    const year = Number(row[ovIdx("year")]);
+    if (!posId || !week || !year) {
+      continue;
+    }
+    if (!trueIsoTrackingStarted[year + "|" + week]) {
+      continue; // week not yet started tracking - see file header ("TRACKING GATE")
+    }
+    const tech = plannedTechByPosWeek[posId + "|" + week + "|" + year] || posTechnician[posId] || "";
+    if (!tech) {
+      continue; // genuinely unattributable - skip rather than guess
+    }
+    bucketFor(tech, year, week).otherVisits++;
+  }
+
+  // ==========================================================================
   // WRITE TECHNICIAN_PERFORMANCE_LOG (full rebuild every run - bounded row
   // count, technicians x weeks, so this stays fast regardless of how large
   // the underlying append-only logs grow - see
@@ -557,6 +607,7 @@ function main(workbook: ExcelScript.Workbook) {
       b.visitsByDay[0], b.visitsByDay[1], b.visitsByDay[2], b.visitsByDay[3], b.visitsByDay[4],
       now,
       kmByDay[0], kmByDay[1], kmByDay[2], kmByDay[3], kmByDay[4],
+      b.otherVisits,
     ]);
   }
 
@@ -568,9 +619,10 @@ function main(workbook: ExcelScript.Workbook) {
     "visitsMon", "visitsTue", "visitsWed", "visitsThu", "visitsFri",
     "updatedAt",
     "kmMon", "kmTue", "kmWed", "kmThu", "kmFri",
+    "otherVisits",
   ];
   const outWs = workbook.getWorksheet("TECHNICIAN_PERFORMANCE_LOG");
-  outWs.getRange("A2:V100000").clear(ExcelScript.ClearApplyTo.contents);
+  outWs.getRange("A2:W100000").clear(ExcelScript.ClearApplyTo.contents);
   outWs.getRangeByIndexes(0, 0, 1, headerRow.length).setValues([headerRow]);
   if (outRows.length > 0) {
     outWs.getRangeByIndexes(1, 0, outRows.length, headerRow.length).setValues(outRows);
@@ -682,6 +734,7 @@ function main(workbook: ExcelScript.Workbook) {
       (complianceLog.length - 1) + " raw rows before dedup, " +
       Object.keys(trackingStartedRawWeeks).length + " week(s) with tracking started), " +
       summaryRows.length + " rows written to TECHNICIAN_PERFORMANCE_SUMMARY, " +
-      issueRows.length + " rows written to TECHNICIAN_TOP_ISSUES."
+      issueRows.length + " rows written to TECHNICIAN_TOP_ISSUES, " +
+      (otherVisitLog.length - 1) + " other-purpose visits aggregated from OTHER_VISIT_LOG."
   );
 }

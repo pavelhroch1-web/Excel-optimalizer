@@ -13,12 +13,22 @@
 //     "Ucel navstevy - Technik - MCHD - Nabeh kampane" column = "Ano" -
 //     confirmed by product owner: a Completed/Finalized SalesApp row for any
 //     OTHER visit purpose (restocking, lottery ticket pickup, etc.) is real
-//     but is not evidence a planned campaign visit happened, and is ignored
-//     entirely - not matched to a plan, not logged as Navic_evidovano either
-//     (explicit product-owner instruction: "ignorovat uplne"). The State
-//     filter alone (~99.7% of rows in the real export; Suspended/InProgress
-//     excluded as not-yet-completed) is still applied first - a Finalized
-//     campaign-purpose row is what counts, both conditions together.
+//     but is not evidence a planned campaign visit happened, so it is NOT
+//     matched to a plan and NOT counted toward compliance (explicit
+//     product-owner instruction: "ignorovat uplne" - still true for
+//     COMPLIANCE_LOG). The State filter alone (~99.7% of rows in the real
+//     export; Suspended/InProgress excluded as not-yet-completed) is still
+//     applied first - a Finalized campaign-purpose row is what counts, both
+//     conditions together.
+//   - Since 2026-07-06: those non-campaign-purpose Completed/Finalized rows
+//     ARE now logged separately, to OTHER_VISIT_LOG (deduplicated by UID like
+//     VISIT_HISTORY_ACTUAL below) - purely informational context for the
+//     manager ("kolik dalsich navstev tam probehlo mimo kampan"), consumed by
+//     PerformanceEngine.ts's otherVisits column. Does not affect compliance
+//     classification, COMPLIANCE_LOG, or PLAN_LIFECYCLE in any way - product
+//     owner confirmed "Merch" and "Visibility" are the same single MCHD -
+//     Nabeh kampane signal already used above, and asked for this as an
+//     additional informational count alongside it, not a new compliance rule.
 //   - Appends to VISIT_HISTORY_ACTUAL, deduplicated by SalesApp UID (safe to
 //     re-import overlapping weekly exports).
 //   - Matches actual visits to MANAGER_PLAN rows by POS + week. SalesApp's
@@ -317,9 +327,14 @@ function main(workbook: ExcelScript.Workbook) {
     }
   }
 
+  const otherVisitLog = readTable("OTHER_VISIT_LOG");
   const knownUids = new Set<string>();
   for (let i = 1; i < visitHistoryActual.length; i++) {
     knownUids.add(String(visitHistoryActual[i][6]));
+  }
+  const knownOtherUids = new Set<string>();
+  for (let i = 1; i < otherVisitLog.length; i++) {
+    knownOtherUids.add(String(otherVisitLog[i][5]));
   }
 
   interface ActualVisit {
@@ -331,15 +346,24 @@ function main(workbook: ExcelScript.Workbook) {
     state: string;
     uid: string;
   }
+  interface OtherVisit {
+    posId: string;
+    date: Date;
+    week: number;
+    year: number;
+    executor: string;
+    uid: string;
+  }
   let newVisits: ActualVisit[] = [];
+  let otherVisits: OtherVisit[] = [];
   let latestWeek = 0;
   let latestYear = 0;
 
   for (let i = 1; i < salesApp.length; i++) {
     const row = salesApp[i];
     const uid = String(row[cUID]);
-    if (!uid || knownUids.has(uid)) {
-      continue; // already imported, or blank row
+    if (!uid || knownUids.has(uid) || knownOtherUids.has(uid)) {
+      continue; // already imported (either log), or blank row
     }
     const state = norm(String(row[cState]));
     if (state != "COMPLETED" && state != "FINALIZED") {
@@ -360,21 +384,25 @@ function main(workbook: ExcelScript.Workbook) {
       latestWeek = week;
       latestYear = year;
     }
-    // Only a "MCHD - Nabeh kampane" = Ano row is a realized CAMPAIGN visit -
-    // confirmed by product owner. A Completed/Finalized visit for any other
-    // purpose (restocking, lottery ticket pickup, etc.) is a real SalesApp
-    // event but not evidence the planned campaign visit happened, and is not
-    // logged at all here - not as a compliance match, not as Navic_evidovano
-    // (confirmed: "ignorovat uplne", not "pocitat jako Navic_evidovano").
-    if (cCampaignPurpose == -1 || norm(String(row[cCampaignPurpose])) != "ANO") {
-      continue;
-    }
     // Resolve SalesApp's terminal-number "Store UID" to the POS (location)
     // it belongs to - see terminalIdToPosId's comment above. A terminal not
     // found in POS_MASTER (e.g. genuinely new/unknown, or this POS_MASTER
     // snapshot predates it) cannot be matched to any planned POS visit, so
     // the row is skipped rather than guessed.
     const resolvedPosId = terminalIdToPosId[String(row[cStoreUID])];
+    // Only a "MCHD - Nabeh kampane" = Ano row is a realized CAMPAIGN visit -
+    // confirmed by product owner. A Completed/Finalized visit for any other
+    // purpose (restocking, lottery ticket pickup, etc.) is a real SalesApp
+    // event but not evidence the planned campaign visit happened - it does
+    // not count toward compliance (confirmed: "ignorovat uplne" from
+    // COMPLIANCE_LOG), but IS logged separately to OTHER_VISIT_LOG as of
+    // 2026-07-06 (see file header) - informational only.
+    if (cCampaignPurpose == -1 || norm(String(row[cCampaignPurpose])) != "ANO") {
+      if (resolvedPosId) {
+        otherVisits.push({ posId: resolvedPosId, date, week, year, executor: String(row[cExecutor]), uid });
+      }
+      continue;
+    }
     if (!resolvedPosId) {
       continue;
     }
@@ -420,6 +448,18 @@ function main(workbook: ExcelScript.Workbook) {
     ]);
     const startRow = visitHistoryActual.length > 0 ? visitHistoryActual.length : 1;
     historyWs.getRangeByIndexes(startRow, 0, rows.length, 7).setValues(rows);
+  }
+
+  // OTHER_VISIT_LOG: non-campaign-purpose Completed/Finalized visits, logged
+  // separately from VISIT_HISTORY_ACTUAL (see file header) - informational
+  // only, consumed by PerformanceEngine.ts's otherVisits column.
+  const otherVisitWs = workbook.getWorksheet("OTHER_VISIT_LOG");
+  if (otherVisits.length > 0) {
+    const rows = otherVisits.map((v) => [
+      v.posId, v.date.toISOString().slice(0, 10), v.week, v.year, v.executor, v.uid,
+    ]);
+    const startRow = otherVisitLog.length > 0 ? otherVisitLog.length : 1;
+    otherVisitWs.getRangeByIndexes(startRow, 0, rows.length, 6).setValues(rows);
   }
 
   // Full actual-visit set (existing + new) grouped by POS, for matching below
@@ -603,6 +643,7 @@ function main(workbook: ExcelScript.Workbook) {
     "Compliance Engine: " + newVisits.length + " new realized visits imported, " +
       complianceRows.length + " compliance rows written (" +
       complianceRows.filter((r) => r[4] == "Navic_evidovano").length + " extra), " +
+      otherVisits.length + " other-purpose visits logged to OTHER_VISIT_LOG, " +
       updated + " POS_MASTER rows updated with real last-visit data. Reference 'now' = week " +
       latestWeek + "/" + latestYear + "."
   );

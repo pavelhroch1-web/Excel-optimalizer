@@ -1111,7 +1111,7 @@ def build_technician_scorecard(wb):
     # not measured driving distance.
     # ==========================================================================
     build_section_header(ws, "C31", "TRASA / EFEKTIVITA JÍZD (odhad km mezi POS)")
-    style_dashboard_table_header(ws, 32, "CDEFGH", ["Po", "Út", "St", "Čt", "Pá", "Týden celkem"])
+    style_dashboard_table_header(ws, 32, "CDEFGHI", ["Po", "Út", "St", "Čt", "Pá", "Týden celkem", "Ostatní návštěvy"])
     km_cells = [("C33", "Y1"), ("D33", "Y2"), ("E33", "Y3"), ("F33", "Y4"), ("G33", "Y5")]
     for target, source in km_cells:
         ws[target] = f"={source}"
@@ -1125,6 +1125,16 @@ def build_technician_scorecard(wb):
     ws["H33"].fill = PatternFill("solid", fgColor=WHITE)
     ws["H33"].alignment = Alignment(horizontal="center", vertical="center")
     ws["H33"].border = CARD_BORDER
+    # Ostatní návštěvy (otherVisits, TP!W) - informational only, not part of
+    # the compliance/campaign gate (see PerformanceEngine.ts's "SIXTH OUTPUT
+    # ADDITION" header comment): visits at that technician's POS with a
+    # non-campaign SalesApp purpose (restocking, lottery ticket downloads...).
+    # Neutral gray styling on purpose - this is context, not a KPI to chase.
+    ws["I33"] = f'=SUMPRODUCT({tp_cond}*{TP}!$W$2:$W$5000)'
+    ws["I33"].font = font_card_value(size=14, color=NAVY)
+    ws["I33"].fill = PatternFill("solid", fgColor=dashboard_ui.LIGHT_GREY)
+    ws["I33"].alignment = Alignment(horizontal="center", vertical="center")
+    ws["I33"].border = CARD_BORDER
     ws.row_dimensions[33].height = 20
     for col, cell in (("C", "C33"), ("D", "D33"), ("E", "E33"), ("F", "F33"), ("G", "G33")):
         rng = f"{col}33"

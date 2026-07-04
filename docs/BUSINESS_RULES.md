@@ -451,6 +451,27 @@ the same way `TECHNICIAN_PERFORMANCE_LOG` already is (rebuilt every run from the
 STATUS: CONFIRMED intent (product owner, 2026-07-06); thresholds (80/150 km) are a starting
 guess, explicitly flagged in `CONTROL` as tunable on real data, not a confirmed business rule.
 
+**RULE: "Merch" and "Visibility" are the same signal - and "Ostatní" (other) visit count**
+CONDITION/DISCOVERED: after reviewing the real SalesApp export together (2026-07-06), product
+owner confirmed that "Merch" and "Visibility" - originally proposed as two separate breakdown
+columns in `docs/MANAGER_UX_ARCHITECTURE.md` section 1a - are in fact the SAME single signal:
+the `Účel návštevy -  Technik - MCHD - Náběh kampaně` column already used as the campaign-visit
+gate (section 12 above). There is no separate structured "Visibility" column in the real data.
+What the product owner actually wanted in addition: a count of "Ostatní" (other-purpose) visits -
+real Completed/Finalized SalesApp visits at a technician's POS whose purpose is NOT the campaign
+signal (e.g. restocking, envelopes, lottery ticket downloads) - shown for context, alongside the
+campaign-visit numbers, but never counted toward compliance.
+ACTION: `ComplianceEngine.ts` now logs these non-campaign-purpose Completed/Finalized rows to a
+new append-only `OTHER_VISIT_LOG` sheet (deduplicated by SalesApp UID, same pattern as
+`VISIT_HISTORY_ACTUAL`) instead of discarding them entirely. `PerformanceEngine.ts` aggregates
+them into a new `otherVisits` column on `TECHNICIAN_PERFORMANCE_LOG` (technician resolved via the
+POS's planned technician that week, falling back to `POS_MASTER`'s current assignment - same
+pattern as `Navic_evidovano` attribution), gated by the same tracking-started check as everything
+else. Displayed on `TECHNICIAN_SCORECARD` next to the route-efficiency table as "Ostatní
+návštěvy" - neutral/gray styling, not a KPI to optimize against.
+STATUS: CONFIRMED (product owner, 2026-07-06) - does not change compliance classification,
+`COMPLIANCE_LOG`, or `PLAN_LIFECYCLE` in any way; purely an additional informational count.
+
 ## 13. Advisor Engine
 
 Never writes to the plan. Reads POS_MASTER + COMPLIANCE_LOG + SCORE_LOG, writes to ADVISOR_LOG.
