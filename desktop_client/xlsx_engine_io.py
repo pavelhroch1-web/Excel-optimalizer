@@ -26,6 +26,7 @@ import shutil
 from pathlib import Path
 
 import openpyxl
+from openpyxl.cell.cell import MergedCell
 
 # Sheets that Import/Planning/Publish/StartTracking/Compliance/Advisor/
 # Performance/Reporting Engine may write to, in the real office-scripts/*.ts.
@@ -99,10 +100,24 @@ def write_state(path: str, state: dict[str, list[list]], sheets: set[str]) -> No
             for r in range(1, max_row + 1):
                 row_values = new_rows[r - 1] if r - 1 < len(new_rows) else []
                 for c in range(1, max_col + 1):
+                    cell = ws.cell(row=r, column=c)
+                    if isinstance(cell, MergedCell):
+                        # A non-top-left cell of a merged range (e.g. a
+                        # dashboard title banner or KPI tile label styled by
+                        # tools/ux_style.py) - openpyxl only allows writing
+                        # the top-left cell of a merge; every other cell in
+                        # the range carries no independent value to begin
+                        # with, so there is nothing to preserve or write
+                        # here. Skipping it (rather than erroring, as a bare
+                        # `.value = v` assignment does) is the correct
+                        # behaviour, not a fallback - real Excel's own
+                        # setValues() has the same constraint on merged
+                        # ranges.
+                        continue
                     v = row_values[c - 1] if c - 1 < len(row_values) else None
                     if v == "":
                         v = None
-                    ws.cell(row=r, column=c).value = v
+                    cell.value = v
         wb.save(path)
     finally:
         wb.close()
