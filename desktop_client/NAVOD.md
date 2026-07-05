@@ -7,8 +7,9 @@ příkazové řádky, krok za krokem. Appka běží na Windows.
 
 - **Prohlížet a exportovat** už publikovaný plán po technicích (jedno
   kliknutí = Excel soubor pro daného technika).
-- **Nově i spustit Import/Planning/Publish** přímo nad workbookem, bez
-  nutnosti otevírat Excel Online (viz varování v kroku 4).
+- **Nově i spustit celý týdenní cyklus (všech 8 kroků)** přímo nad
+  workbookem, bez nutnosti otevírat Excel Online a vkládat skripty do
+  Automatizace (viz varování v kroku 4).
 
 Business logika (co, kdy a komu naplánovat) běží ve dvou nezávisle
 ověřených implementacích — v Excelu (Office Scripts, hlavní/oficiální) a
@@ -61,17 +62,37 @@ aplikaci. Od teď už Python ani `desktop_client` složku nepotřebuješ,
 2. **Prohlížení/export** (bezpečné, nic se nezapisuje): vlevo vyber
    technika, vpravo vidíš jeho plán, tlačítkem "Exportovat" uložíš jeho
    `.xlsx`.
-3. **Lokální spuštění enginů** (žlutý panel nahoře, `▶ Import` /
-   `▶ Planning` / `▶ Publish`): **tohle přepisuje otevřený soubor na
-   disku.** Než na to sáhneš:
+3. **Lokální spuštění enginů** (žlutý panel nahoře, tlačítka `1 ▶ Import`
+   až `8 ▶ Reporting`): **tohle přepisuje otevřený soubor na disku.** Než
+   na to sáhneš:
    - zavři daný soubor v Excelu (jinak si zápisy můžou navzájem
      přepsat),
    - appka si před zápisem sama udělá zálohu (`.backup_...xlsx` vedle
      původního souboru), ale i tak doporučuju první běh vyzkoušet na
      kopii — checklist pro první ostrý test jsem ti poslal dřív v chatu.
-   - po spuštění Planning/Publish otevři soubor v Excelu (na webu), aby
-     se přepočítaly vzorce na listu `TECHNICIAN_PLAN` — appka sama vzorce
-     nepřepočítává.
+   - po libovolném engine otevři soubor v Excelu (na webu), aby se
+     přepočítaly vzorce na listech jako `TECHNICIAN_PLAN`/`HOME`/
+     `PERFORMANCE` — appka sama vzorce nepřepočítává, jen zapisuje
+     surová data.
+
+   Tlačítka jsou očíslovaná ve stejném pořadí, v jakém se spouští podle
+   `docs/EXCEL_ONLY_WORKFLOW.md`:
+   1. **Import** — vezme `RAW_DATA`/`POS_STATUS_IMPORT`, aktualizuje
+      `POS_MASTER`.
+   2. **Planning** — vygeneruje/aktualizuje Draft týdny v `MANAGER_PLAN`.
+   3. **Publish** — zveřejní nejbližší Draft týden.
+   4. **Start Tracking** — řekne appce, které publikované týdny se mají
+      počítat do manažerských přehledů (spusť, až chceš, aby se týden
+      začal sledovat).
+   5. **Compliance** — po novém importu **návštěv ze SalesApp** (list
+      `SALESAPP_IMPORT`, ne `RAW_DATA`) vyhodnotí, co bylo splněno.
+   6. **Advisor** — diagnostická upozornění (zanedbané POS, přetížení
+      technika…) do `ADVISOR_LOG`.
+   7. **Performance** — přepočítá manažerské přehledy podle technika/týdne.
+   8. **Reporting** — obnoví `DASHBOARD` a mapu území (`POS_MAP_DATA`).
+
+   Kroky 1–4 patří k týdennímu plánování, kroky 5–8 spouštěj po každém
+   novém importu dat ze SalesApp.
 
 ## 5. Když appka nejde spustit / nechceš appku vůbec
 
@@ -83,6 +104,6 @@ ji jako `docs/EXCEL_ONLY_WORKFLOW.md`.
 - Appka nikdy nesahá na SalesApp, internet, ani žádné jiné API — pracuje
   jen s tím `.xlsx` souborem, který jí otevřeš.
 - Export (krok 2) nikdy nezapisuje do zdrojového souboru.
-- Lokální spuštění enginů (krok 3) zapisuje, ale jen do čtyř konkrétních
-  listů (`POS_MASTER`, `MANAGER_PLAN`, `MANAGER_PLAN_PUBLISHED`,
-  `PLAN_LIFECYCLE`) a vždy s automatickou zálohou před zápisem.
+- Lokální spuštění enginů (krok 3) zapisuje, ale jen do listů, které
+  odpovídající Office Script smí zapisovat (nikdy do listů se vzorci jako
+  `TECHNICIAN_PLAN`/`HOME`), a vždy s automatickou zálohou před zápisem.

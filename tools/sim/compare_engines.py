@@ -33,12 +33,35 @@ TIMESTAMP_COLUMNS = {
     "POS_MASTER": {37, 38},  # importedAt, updatedAt
     "MANAGER_PLAN_PUBLISHED": {17},  # publishedAt (appended 18th column, index 17)
     "PLAN_LIFECYCLE": {3},  # publishedAt/updatedAt-equivalent 4th column
+    "COMPLIANCE_LOG": {7},  # evaluatedAt
+    "ADVISOR_LOG": {5},  # evaluatedAt
+    "TECHNICIAN_PERFORMANCE_LOG": {16},  # updatedAt
 }
 
-SHEETS_TO_COMPARE = ["POS_MASTER", "MANAGER_PLAN", "MANAGER_PLAN_PUBLISHED", "PLAN_LIFECYCLE"]
+SHEETS_TO_COMPARE = [
+    "POS_MASTER", "MANAGER_PLAN", "MANAGER_PLAN_PUBLISHED", "PLAN_LIFECYCLE",
+    "COMPLIANCE_LOG", "VISIT_HISTORY_ACTUAL", "OTHER_VISIT_LOG", "ADVISOR_LOG",
+    "TECHNICIAN_PERFORMANCE_LOG", "TECHNICIAN_PERFORMANCE_SUMMARY", "TECHNICIAN_TOP_ISSUES",
+    "POS_MAP_DATA",
+]
+# DASHBOARD is deliberately NOT compared: its ReportingEngine.ts writes
+# interleave narrow, column-scoped .clear() calls (chart data blocks) with
+# earlier writes to the same rows in different columns - correct under real
+# Excel (ClearApplyTo.contents only ever touches the named range) but the
+# shared MockRange.clear() this harness uses truncates every row from the
+# clear's start row onward regardless of column (see mock_workbook.py's
+# docstring) - safe only when a clear() happens before any write to those
+# rows. desktop_client/engines/reporting_engine.py works around this by
+# reordering its own clear() calls to happen up front; office-scripts/
+# ReportingEngine.ts (correct in real Excel) is not reordered to match, so
+# comparing DASHBOARD through this harness would flag a false mismatch.
 
 
 def normalize_cell(v):
+    if v is None or v == "":
+        return None  # a never-written cell: TS's mock leaves it undefined (-> JSON null),
+        # Python's mock pads it with "" (mock_workbook.py's set_values) - same "nothing here",
+        # not a business-logic difference.
     if isinstance(v, dict) and "__date__" in v:
         return str(v["__date__"])[:10]
     if isinstance(v, str) and len(v) >= 10 and v[4] == "-" and v[7] == "-":
@@ -60,7 +83,7 @@ def compare_sheet(name: str, ts_rows: list, py_rows: list) -> list[str]:
     ignore_cols = TIMESTAMP_COLUMNS.get(name, set())
 
     ts_header, py_header = ts_rows[0] if ts_rows else [], py_rows[0] if py_rows else []
-    if ts_header != py_header:
+    if [normalize_cell(v) for v in ts_header] != [normalize_cell(v) for v in py_header]:
         problems.append(f"  HEADER MISMATCH: ts={ts_header} py={py_header}")
 
     ts_data = ts_rows[1:] if ts_rows else []

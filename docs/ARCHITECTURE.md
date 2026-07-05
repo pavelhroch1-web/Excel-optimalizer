@@ -899,3 +899,52 @@ mechanism that would catch it - it is not yet wired into CI, so re-running it af
 business-rule change in `office-scripts/` is a manual discipline, not an automated gate. Flagged
 here rather than silently assumed to stay in sync forever, consistent with every other
 simplification tracked in this document.
+
+**Extended to all 8 engines (2026-07-06)**: product owner asked for the same "run it from the app,
+not from Excel Automate" convenience for the rest of the weekly cycle, explicitly accepting the
+same tradeoff already approved above (a second tested implementation, not a replacement). Added
+`start_tracking_engine.py`, `compliance_engine.py`, `advisor_engine.py`, `performance_engine.py`,
+`reporting_engine.py`, plus the previously-missing pure functions they depend on
+(`weeksBetween`/`determineComplianceStatus`/`advanceLifecycleStatus`/`findNeglected`/
+`computeFailureRateByGroup`/`latestByKey`/`computeVolumeTrend`/`findPublishedPlanDrift`/
+`findUnplannedActivePOS`) to `core_logic.py`. `ENGINE_OUTPUT_SHEETS` (`xlsx_engine_io.py`) grew to
+cover every sheet these engines write (`VISIT_HISTORY_ACTUAL`, `OTHER_VISIT_LOG`, `COMPLIANCE_LOG`,
+`ADVISOR_LOG`, `TECHNICIAN_PERFORMANCE_LOG`, `TECHNICIAN_PERFORMANCE_SUMMARY`,
+`TECHNICIAN_TOP_ISSUES`, `DASHBOARD`, `POS_MAP_DATA`) - still nothing outside that set, still
+enforced by the same assertion. `distribution_client.py`'s engine panel grew a second row of
+buttons, numbered 1-8 to match `docs/EXCEL_ONLY_WORKFLOW.md`'s step order.
+
+One mock-only wrinkle found and fixed during this extension: `MockRange.clear()` (both
+`mock_workbook.py` and `tools/sim/mockWorkbook.ts`) is deliberately simplified to truncate every
+row from the clear's start row onward, in every column - correct for every existing clear() call
+site (always a full-width range cleared before any write to those rows), but NOT correct for
+`ReportingEngine.ts`'s `DASHBOARD` writes, which interleave narrow, column-scoped clears (chart
+data blocks in columns H:K) with earlier writes to the same rows in columns A:F. Real Excel's
+`.clear(ClearApplyTo.contents)` only ever touches the exact range named, so the deployed Office
+Script has no bug; the shared test-harness mock does, for this one sheet. Rather than rewrite the
+shared mock's clear() to be column-aware (higher risk, touches every existing engine port),
+`reporting_engine.py` works around it by moving all of `DASHBOARD`'s clear() calls to happen up
+front, before any writes - `office-scripts/ReportingEngine.ts` itself was left exactly as-is, since
+it is correct under real Excel; only the Python port's *order of operations* changed, and only to
+route around a test-harness limitation. `tools/sim/compare_engines.py`'s `SHEETS_TO_COMPARE` grew
+to include every new sheet except `DASHBOARD` itself (excluded with an explicit comment - comparing
+it would flag a false mismatch, since the TS side still hits the mock's coarse-clear quirk and the
+Python side no longer does).
+
+Verified equivalent (`compare_engines.py`) on the full real production dataset for all 8 engines
+run in sequence, twice: once with an empty `SALESAPP_IMPORT` (exercises every engine's "nothing to
+do yet" branch) and once with a hand-built `SALESAPP_IMPORT` seed (10 rows, referencing real
+published POS/technicians, correctly represented as real `Date`-equivalent values - see the
+seed-construction note below) exercising the realized-visit path: 1,215 `COMPLIANCE_LOG` rows, 7
+`VISIT_HISTORY_ACTUAL` rows, 3 `OTHER_VISIT_LOG` rows, 27 `TECHNICIAN_PERFORMANCE_LOG`/
+`TECHNICIAN_PERFORMANCE_SUMMARY` rows, 10,390+ `ADVISOR_LOG` rows, 531 `POS_MAP_DATA` rows - all
+byte-for-byte identical row sets on both sides. Found and fixed one real seed-construction pitfall
+in the process: `PlanningEngine.ts`/`PublishEngine.ts` write `MANAGER_PLAN`/`MANAGER_PLAN_PUBLISHED`
+`DATE` cells as a `toLocaleDateString("cs-CZ")` STRING, not a `Date` object - in real Excel this
+becomes a genuine date-typed cell as soon as Excel recognizes and re-types the string on save (so a
+later engine run sees a real `Date`), but a JSON seed dumped straight from that string never goes
+through that implicit Excel conversion - any hand-built seed feeding `ComplianceEngine.ts`/
+`compliance_engine.py`'s date-matching logic must pre-convert `MANAGER_PLAN_PUBLISHED.DATE` to a
+real date value, or every row is silently skipped (on both language sides identically, so this
+would not have shown up as a cross-language discrepancy - only as "compliance matched nothing" on
+both, which is why it was worth writing down here rather than only fixing the one seed script).

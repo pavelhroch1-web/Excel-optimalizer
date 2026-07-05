@@ -27,17 +27,22 @@ from pathlib import Path
 
 import openpyxl
 
-# Sheets that Import/Planning/Publish Engine may write to, in the real
-# office-scripts/*.ts. Nothing outside this set is ever opened for writing -
-# see office-scripts/ImportEngine.ts / PlanningEngine.ts / PublishEngine.ts
-# file headers for the authoritative scope of each.
-ENGINE_OUTPUT_SHEETS = {"POS_MASTER", "MANAGER_PLAN", "MANAGER_PLAN_PUBLISHED", "PLAN_LIFECYCLE"}
+# Sheets that Import/Planning/Publish/StartTracking/Compliance/Advisor/
+# Performance/Reporting Engine may write to, in the real office-scripts/*.ts.
+# Nothing outside this set is ever opened for writing - see each engine's
+# own file header for its authoritative scope.
+ENGINE_OUTPUT_SHEETS = {
+    "POS_MASTER", "MANAGER_PLAN", "MANAGER_PLAN_PUBLISHED", "PLAN_LIFECYCLE",
+    "VISIT_HISTORY_ACTUAL", "OTHER_VISIT_LOG", "COMPLIANCE_LOG", "ADVISOR_LOG",
+    "TECHNICIAN_PERFORMANCE_LOG", "TECHNICIAN_PERFORMANCE_SUMMARY", "TECHNICIAN_TOP_ISSUES",
+    "DASHBOARD", "POS_MAP_DATA",
+}
 
 # Sheets the engines read as input (beyond the ones they also write).
 ENGINE_INPUT_SHEETS = ENGINE_OUTPUT_SHEETS | {
     "RAW_DATA", "POS_STATUS_IMPORT", "ACTIVITY_PLAN", "CONTROL", "TERMINAL_RULES",
     "MARKET_RULES", "CATEGORY_RULES", "CADENCE_RULES", "PARETO_GROUPS", "SCORE_PROFILES",
-    "CAPACITY_OVERRIDE",
+    "CAPACITY_OVERRIDE", "SALESAPP_IMPORT",
 }
 
 

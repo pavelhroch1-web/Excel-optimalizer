@@ -366,3 +366,221 @@ def resolve_capacity(
     if target_visits_week is not None:
         return target_visits_week
     return work_days_count * target_visits_per_day
+
+
+def weeks_between(week1: int, year1: int, week2: int, year2: int) -> int:
+    """Port of core.ts's weeksBetween() - simplified week-distance (treats
+    every year as 52 weeks, same documented limitation as the TS original)."""
+    return week2 - week1 + (year2 - year1) * 52
+
+
+@dataclass
+class ActualWeek:
+    week: int
+    year: int
+
+
+def determine_compliance_status(
+    planned_week: int,
+    planned_year: int,
+    actual_weeks: list[ActualWeek],
+    late_cutoff_weeks: int,
+    latest_known_week: int,
+    latest_known_year: int,
+) -> str:
+    """Port of core.ts's determineComplianceStatus(). Returns one of
+    "Splneno_vcas" | "Splneno_pozde" | "Nesplneno" | "Pending"."""
+    if len(actual_weeks) == 0:
+        elapsed = weeks_between(planned_week, planned_year, latest_known_week, latest_known_year)
+        if elapsed > late_cutoff_weeks:
+            return "Nesplneno"
+        return "Pending"
+    earliest = min(
+        actual_weeks,
+        key=lambda w: weeks_between(planned_week, planned_year, w.week, w.year),
+    )
+    delta = weeks_between(planned_week, planned_year, earliest.week, earliest.year)
+    if delta <= 0:
+        return "Splneno_vcas"
+    return "Splneno_pozde"
+
+
+def advance_lifecycle_status(current: str, monday_has_passed: bool, has_pending_visits: bool) -> str:
+    """Port of core.ts's advanceLifecycleStatus(). current/return values are
+    one of "Draft" | "Published" | "Active" | "Closed"."""
+    if current == "Closed":
+        return "Closed"
+    if current == "Draft":
+        return "Draft"
+    if not has_pending_visits:
+        return "Closed"
+    if current == "Active":
+        return "Active"
+    return "Active" if monday_has_passed else "Published"
+
+
+@dataclass
+class NeglectCandidate:
+    posId: str
+    weeksSinceLastVisit: Optional[float]
+
+
+def find_neglected(items: list[NeglectCandidate], threshold_weeks: float) -> list[str]:
+    """Port of core.ts's findNeglected()."""
+    return [
+        i.posId
+        for i in items
+        if i.weeksSinceLastVisit is not None and i.weeksSinceLastVisit >= threshold_weeks
+    ]
+
+
+@dataclass
+class ComplianceOutcome:
+    group: str
+    status: str
+
+
+@dataclass
+class GroupFailureRate:
+    group: str
+    total: int
+    failed: int
+    rate: float
+
+
+def compute_failure_rate_by_group(
+    rows: list[ComplianceOutcome], failure_statuses: list[str]
+) -> list[GroupFailureRate]:
+    """Port of core.ts's computeFailureRateByGroup(). Caller must dedupe an
+    append-only source (e.g. COMPLIANCE_LOG) to one row per logical subject
+    first via latest_by_key() - see core.ts's comment for the bug this
+    prevents."""
+    by_group: dict[str, dict[str, int]] = {}
+    for row in rows:
+        if not row.group:
+            continue
+        g = by_group.setdefault(row.group, {"total": 0, "failed": 0})
+        g["total"] += 1
+        if row.status in failure_statuses:
+            g["failed"] += 1
+    return [
+        GroupFailureRate(group=group, total=v["total"], failed=v["failed"], rate=v["failed"] / v["total"])
+        for group, v in by_group.items()
+    ]
+
+
+def latest_by_key(rows: list) -> list:
+    """Port of core.ts's latestByKey(). Each row must have `.key` and
+    `.timestamp` (ISO string, lexicographically comparable) attributes."""
+    latest: dict[str, object] = {}
+    for row in rows:
+        if row.key not in latest or row.timestamp > latest[row.key].timestamp:
+            latest[row.key] = row
+    return list(latest.values())
+
+
+@dataclass
+class WeeklyVolume:
+    week: int
+    year: int
+    count: int
+
+
+@dataclass
+class VolumeTrendSignal:
+    trailingAvg: float
+    baselineAvg: float
+    ratioPercent: float
+    significant: bool
+
+
+def compute_volume_trend(
+    weekly_volumes: list[WeeklyVolume],
+    trailing_window: int,
+    baseline_window: int,
+    threshold_percent: float,
+) -> Optional[VolumeTrendSignal]:
+    """Port of core.ts's computeVolumeTrend(). Returns None when there isn't
+    enough history yet, or when the baseline average is zero."""
+    sorted_volumes = sorted(weekly_volumes, key=lambda v: (v.year, v.week))
+    if len(sorted_volumes) < trailing_window + baseline_window:
+        return None
+    trailing = sorted_volumes[len(sorted_volumes) - trailing_window :]
+    baseline = sorted_volumes[
+        len(sorted_volumes) - trailing_window - baseline_window : len(sorted_volumes) - trailing_window
+    ]
+
+    def avg(rows: list[WeeklyVolume]) -> float:
+        return sum(r.count for r in rows) / len(rows)
+
+    trailing_avg = avg(trailing)
+    baseline_avg = avg(baseline)
+    if baseline_avg == 0:
+        return None
+    ratio_percent = round((trailing_avg / baseline_avg) * 1000) / 10
+    significant = abs(ratio_percent - 100) >= threshold_percent
+    return VolumeTrendSignal(
+        trailingAvg=trailing_avg, baselineAvg=baseline_avg, ratioPercent=ratio_percent, significant=significant
+    )
+
+
+@dataclass
+class OpenPlanRow:
+    posId: str
+    plannedTechnician: str
+
+
+@dataclass
+class POSCurrentState:
+    status: str
+    assignedTechnician: str
+
+
+@dataclass
+class DriftAlert:
+    posId: str
+    type: str  # "CLOSED_POS_IN_PLAN" | "TECHNICIAN_REASSIGNED"
+    plannedTechnician: str
+    currentTechnician: str
+
+
+def find_published_plan_drift(
+    open_plan_rows: list[OpenPlanRow], pos_state: dict[str, POSCurrentState]
+) -> list[DriftAlert]:
+    """Port of core.ts's findPublishedPlanDrift()."""
+    seen: set[str] = set()
+    alerts: list[DriftAlert] = []
+    for row in open_plan_rows:
+        current = pos_state.get(row.posId)
+        if not current:
+            continue
+        if current.status == "Closed":
+            key = f"{row.posId}|CLOSED_POS_IN_PLAN"
+            if key not in seen:
+                seen.add(key)
+                alerts.append(
+                    DriftAlert(
+                        posId=row.posId,
+                        type="CLOSED_POS_IN_PLAN",
+                        plannedTechnician=row.plannedTechnician,
+                        currentTechnician=current.assignedTechnician,
+                    )
+                )
+        if current.assignedTechnician and current.assignedTechnician != row.plannedTechnician:
+            key = f"{row.posId}|TECHNICIAN_REASSIGNED"
+            if key not in seen:
+                seen.add(key)
+                alerts.append(
+                    DriftAlert(
+                        posId=row.posId,
+                        type="TECHNICIAN_REASSIGNED",
+                        plannedTechnician=row.plannedTechnician,
+                        currentTechnician=current.assignedTechnician,
+                    )
+                )
+    return alerts
+
+
+def find_unplanned_active_pos(active_pos_ids: list[str], ever_planned_pos_ids: set[str]) -> list[str]:
+    """Port of core.ts's findUnplannedActivePOS()."""
+    return [p for p in active_pos_ids if p not in ever_planned_pos_ids]

@@ -26,14 +26,17 @@ faster way to browse it and export a separate Excel file per technician.
 No search/filter/print/history yet (see `docs/BACKLOG.md` for what may be
 added later, all still read-only).
 
-## V2: run Import/Planning/Publish locally (writes to the workbook)
+## V2: run all 8 engines locally (writes to the workbook)
 
 The "Lokální spuštění enginů" panel at the top of the app runs a Python
-port of the real `ImportEngine.ts`/`PlanningEngine.ts`/`PublishEngine.ts`
-(`desktop_client/engines/`) directly against the open `.xlsx` file via
-openpyxl - no Microsoft Graph API, no online sync (the project's "no
-external API" constraint rules that out), so this is the only way a
-desktop app can trigger these steps without opening Excel.
+port of the real office-scripts/*.ts engines (`desktop_client/engines/`)
+directly against the open `.xlsx` file via openpyxl - no Microsoft Graph
+API, no online sync (the project's "no external API" constraint rules
+that out), so this is the only way a desktop app can trigger these steps
+without opening Excel. All 8 weekly-cycle engines are covered, numbered
+in the UI in the same order as `docs/EXCEL_ONLY_WORKFLOW.md`:
+1 Import, 2 Planning, 3 Publish, 4 Start Tracking, 5 Compliance,
+6 Advisor, 7 Performance, 8 Reporting.
 
 This is a genuine, documented exception to "the app never writes to the
 workbook / never contains business logic" - approved explicitly by the
@@ -47,9 +50,10 @@ for the desktop app's convenience, not a replacement.
 
 Safety measures built in:
 - A timestamped backup of the whole file is made before every write.
-- Only `POS_MASTER`/`MANAGER_PLAN`/`MANAGER_PLAN_PUBLISHED`/
-  `PLAN_LIFECYCLE` are ever opened for writing - every other sheet
-  (including any live formulas, e.g. `TECHNICIAN_PLAN`) is left untouched.
+- Only the sheets the corresponding Office Script may write to are ever
+  opened for writing (see `xlsx_engine_io.py`'s `ENGINE_OUTPUT_SHEETS`) -
+  every sheet with live formulas (e.g. `TECHNICIAN_PLAN`, `HOME`) is left
+  untouched.
 - Each run requires an explicit confirmation dialog naming the exact risk
   (writes to disk outside Excel; close the file in Excel first; formula-
   driven sheets go stale until the file is reopened/saved in real Excel).
@@ -119,10 +123,10 @@ opened in Excel will show zero technicians — that's expected, not a bug.
 - `xlsx_engine_io.py` — V2 bridge between a real `.xlsx` file and the
   engine port (openpyxl read/write, backup-before-write, restricts writes
   to `ENGINE_OUTPUT_SHEETS`).
-- `engines/` — the Python port of `core.ts`/`ImportEngine.ts`/
-  `PlanningEngine.ts`/`PublishEngine.ts`. See
-  `docs/ARCHITECTURE.md` section 22 for what each file does and how it's
-  verified.
+- `engines/` — the Python port of `core.ts` and all 8 office-scripts/*.ts
+  engines (Import/Planning/Publish/StartTracking/Compliance/Advisor/
+  Performance/Reporting). See `docs/ARCHITECTURE.md` section 22 for what
+  each file does and how it's verified.
 - `distribution_client.py` — the Tkinter GUI, imports from both
   `plan_export.py` (V1) and `xlsx_engine_io.py`/`engines/` (V2).
 

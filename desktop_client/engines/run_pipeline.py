@@ -15,7 +15,16 @@ import datetime
 import json
 import sys
 
-from . import import_engine, planning_engine, publish_engine
+from . import (
+    advisor_engine,
+    compliance_engine,
+    import_engine,
+    performance_engine,
+    planning_engine,
+    publish_engine,
+    reporting_engine,
+    start_tracking_engine,
+)
 from .mock_workbook import MockWorkbook
 
 
@@ -24,10 +33,27 @@ def _json_default(v):
         return v.isoformat()
     raise TypeError(f"Object of type {type(v)} is not JSON serializable")
 
+
+def _json_object_hook(d: dict):
+    # Matches tools/sim/run_e2e.ts's seed loader: a `{"__date__": ...}` cell
+    # (written by tools/sim/xlsx_to_json.py) round-trips back into a real
+    # datetime, not a plain dict, so `isinstance(v, datetime.date)` checks in
+    # the engine ports behave the same as `instanceof Date` in the TS engines
+    # running against the identical seed.
+    if "__date__" in d:
+        return datetime.datetime.fromisoformat(d["__date__"])
+    return d
+
+
 ENGINES = {
     "import": import_engine.run,
     "planning": planning_engine.run,
     "publish": publish_engine.run,
+    "start_tracking": start_tracking_engine.run,
+    "compliance": compliance_engine.run,
+    "advisor": advisor_engine.run,
+    "performance": performance_engine.run,
+    "reporting": reporting_engine.run,
 }
 
 
@@ -51,7 +77,7 @@ def main() -> None:
     out_path = sys.argv[3] if len(sys.argv) > 3 else "final_state_py.json"
 
     with open(seed_path, "r", encoding="utf-8") as f:
-        seed = json.load(f)
+        seed = json.load(f, object_hook=_json_object_hook)
 
     final_state, log = run_pipeline(seed, pipeline)
 

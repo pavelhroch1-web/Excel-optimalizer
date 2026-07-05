@@ -11,20 +11,35 @@ from __future__ import annotations
 import sys
 
 from core_logic import (
+    ActualWeek,
     CadenceRule,
+    ComplianceOutcome,
+    DriftAlert,
     GeoClusterConfig,
     GpsBonusConfig,
+    NeglectCandidate,
+    OpenPlanRow,
+    POSCurrentState,
     POSItem,
     ScoreWeights,
+    WeeklyVolume,
     WorkDay,
     add_gps_bonus,
+    advance_lifecycle_status,
     apply_premium_tier,
     category_rule,
+    compute_failure_rate_by_group,
     compute_geo_cluster_bonus,
     compute_score,
+    compute_volume_trend,
+    determine_compliance_status,
     distance_km,
+    find_neglected,
+    find_published_plan_drift,
+    find_unplanned_active_pos,
     geo_days,
     is_overdue_for_cadence_rule,
+    latest_by_key,
     matches_cadence_rule_scope,
     norm,
     pick_mandatory,
@@ -213,6 +228,170 @@ check("isOverdueForCadenceRule: at the interval is overdue", is_overdue_for_cade
 check("isOverdueForCadenceRule: under the interval is not overdue", not is_overdue_for_cadence_rule(corn_rule, 3))
 no_interval = CadenceRule(**{**corn_rule.__dict__, "maxIntervalWeeks": None})
 check("isOverdueForCadenceRule: no maxIntervalWeeks never triggers", not is_overdue_for_cadence_rule(no_interval, None))
+
+# --- determineComplianceStatus ---
+check("visit realized in the planned week = Splneno_vcas",
+      determine_compliance_status(31, 2026, [ActualWeek(31, 2026)], 1, 33, 2026) == "Splneno_vcas")
+check("visit realized one week late = Splneno_pozde",
+      determine_compliance_status(31, 2026, [ActualWeek(32, 2026)], 1, 33, 2026) == "Splneno_pozde")
+check("visit very late is still Splneno_pozde, not Nesplneno",
+      determine_compliance_status(31, 2026, [ActualWeek(40, 2026)], 1, 41, 2026) == "Splneno_pozde")
+check("no visit yet, deadline not reached = Pending",
+      determine_compliance_status(31, 2026, [], 1, 31, 2026) == "Pending")
+check("no visit, exactly at cutoff boundary = still Pending",
+      determine_compliance_status(31, 2026, [], 1, 32, 2026) == "Pending")
+check("no visit, one week past cutoff = Nesplneno",
+      determine_compliance_status(31, 2026, [], 1, 33, 2026) == "Nesplneno")
+check("multiple actual visits - earliest one determines the status",
+      determine_compliance_status(31, 2026, [ActualWeek(33, 2026), ActualWeek(31, 2026)], 1, 33, 2026) == "Splneno_vcas")
+
+# --- findNeglected ---
+neglect_items = [
+    NeglectCandidate(posId="A", weeksSinceLastVisit=26),
+    NeglectCandidate(posId="B", weeksSinceLastVisit=25),
+    NeglectCandidate(posId="C", weeksSinceLastVisit=30),
+]
+check("findNeglected: POS at or beyond threshold are flagged", find_neglected(neglect_items, 26) == ["A", "C"])
+check("findNeglected: null weeksSinceLastVisit is not flagged",
+      find_neglected([NeglectCandidate(posId="A", weeksSinceLastVisit=None)], 26) == [])
+check("findNeglected: empty list returns empty", find_neglected([], 26) == [])
+
+# --- computeFailureRateByGroup ---
+failure_rows = [
+    ComplianceOutcome(group="Novak", status="Nesplneno"),
+    ComplianceOutcome(group="Novak", status="Nesplneno"),
+    ComplianceOutcome(group="Novak", status="Splneno_vcas"),
+    ComplianceOutcome(group="Svoboda", status="Splneno_vcas"),
+]
+failure_result = compute_failure_rate_by_group(failure_rows, ["Nesplneno"])
+novak_rate = next(r for r in failure_result if r.group == "Novak")
+svoboda_rate = next(r for r in failure_result if r.group == "Svoboda")
+check("computeFailureRateByGroup: total/failed computed correctly", novak_rate.total == 3 and novak_rate.failed == 2)
+check("computeFailureRateByGroup: rate computed correctly", abs(novak_rate.rate - 2 / 3) < 1e-9)
+check("computeFailureRateByGroup: group with no failures has rate 0", svoboda_rate.rate == 0)
+check("computeFailureRateByGroup: empty group is skipped",
+      len(compute_failure_rate_by_group(
+          [ComplianceOutcome(group="", status="Navic_evidovano"), ComplianceOutcome(group="Novak", status="Splneno_vcas")],
+          ["Nesplneno"])) == 1)
+check("computeFailureRateByGroup: multiple failure statuses counted together",
+      compute_failure_rate_by_group(
+          [ComplianceOutcome(group="Novak", status="Nesplneno"),
+           ComplianceOutcome(group="Novak", status="Splneno_pozde"),
+           ComplianceOutcome(group="Novak", status="Splneno_vcas")],
+          ["Nesplneno", "Splneno_pozde"])[0].failed == 2)
+check("computeFailureRateByGroup: empty input returns empty output", compute_failure_rate_by_group([], ["Nesplneno"]) == [])
+
+
+class _TimestampedRow:
+    def __init__(self, key, timestamp, **extra):
+        self.key = key
+        self.timestamp = timestamp
+        for k, v in extra.items():
+            setattr(self, k, v)
+
+
+undeduped = [_TimestampedRow(key=None, timestamp=None, group="Novak", status="Pending"),
+             _TimestampedRow(key=None, timestamp=None, group="Novak", status="Nesplneno")]
+wrong_rate = compute_failure_rate_by_group(
+    [ComplianceOutcome(group=r.group, status=r.status) for r in undeduped], ["Nesplneno"])[0].rate
+check("regression: undeduped repeated evaluations dilute the rate", abs(wrong_rate - 0.5) < 1e-9)
+timestamped = [
+    _TimestampedRow(key="Novak|POS1", timestamp="2026-08-01T00:00:00Z", group="Novak", status="Pending"),
+    _TimestampedRow(key="Novak|POS1", timestamp="2026-08-08T00:00:00Z", group="Novak", status="Nesplneno"),
+]
+deduped = latest_by_key(timestamped)
+correct_rate = compute_failure_rate_by_group(
+    [ComplianceOutcome(group=r.group, status=r.status) for r in deduped], ["Nesplneno"])[0].rate
+check("regression: deduping with latestByKey first gives the correct rate", correct_rate == 1)
+
+# --- latestByKey ---
+lbk_rows = [
+    _TimestampedRow(key="A|31", timestamp="2026-08-01T00:00:00Z", status="Pending"),
+    _TimestampedRow(key="A|31", timestamp="2026-08-08T00:00:00Z", status="Nesplneno"),
+    _TimestampedRow(key="B|31", timestamp="2026-08-01T00:00:00Z", status="Splneno_vcas"),
+]
+lbk_result = latest_by_key(lbk_rows)
+lbk_a = next(r for r in lbk_result if r.key == "A|31")
+check("latestByKey: keeps only the newest timestamp per key", lbk_a.status == "Nesplneno" and len(lbk_result) == 2)
+single_row = [_TimestampedRow(key="A", timestamp="2026-08-01T00:00:00Z")]
+check("latestByKey: single row per key returned unchanged", latest_by_key(single_row) == single_row)
+check("latestByKey: empty input returns empty output", latest_by_key([]) == [])
+
+# --- advanceLifecycleStatus ---
+check("Draft never auto-advances", advance_lifecycle_status("Draft", True, True) == "Draft")
+check("Draft never auto-advances (2)", advance_lifecycle_status("Draft", False, False) == "Draft")
+check("Closed is terminal", advance_lifecycle_status("Closed", False, True) == "Closed")
+check("Published stays Published if Monday hasn't passed and visits pending",
+      advance_lifecycle_status("Published", False, True) == "Published")
+check("Published becomes Active once Monday has passed and visits pending",
+      advance_lifecycle_status("Published", True, True) == "Active")
+check("Published closes immediately if no visits pending",
+      advance_lifecycle_status("Published", False, False) == "Closed")
+check("Active closes once no visits pending", advance_lifecycle_status("Active", True, False) == "Closed")
+check("Active stays Active while visits pending", advance_lifecycle_status("Active", True, True) == "Active")
+check("Active never regresses to Published", advance_lifecycle_status("Active", False, True) == "Active")
+
+# --- computeVolumeTrend ---
+def _weeks(counts, start_year=2026, start_week=1):
+    return [WeeklyVolume(week=start_week + i, year=start_year, count=c) for i, c in enumerate(counts)]
+
+
+check("computeVolumeTrend: not enough history returns None", compute_volume_trend(_weeks([10, 10, 10]), 4, 4, 25) is None)
+check("computeVolumeTrend: baseline average of zero returns None",
+      compute_volume_trend(_weeks([0, 0, 0, 0, 10, 10, 10, 10]), 4, 4, 25) is None)
+stable_signal = compute_volume_trend(_weeks([10, 10, 10, 10, 10, 10, 10, 10]), 4, 4, 25)
+check("computeVolumeTrend: stable volume is not significant", stable_signal.significant is False and stable_signal.ratioPercent == 100)
+increase_signal = compute_volume_trend(_weeks([10, 10, 10, 10, 20, 20, 20, 20]), 4, 4, 25)
+check("computeVolumeTrend: large increase flagged with correct ratio",
+      increase_signal.trailingAvg == 20 and increase_signal.baselineAvg == 10
+      and increase_signal.ratioPercent == 200 and increase_signal.significant is True)
+decrease_signal = compute_volume_trend(_weeks([20, 20, 20, 20, 10, 10, 10, 10]), 4, 4, 25)
+check("computeVolumeTrend: large decrease flagged too", decrease_signal.ratioPercent == 50 and decrease_signal.significant is True)
+small_signal = compute_volume_trend(_weeks([10, 10, 10, 10, 11, 11, 11, 11]), 4, 4, 25)
+check("computeVolumeTrend: small deviation under threshold not flagged", small_signal.significant is False)
+shuffled = [
+    WeeklyVolume(week=3, year=2026, count=20),
+    WeeklyVolume(week=1, year=2026, count=10),
+    WeeklyVolume(week=4, year=2026, count=20),
+    WeeklyVolume(week=2, year=2026, count=10),
+]
+shuffled_signal = compute_volume_trend(shuffled, 2, 2, 25)
+check("computeVolumeTrend: unsorted input is sorted internally",
+      shuffled_signal.baselineAvg == 10 and shuffled_signal.trailingAvg == 20)
+
+# --- findPublishedPlanDrift ---
+check("findPublishedPlanDrift: flags Active-in-plan but Closed-in-master",
+      find_published_plan_drift(
+          [OpenPlanRow(posId="POS1", plannedTechnician="Novak")],
+          {"POS1": POSCurrentState(status="Closed", assignedTechnician="Novak")})[0].type == "CLOSED_POS_IN_PLAN")
+reassigned_alerts = find_published_plan_drift(
+    [OpenPlanRow(posId="POS1", plannedTechnician="Novak")],
+    {"POS1": POSCurrentState(status="Active", assignedTechnician="Svoboda")})
+check("findPublishedPlanDrift: flags technician reassignment",
+      len(reassigned_alerts) == 1 and reassigned_alerts[0].type == "TECHNICIAN_REASSIGNED"
+      and reassigned_alerts[0].plannedTechnician == "Novak" and reassigned_alerts[0].currentTechnician == "Svoboda")
+check("findPublishedPlanDrift: both reasons at once",
+      len(find_published_plan_drift(
+          [OpenPlanRow(posId="POS1", plannedTechnician="Novak")],
+          {"POS1": POSCurrentState(status="Closed", assignedTechnician="Svoboda")})) == 2)
+check("findPublishedPlanDrift: no drift when master matches plan",
+      len(find_published_plan_drift(
+          [OpenPlanRow(posId="POS1", plannedTechnician="Novak")],
+          {"POS1": POSCurrentState(status="Active", assignedTechnician="Novak")})) == 0)
+check("findPublishedPlanDrift: same POS in several open weeks flagged once per reason",
+      len(find_published_plan_drift(
+          [OpenPlanRow(posId="POS1", plannedTechnician="Novak"), OpenPlanRow(posId="POS1", plannedTechnician="Novak")],
+          {"POS1": POSCurrentState(status="Closed", assignedTechnician="Novak")})) == 1)
+check("findPublishedPlanDrift: no matching POS_MASTER entry is skipped",
+      find_published_plan_drift([OpenPlanRow(posId="GHOST", plannedTechnician="Novak")], {}) == [])
+check("findPublishedPlanDrift: empty input returns empty output", find_published_plan_drift([], {}) == [])
+
+# --- findUnplannedActivePOS ---
+check("findUnplannedActivePOS: finds Active POS absent from ever-planned set",
+      find_unplanned_active_pos(["POS1", "POS2"], {"POS1"}) == ["POS2"])
+check("findUnplannedActivePOS: empty when every Active POS was planned",
+      find_unplanned_active_pos(["POS1", "POS2"], {"POS1", "POS2"}) == [])
+check("findUnplannedActivePOS: empty input returns empty output", find_unplanned_active_pos([], set()) == [])
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

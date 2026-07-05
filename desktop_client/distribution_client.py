@@ -44,13 +44,27 @@ import ttkbootstrap as tb
 from ttkbootstrap.constants import BOTH, LEFT, RIGHT, X, Y, W
 
 import xlsx_engine_io
+from engines.advisor_engine import run as run_advisor_engine
+from engines.compliance_engine import run as run_compliance_engine
 from engines.import_engine import run as run_import_engine
 from engines.mock_workbook import MockWorkbook
+from engines.performance_engine import run as run_performance_engine
 from engines.planning_engine import run as run_planning_engine
 from engines.publish_engine import run as run_publish_engine
+from engines.reporting_engine import run as run_reporting_engine
+from engines.start_tracking_engine import run as run_start_tracking_engine
 from plan_export import SHEET_NAME, export_technician_file, read_technician_plan
 
-ENGINE_RUNNERS = {"import": run_import_engine, "planning": run_planning_engine, "publish": run_publish_engine}
+ENGINE_RUNNERS = {
+    "import": run_import_engine,
+    "planning": run_planning_engine,
+    "publish": run_publish_engine,
+    "start_tracking": run_start_tracking_engine,
+    "compliance": run_compliance_engine,
+    "advisor": run_advisor_engine,
+    "performance": run_performance_engine,
+    "reporting": run_reporting_engine,
+}
 
 # Plain tkinter.ttk.Scrollbar, not tb.Scrollbar: ttkbootstrap renders any
 # scrollbar's track/thumb via Pillow (PIL.ImageTk) as soon as a themed
@@ -72,8 +86,8 @@ class DistributionClientApp:
     def __init__(self, root: tb.Window):
         self.root = root
         self.root.title("Field Force Optimizer — Distribution Client")
-        self.root.geometry("1040x640")
-        self.root.minsize(820, 520)
+        self.root.geometry("1040x700")
+        self.root.minsize(820, 560)
 
         self.workbook_path = None
         self.headers: list[str] = []
@@ -144,7 +158,7 @@ class DistributionClientApp:
         panel.pack(fill=X)
 
         label_col = tb.Frame(panel, bootstyle="warning")
-        label_col.pack(side=LEFT, fill=X, expand=True)
+        label_col.pack(anchor=W, fill=X)
         tb.Label(
             label_col, text="Lokální spuštění enginů (zapisuje přímo do souboru)",
             font=("", 9, "bold"), bootstyle="inverse-warning",
@@ -154,30 +168,79 @@ class DistributionClientApp:
             text="Vytvoří se záloha před zápisem. Zavři soubor v Excelu, než spustíš. "
                  "Business logika je ověřená proti Office Scriptům (tools/sim/compare_engines.py), "
                  "ale Excel zůstává oficiálním zdrojem pravdy.",
-            font=("", 8), bootstyle="inverse-warning", wraplength=560, justify="left",
+            font=("", 8), bootstyle="inverse-warning", wraplength=900, justify="left",
         ).pack(anchor=W)
 
-        btn_col = tb.Frame(panel, bootstyle="warning")
-        btn_col.pack(side=RIGHT)
+        # Row 1: the weekly-planning half of the cycle (Import -> Planning ->
+        # Publish -> StartTracking), same order as docs/EXCEL_ONLY_WORKFLOW.md.
+        btn_row1 = tb.Frame(panel, bootstyle="warning", padding=(0, 8, 0, 0))
+        btn_row1.pack(fill=X)
         self.import_btn = tb.Button(
-            btn_col, text="▶ Import", bootstyle="dark", width=12, state="disabled",
+            btn_row1, text="1 ▶ Import", bootstyle="dark", width=14, state="disabled",
             command=lambda: self._run_local_engine(["import"], {"POS_MASTER"}, "Import Engine"),
         )
         self.import_btn.pack(side=LEFT, padx=3)
         self.planning_btn = tb.Button(
-            btn_col, text="▶ Planning", bootstyle="dark", width=12, state="disabled",
+            btn_row1, text="2 ▶ Planning", bootstyle="dark", width=14, state="disabled",
             command=lambda: self._run_local_engine(
                 ["planning"], {"MANAGER_PLAN", "PLAN_LIFECYCLE"}, "Planning Engine"
             ),
         )
         self.planning_btn.pack(side=LEFT, padx=3)
         self.publish_btn = tb.Button(
-            btn_col, text="▶ Publish", bootstyle="dark", width=12, state="disabled",
+            btn_row1, text="3 ▶ Publish", bootstyle="dark", width=14, state="disabled",
             command=lambda: self._run_local_engine(
                 ["publish"], {"MANAGER_PLAN_PUBLISHED", "PLAN_LIFECYCLE"}, "Publish Engine"
             ),
         )
         self.publish_btn.pack(side=LEFT, padx=3)
+        self.start_tracking_btn = tb.Button(
+            btn_row1, text="4 ▶ Start Tracking", bootstyle="dark", width=16, state="disabled",
+            command=lambda: self._run_local_engine(
+                ["start_tracking"], {"PLAN_LIFECYCLE"}, "Start Tracking Engine"
+            ),
+        )
+        self.start_tracking_btn.pack(side=LEFT, padx=3)
+
+        # Row 2: the after-a-SalesApp-import half of the cycle (Compliance ->
+        # Advisor -> Performance -> Reporting), run once a new export lands.
+        btn_row2 = tb.Frame(panel, bootstyle="warning", padding=(0, 6, 0, 0))
+        btn_row2.pack(fill=X)
+        self.compliance_btn = tb.Button(
+            btn_row2, text="5 ▶ Compliance", bootstyle="dark", width=14, state="disabled",
+            command=lambda: self._run_local_engine(
+                ["compliance"],
+                {"VISIT_HISTORY_ACTUAL", "OTHER_VISIT_LOG", "COMPLIANCE_LOG", "PLAN_LIFECYCLE", "POS_MASTER"},
+                "Compliance Engine",
+            ),
+        )
+        self.compliance_btn.pack(side=LEFT, padx=3)
+        self.advisor_btn = tb.Button(
+            btn_row2, text="6 ▶ Advisor", bootstyle="dark", width=14, state="disabled",
+            command=lambda: self._run_local_engine(["advisor"], {"ADVISOR_LOG"}, "Advisor Engine"),
+        )
+        self.advisor_btn.pack(side=LEFT, padx=3)
+        self.performance_btn = tb.Button(
+            btn_row2, text="7 ▶ Performance", bootstyle="dark", width=14, state="disabled",
+            command=lambda: self._run_local_engine(
+                ["performance"],
+                {"TECHNICIAN_PERFORMANCE_LOG", "TECHNICIAN_PERFORMANCE_SUMMARY", "TECHNICIAN_TOP_ISSUES"},
+                "Performance Engine",
+            ),
+        )
+        self.performance_btn.pack(side=LEFT, padx=3)
+        self.reporting_btn = tb.Button(
+            btn_row2, text="8 ▶ Reporting", bootstyle="dark", width=16, state="disabled",
+            command=lambda: self._run_local_engine(
+                ["reporting"], {"DASHBOARD", "POS_MAP_DATA"}, "Reporting Engine"
+            ),
+        )
+        self.reporting_btn.pack(side=LEFT, padx=3)
+
+        self._local_engine_buttons = [
+            self.import_btn, self.planning_btn, self.publish_btn, self.start_tracking_btn,
+            self.compliance_btn, self.advisor_btn, self.performance_btn, self.reporting_btn,
+        ]
 
     def _build_technician_panel(self, body):
         left = tb.Frame(body, padding=(0, 0, 12, 0))
@@ -289,9 +352,8 @@ class DistributionClientApp:
 
         self.export_all_btn.config(state=("normal" if self.by_technician else "disabled"))
         self.export_selected_btn.config(state="disabled")
-        self.import_btn.config(state="normal")
-        self.planning_btn.config(state="normal")
-        self.publish_btn.config(state="normal")
+        for btn in self._local_engine_buttons:
+            btn.config(state="normal")
         self.plan_label.config(text="Vyber technika vlevo.")
         self._clear_tree()
 
