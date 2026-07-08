@@ -839,3 +839,79 @@ All TypeScript changes synced (`tools/check_sync.py` passes, 18 blocks), mirrore
 on the real production dataset (11,605 POS) plus 2 synthetic edge-case seeds (GECO address dedup,
 CORN deferral phantom-requirement check). Full test suites green: 107 TypeScript
 (`tests/core.test.ts`), 94 Python (`desktop_client/engines/test_core_logic.py`).
+
+## 17. Resume-from-last-week, BLACKLIST, Smart Hold-back, proactive urgency boost (2026-07-09)
+
+Second round of refinements to the same architecture, superseding/extending some of section 16's
+scope (product owner: "Zapracuj je do PlanningEngine.ts a souvisejících souborů"). Export (former
+section 16 point 8) was explicitly cancelled by the product owner ("to si vyřeším sám makrem") and
+is out of scope entirely - not built, not planned.
+
+**1. Resume-from-last-week (generation +1) as the default** - IMPLEMENTED. `PlanningEngine.ts`'s
+`START_WEEK` default chain changed from "today's ISO week" to: explicit
+`CONTROL.CAMPAIGN_START_WEEK` override (unchanged, always wins) → one past the highest `WEEK`
+already present in `MANAGER_PLAN` ("resume where the last run left off") → today's real ISO week
+(only reached on a genuinely first-ever run, when `MANAGER_PLAN` is still empty). Mirrored in
+`planning_engine.py`.
+
+**2. Manual BLACKLIST** - IMPLEMENTED. New `BLACKLIST` sheet (`POS`, `NOTES` columns,
+`tools/scaffold_workbook.py`/`tools/ux_style.py`, real workbook). Checked immediately after
+`status=Active`, before the existing `managerOverrideType=FORCE_EXCLUDE` check - a POS in either
+mechanism never enters the candidate pool. Distinct from `FORCE_EXCLUDE` in that it's a dedicated,
+paste-and-scan list rather than editing individual `POS_MASTER` dropdown cells one at a time; both
+co-exist.
+
+**3. Smart Hold-back with elastic, classification-tiered lookahead - IMPLEMENTED, as a NEW,
+stronger mechanism alongside (not replacing) the pre-existing `campaignChangeSoon()`/`holdPremium`
+soft tie-break already in `selectWeekPOS`'s sort.** Three new pure functions added to
+`office-scripts/shared/core.ts` (synced into `PlanningEngine.ts`, ported to `core_logic.py`):
+- `campaignStartsWithin(activityPlan, week, lookaheadWeeks)` - true if any `ACTIVITY_PLAN` campaign
+  starts strictly after `week` and at or before `week + lookaheadWeeks` (a campaign already running
+  as of `week` does not count).
+- `shouldHoldBack(classification, weeksSinceLastVisit, deadlineWeeks, activityPlan, week, config)` -
+  deliberately conservative: never defers unknown history (`weeksSinceLastVisit === null`, already
+  maximally urgent by convention elsewhere), never defers past `deadlineWeeks` (the item's own
+  matched `RECURRING`+`HARD` `CADENCE_RULES` row's `maxIntervalWeeks` if any, else
+  `NEGLECTED_AFTER_WEEKS` - computed once per item at candidate-build time in `PlanningEngine.ts`/
+  `planning_engine.py`, stored as `POSItem.deadlineWeeks`). Tolerance is classification-tiered:
+  classification A gets `HOLDBACK_TOLERANCE_A_WEEKS` (default 1), everything else gets
+  `HOLDBACK_TOLERANCE_OTHER_WEEKS` (default 3), both capped by `HOLDBACK_LOOKAHEAD_WEEKS` (default
+  3, the widest possible elastic window).
+- `computeUrgencyBoost(...)` - see point 4 below.
+
+Wired into `PlanningEngine.ts`'s per-week candidate loop: non-mandatory items (`mandatoryRuleId ===
+null`) for which `shouldHoldBack` returns true are removed from that week's `available` pool
+entirely (a hard pool-removal, not a soft sort tie-break). Mandatory items are never held back - a
+hard guarantee is not up for deferral once it applies. Capacity freed this way cascades
+automatically to whatever else is competing that week, since `available` simply has fewer entries -
+no separate "refill" mechanism needed, it falls out of the existing per-week loop structure.
+Verified via 18 new unit tests (both languages) plus an end-to-end synthetic seed run through the
+real `PlanningEngine.ts`/`planning_engine.py` (a classification-B GECO-category POS with 4 weeks of
+slack against its own 5-week deadline, and an upcoming campaign 2 weeks out, was correctly excluded
+from weeks 31-32 and picked up starting week 33 once the campaign was no longer "upcoming" - and the
+Python port produced a byte-identical `MANAGER_PLAN`).
+
+**4. Proactive urgency boost for POS approaching their own deadline** - IMPLEMENTED as a smooth
+linear score ramp (`computeUrgencyBoost`, NOT a step function like the existing
+`NEGLECTED_AFTER_WEEKS` bonus already inside `computeScore()`): 0 below `rampStartRatio` (default
+0.5, i.e. halfway to `deadlineWeeks`), ramping linearly up to `URGENCY_BOOST_MAX` (default 20000)
+exactly at the deadline. Applied as a separate additive pass (like the existing geo cluster bonus),
+run BEFORE the geo cluster bonus pass so a boosted item's real value feeds its neighbors' cluster
+bonus correctly - not folded into `computeScore()` itself, so that function's own tested contract
+is untouched. `URGENCY_BOOST_MAX` is kept well below `NEGLECTED_BONUS` (50000) and classification A
+(10000000) so it only ever nudges a POS ahead of other non-neglected competition as its deadline
+approaches, never overriding the existing hard priority tiers.
+
+All five new `CONTROL` settings (`HOLDBACK_LOOKAHEAD_WEEKS`, `HOLDBACK_TOLERANCE_A_WEEKS`,
+`HOLDBACK_TOLERANCE_OTHER_WEEKS`, `URGENCY_BOOST_MAX`, `URGENCY_BOOST_RAMP_START_RATIO`) are
+config-driven with documented defaults (section 0 "config over code"), added to
+`tools/scaffold_workbook.py` and patched into the real workbook's `CONTROL` sheet.
+
+**5. HOME UI (terminal-type countdown, post-generation summary) and daily technician stats -
+NOT YET IMPLEMENTED**, tracked as the next piece of this round of work.
+
+All TypeScript changes synced (`tools/check_sync.py` passes, 18 blocks), mirrored into
+`desktop_client/engines/`, and verified equivalent (`tools/sim/compare_engines.py`) on the real
+production dataset (11,605 POS, `ImportEngine.ts`+`PlanningEngine.ts` pipeline) plus the synthetic
+Smart Hold-back seed. Full test suites green: 127 TypeScript (`tests/core.test.ts`), 114 Python
+(`desktop_client/engines/test_core_logic.py`).

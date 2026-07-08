@@ -175,6 +175,7 @@ function main(workbook: ExcelScript.Workbook) {
     forceInclude: boolean;
     core: boolean;
     mandatoryRuleId: string | null;
+    deadlineWeeks: number | null;
     premium: boolean;
     score: number;
     reason: string;
@@ -315,6 +316,89 @@ function main(workbook: ExcelScript.Workbook) {
       rule.maxIntervalWeeks != null &&
       (weeksSinceLastVisit === null || weeksSinceLastVisit >= rule.maxIntervalWeeks)
     );
+  }
+
+  interface ActivityPlanWindow {
+    activityType: string; // "LOS" | "LOT"
+    activity: string;
+    startWeek: number;
+    endWeek: number;
+  }
+
+  // True if any ACTIVITY_PLAN campaign STARTS strictly after `week` and at or
+  // before `week + lookaheadWeeks` - a new campaign is about to begin within
+  // the lookahead horizon (a campaign already running as of `week` itself
+  // does not count - that's not a hold-back trigger, it already started).
+  function campaignStartsWithin(
+    activityPlan: ActivityPlanWindow[],
+    week: number,
+    lookaheadWeeks: number
+  ): boolean {
+    return activityPlan.some((a) => a.startWeek > week && a.startWeek <= week + lookaheadWeeks);
+  }
+
+  interface HoldBackConfig {
+    lookaheadWeeks: number; // widest possible lookahead, e.g. 3
+    toleranceAWeeks: number; // max defer for classification A, e.g. 1
+    toleranceOtherWeeks: number; // max defer for everything else, e.g. 3
+  }
+
+  // Decides whether `item` (otherwise eligible to be visited THIS week) should
+  // instead be held back. Deliberately conservative: never defers a POS with
+  // unknown history (weeksSinceLastVisit === null - already maximally urgent
+  // by convention elsewhere, e.g. isOverdueForCadenceRule), and never defers
+  // past its own deadline (deadlineWeeks - the matched cadence rule's
+  // maxIntervalWeeks if any, else the caller-supplied neglected-POS
+  // threshold) - the absolute limit always wins over any hold-back.
+  function shouldHoldBack(
+    classification: string,
+    weeksSinceLastVisit: number | null,
+    deadlineWeeks: number | null,
+    activityPlan: ActivityPlanWindow[],
+    week: number,
+    config: HoldBackConfig
+  ): boolean {
+    if (weeksSinceLastVisit === null || deadlineWeeks === null || deadlineWeeks <= 0) {
+      return false;
+    }
+    const tolerance = classification == "A" ? config.toleranceAWeeks : config.toleranceOtherWeeks;
+    const lookahead = Math.min(tolerance, config.lookaheadWeeks);
+    if (lookahead <= 0) {
+      return false;
+    }
+    if (!campaignStartsWithin(activityPlan, week, lookahead)) {
+      return false;
+    }
+    return weeksSinceLastVisit + lookahead < deadlineWeeks;
+  }
+
+  // PROACTIVE URGENCY BOOST (product owner, 2026-07-09) - a smooth score ramp
+  // as a POS approaches its own deadline (deadlineWeeks - same meaning as
+  // shouldHoldBack's parameter), so it isn't starved out of selection by a
+  // surge of campaign-driven candidates in the weeks just before it would
+  // otherwise become HARD-mandatory. Deliberately smooth (not a step function
+  // like the existing NEGLECTED_AFTER_WEEKS bonus in computeScore) - starts
+  // ramping at rampStartRatio (e.g. 0.5 = halfway to the deadline) up to
+  // maxBoost right at the deadline itself. Applied as a SEPARATE additive pass
+  // (like computeGeoClusterBonus), not folded into computeScore, so it never
+  // changes computeScore's own tested contract.
+  function computeUrgencyBoost(
+    weeksSinceLastVisit: number | null,
+    deadlineWeeks: number | null,
+    maxBoost: number,
+    rampStartRatio: number
+  ): number {
+    if (weeksSinceLastVisit === null || deadlineWeeks === null || deadlineWeeks <= 0) {
+      return 0;
+    }
+    const ratio = Math.min(1, weeksSinceLastVisit / deadlineWeeks);
+    if (ratio < rampStartRatio) {
+      return 0;
+    }
+    if (rampStartRatio >= 1) {
+      return maxBoost;
+    }
+    return maxBoost * ((ratio - rampStartRatio) / (1 - rampStartRatio));
   }
 
   function pickMandatory(list: POSItem[], mandatoryRules: CadenceRule[]): POSItem[] {
@@ -544,6 +628,20 @@ function main(workbook: ExcelScript.Workbook) {
   const capacityOverride = readTable("CAPACITY_OVERRIDE");
   const planLifecycle = readTable("PLAN_LIFECYCLE");
   const existingManagerPlan = readTable("MANAGER_PLAN");
+  // BLACKLIST (product owner, 2026-07-09): a manual list of POS IDs to
+  // ignore completely, regardless of any other data - distinct from
+  // managerOverrideType=FORCE_EXCLUDE (POS_MASTER, one row at a time) in
+  // that it's a dedicated, quick-to-scan paste-list rather than editing
+  // individual dropdown cells one by one. Both mechanisms co-exist; a POS
+  // excluded by either one never enters the candidate pool.
+  const blacklistRaw = readTable("BLACKLIST");
+  let blacklistedPos = new Set<string>();
+  for (let i = 1; i < blacklistRaw.length; i++) {
+    const posId = String(blacklistRaw[i][0] ?? "").trim();
+    if (posId) {
+      blacklistedPos.add(posId);
+    }
+  }
 
   const outWs = workbook.getWorksheet("MANAGER_PLAN");
 
@@ -579,17 +677,28 @@ function main(workbook: ExcelScript.Workbook) {
     return null;
   }
 
-  // Dynamic "current week" (product owner, 2026-07-08: "uz zadne manualni
-  // prepisovani startovniho tydne v Excelu") - CAMPAIGN_START_WEEK/YEAR
-  // default to TODAY's real ISO week/year (isoWeekNumber, same SYNC-BLOCK
-  // function ComplianceEngine.ts/ReportingEngine.ts already use for the real
-  // calendar "now") whenever the CONTROL row is left blank, so a fresh
-  // Planning Engine run always starts its rolling window at the actual
-  // current week with zero manual upkeep. A CONTROL value, if present,
-  // still wins - kept as an explicit escape hatch (testing, or a deliberate
-  // future-dated start), not the default path.
+  // Dynamic "current week" (product owner, 2026-07-08/09: "uz zadne
+  // manualni prepisovani startovniho tydne", "kdyz byl posledni plan
+  // vygenerovan do Tydne 28, at defaultne stavi Tyden 29"). Default chain:
+  // 1) CONTROL.CAMPAIGN_START_WEEK, if set - explicit manual override,
+  //    always wins (testing, or a deliberate future-dated restart).
+  // 2) one past the highest WEEK already present in MANAGER_PLAN - "resume
+  //    where the last run left off", the normal case for every run after
+  //    the first (MANAGER_PLAN always carries every previously-generated
+  //    week, both locked-and-carried-over and this-run's-predecessor Draft
+  //    rows, via keptRows below - see its own comment).
+  // 3) TODAY's real ISO week (isoWeekNumber) - only reached on a truly
+  //    first-ever run, when MANAGER_PLAN is still empty.
   const nowIso = isoWeekNumber(new Date());
-  const START_WEEK = settingOptional("CAMPAIGN_START_WEEK") ?? nowIso.week;
+  let lastPlannedWeek = 0;
+  for (let i = 1; i < existingManagerPlan.length; i++) {
+    const w = Number(existingManagerPlan[i][0]);
+    if (!isNaN(w) && w > lastPlannedWeek) {
+      lastPlannedWeek = w;
+    }
+  }
+  const START_WEEK =
+    settingOptional("CAMPAIGN_START_WEEK") ?? (lastPlannedWeek > 0 ? lastPlannedWeek + 1 : nowIso.week);
   const CAMPAIGN_LENGTH = setting("CAMPAIGN_LENGTH", 4);
   const TARGET_DAY = setting("TARGET_VISITS_DAY", 8);
   // Optional: a flat weekly capacity target, used instead of deriving
@@ -617,6 +726,42 @@ function main(workbook: ExcelScript.Workbook) {
     bonusFactor: setting("GEO_CLUSTER_BONUS_FACTOR", 0.01),
     maxBonus: setting("GEO_CLUSTER_MAX_BONUS", 5000),
   };
+
+  // SMART HOLD-BACK config (product owner, 2026-07-09, "Kriticke") - elastic
+  // lookahead capped per-classification, so an A-POS only ever waits for a
+  // campaign starting within 1 week, while weaker classifications can wait up
+  // to the full lookahead. See shouldHoldBack()'s own comment above for the
+  // hard-deadline safety guarantee.
+  const HOLDBACK_CONFIG: HoldBackConfig = {
+    lookaheadWeeks: setting("HOLDBACK_LOOKAHEAD_WEEKS", 3),
+    toleranceAWeeks: setting("HOLDBACK_TOLERANCE_A_WEEKS", 1),
+    toleranceOtherWeeks: setting("HOLDBACK_TOLERANCE_OTHER_WEEKS", 3),
+  };
+  // PROACTIVE URGENCY BOOST config - kept well below neglectedBonus (50000)
+  // and classification A (10000000) so it only ever nudges a POS up against
+  // OTHER non-neglected candidates as its own deadline approaches, never
+  // overriding the existing hard priority tiers - see computeUrgencyBoost()
+  // above.
+  const URGENCY_BOOST_MAX = setting("URGENCY_BOOST_MAX", 20000);
+  const URGENCY_BOOST_RAMP_START = setting("URGENCY_BOOST_RAMP_START_RATIO", 0.5);
+
+  // ACTIVITY_PLAN rows reshaped for campaignStartsWithin()/shouldHoldBack() -
+  // distinct from the los[]/lot[] week-expanded maps above (those answer
+  // "what campaign is active in week X", this answers "does any campaign
+  // START within the next N weeks").
+  let activityPlanWindows: ActivityPlanWindow[] = [];
+  for (let i = 1; i < activity.length; i++) {
+    const row = activity[i];
+    if (!row[0]) {
+      continue;
+    }
+    activityPlanWindows.push({
+      activityType: norm(String(row[0])),
+      activity: String(row[1]),
+      startWeek: Number(row[2]),
+      endWeek: Number(row[3]),
+    });
+  }
 
   // PLAN LIFECYCLE: a week that has been Published/Active/Closed is locked -
   // Planning Engine must never regenerate or overwrite its rows (this is
@@ -809,6 +954,9 @@ function main(workbook: ExcelScript.Workbook) {
     if (String(r[midx("status")]) != "Active") {
       continue; // Closed POS are never candidates (docs/BUSINESS_RULES.md section 2)
     }
+    if (blacklistedPos.has(String(r[midx("posId")]))) {
+      continue; // BLACKLIST always wins - never even enters the pool
+    }
 
     const overrideType = norm(String(r[midx("managerOverrideType")] ?? ""));
     if (overrideType == "FORCE_EXCLUDE") {
@@ -888,6 +1036,20 @@ function main(workbook: ExcelScript.Workbook) {
       }
     }
 
+    // deadlineWeeks (Smart Hold-back / urgency boost, product owner 2026-07-09):
+    // the item's own matched RECURRING+HARD cadence rule's maxIntervalWeeks
+    // (whether or not it is overdue yet), else the global neglected-POS
+    // threshold - matches isOverdueForCadenceRule's own definition of
+    // "overdue" so the two mechanisms agree on what "the deadline" means.
+    let matchedHardRule: CadenceRule | null = null;
+    for (const rr of recurringHardRules) {
+      if (matchesCadenceRuleScope(rr, norm(category), norm(item.market))) {
+        matchedHardRule = rr;
+        break;
+      }
+    }
+    item.deadlineWeeks = matchedHardRule?.maxIntervalWeeks ?? NEGLECTED_AFTER;
+
     // NEW CAMPAIGN OVERRIDE min-gap exception from V10.5.5 is deferred - see
     // docs/BACKLOG.md (needs Compliance Engine's currentLosActivity/
     // currentLotActivity comparison, which is a separate, already-tracked gap).
@@ -925,6 +1087,22 @@ function main(workbook: ExcelScript.Workbook) {
     if (eliminated.length > 0) {
       const eliminatedIds = new Set(eliminated.map((p) => p.pos));
       groups[tech] = groups[tech].filter((p) => !eliminatedIds.has(p.pos));
+    }
+  }
+
+  // PROACTIVE URGENCY BOOST (see computeUrgencyBoost's comment above) - run
+  // BEFORE the geo cluster bonus pass, so a boosted item's real value is what
+  // its neighbors' cluster bonus is computed from (same ordering rule as
+  // geo cluster bonus itself: bonuses are additive passes over an already-
+  // final base score, never chained off each other).
+  for (const tech of Object.keys(groups)) {
+    for (const item of groups[tech]) {
+      item.score += computeUrgencyBoost(
+        item.weeksSinceLastVisit,
+        item.deadlineWeeks,
+        URGENCY_BOOST_MAX,
+        URGENCY_BOOST_RAMP_START
+      );
     }
   }
 
@@ -980,7 +1158,24 @@ function main(workbook: ExcelScript.Workbook) {
         continue; // technician has zero capacity this week - skip cleanly
       }
 
-      const available = groups[tech].filter((p) => !used.includes(p));
+      // SMART HOLD-BACK (product owner, 2026-07-09, "Kriticke"): non-mandatory
+      // candidates whose own hard deadline can comfortably absorb an elastic,
+      // classification-tiered wait for an imminent campaign are removed from
+      // THIS week's pool entirely (not merely soft-deprioritized, unlike the
+      // pre-existing campaignChangeSoon()/holdPremium tie-break in
+      // selectWeekPOS below - both are kept, see ActivityPlanWindow's comment
+      // in the SYNC-BLOCK above for why). Mandatory items are never held back
+      // - a hard guarantee is not up for deferral once it applies. Capacity
+      // freed here cascades to whatever else is competing this week
+      // automatically, since `available` simply has fewer entries.
+      const available = groups[tech].filter(
+        (p) =>
+          !used.includes(p) &&
+          !(
+            !p.mandatoryRuleId &&
+            shouldHoldBack(p.classification, p.weeksSinceLastVisit, p.deadlineWeeks, activityPlanWindows, week, HOLDBACK_CONFIG)
+          )
+      );
       const holdPremium = campaignChangeSoon(week);
       const baseSelection = selectWeekPOS(available, capacity, allHardRules, holdPremium);
       const preGpsIds = new Set(baseSelection.map((p) => p.pos));

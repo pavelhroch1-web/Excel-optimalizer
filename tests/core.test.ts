@@ -28,6 +28,9 @@ import {
   computeVolumeTrend,
   findPublishedPlanDrift,
   findUnplannedActivePOS,
+  campaignStartsWithin,
+  shouldHoldBack,
+  computeUrgencyBoost,
 } from "../office-scripts/shared/core";
 
 let passed = 0;
@@ -65,6 +68,7 @@ function makeItem(overrides: Partial<POSItem>): POSItem {
     forceInclude: false,
     core: false,
     mandatoryRuleId: null,
+    deadlineWeeks: null,
     premium: false,
     score: 0,
     reason: "",
@@ -895,6 +899,89 @@ test("returns nothing when every Active POS has been planned at some point", () 
 });
 test("empty input returns empty output, no crash", () => {
   assert.deepStrictEqual(findUnplannedActivePOS([], new Set()), []);
+});
+
+// ==========================================================================
+console.log("campaignStartsWithin()");
+// ==========================================================================
+
+test("finds a campaign starting within the lookahead window", () => {
+  const plan = [{ activityType: "LOS", activity: "Gems", startWeek: 33, endWeek: 37 }];
+  assert.strictEqual(campaignStartsWithin(plan, 31, 3), true); // 33 is within (31, 34]
+});
+test("a campaign starting exactly at the lookahead boundary counts", () => {
+  const plan = [{ activityType: "LOS", activity: "Gems", startWeek: 34, endWeek: 37 }];
+  assert.strictEqual(campaignStartsWithin(plan, 31, 3), true);
+});
+test("a campaign starting just beyond the lookahead window does not count", () => {
+  const plan = [{ activityType: "LOS", activity: "Gems", startWeek: 35, endWeek: 37 }];
+  assert.strictEqual(campaignStartsWithin(plan, 31, 3), false);
+});
+test("a campaign already running (started at or before `week`) does not count", () => {
+  const plan = [{ activityType: "LOS", activity: "Gems", startWeek: 31, endWeek: 37 }];
+  assert.strictEqual(campaignStartsWithin(plan, 31, 3), false);
+});
+test("empty activity plan returns false, no crash", () => {
+  assert.strictEqual(campaignStartsWithin([], 31, 3), false);
+});
+
+// ==========================================================================
+console.log("shouldHoldBack()");
+// ==========================================================================
+
+const holdBackConfig = { lookaheadWeeks: 3, toleranceAWeeks: 1, toleranceOtherWeeks: 3 };
+
+test("classification A defers only for a campaign within 1 week (its own tolerance)", () => {
+  const planIn1Week = [{ activityType: "LOS", activity: "X", startWeek: 32, endWeek: 36 }];
+  assert.strictEqual(shouldHoldBack("A", 2, 4, planIn1Week, 31, holdBackConfig), true);
+});
+test("classification A does NOT defer for a campaign 2 weeks out (beyond its 1-week tolerance)", () => {
+  const planIn2Weeks = [{ activityType: "LOS", activity: "X", startWeek: 33, endWeek: 36 }];
+  assert.strictEqual(shouldHoldBack("A", 2, 4, planIn2Weeks, 31, holdBackConfig), false);
+});
+test("classification B/C can defer up to 3 weeks out", () => {
+  const planIn3Weeks = [{ activityType: "LOS", activity: "X", startWeek: 34, endWeek: 36 }];
+  assert.strictEqual(shouldHoldBack("B", 1, 10, planIn3Weeks, 31, holdBackConfig), true);
+});
+test("NEVER defers if it would breach the item's own hard deadline", () => {
+  // deadlineWeeks=4, weeksSinceLastVisit=3, lookahead=1 -> 3+1=4, NOT < 4 - must go now.
+  const planIn1Week = [{ activityType: "LOS", activity: "X", startWeek: 32, endWeek: 36 }];
+  assert.strictEqual(shouldHoldBack("A", 3, 4, planIn1Week, 31, holdBackConfig), false);
+});
+test("never defers unknown history (null weeksSinceLastVisit) - already maximally urgent", () => {
+  const planIn1Week = [{ activityType: "LOS", activity: "X", startWeek: 32, endWeek: 36 }];
+  assert.strictEqual(shouldHoldBack("A", null, 4, planIn1Week, 31, holdBackConfig), false);
+});
+test("never defers a POS with no deadline at all (deadlineWeeks null)", () => {
+  const planIn1Week = [{ activityType: "LOS", activity: "X", startWeek: 32, endWeek: 36 }];
+  assert.strictEqual(shouldHoldBack("A", 2, null, planIn1Week, 31, holdBackConfig), false);
+});
+test("no upcoming campaign at all - no hold-back", () => {
+  assert.strictEqual(shouldHoldBack("A", 2, 4, [], 31, holdBackConfig), false);
+});
+
+// ==========================================================================
+console.log("computeUrgencyBoost()");
+// ==========================================================================
+
+test("no boost before the ramp starts (below rampStartRatio)", () => {
+  assert.strictEqual(computeUrgencyBoost(1, 4, 1000, 0.5), 0); // 1/4=0.25 < 0.5
+});
+test("full boost exactly at the deadline", () => {
+  assert.strictEqual(computeUrgencyBoost(4, 4, 1000, 0.5), 1000);
+});
+test("half boost halfway through the ramp", () => {
+  // ratio=0.75 -> (0.75-0.5)/(1-0.5) = 0.5 -> half of maxBoost
+  assert.strictEqual(computeUrgencyBoost(3, 4, 1000, 0.5), 500);
+});
+test("boost is capped at maxBoost even if weeksSinceLastVisit exceeds deadlineWeeks", () => {
+  assert.strictEqual(computeUrgencyBoost(10, 4, 1000, 0.5), 1000);
+});
+test("no boost for unknown history (null)", () => {
+  assert.strictEqual(computeUrgencyBoost(null, 4, 1000, 0.5), 0);
+});
+test("no boost when there is no deadline at all", () => {
+  assert.strictEqual(computeUrgencyBoost(3, null, 1000, 0.5), 0);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

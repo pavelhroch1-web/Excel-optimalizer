@@ -11,12 +11,14 @@ from __future__ import annotations
 import sys
 
 from core_logic import (
+    ActivityPlanWindow,
     ActualWeek,
     CadenceRule,
     ComplianceOutcome,
     DriftAlert,
     GeoClusterConfig,
     GpsBonusConfig,
+    HoldBackConfig,
     NeglectCandidate,
     OpenPlanRow,
     POSCurrentState,
@@ -27,10 +29,12 @@ from core_logic import (
     add_gps_bonus,
     advance_lifecycle_status,
     apply_premium_tier,
+    campaign_starts_within,
     category_rule,
     compute_failure_rate_by_group,
     compute_geo_cluster_bonus,
     compute_score,
+    compute_urgency_boost,
     compute_volume_trend,
     determine_compliance_status,
     distance_km,
@@ -45,6 +49,7 @@ from core_logic import (
     pick_mandatory,
     resolve_capacity,
     select_week_pos,
+    should_hold_back,
 )
 
 passed = 0
@@ -412,6 +417,49 @@ check("findUnplannedActivePOS: finds Active POS absent from ever-planned set",
 check("findUnplannedActivePOS: empty when every Active POS was planned",
       find_unplanned_active_pos(["POS1", "POS2"], {"POS1", "POS2"}) == [])
 check("findUnplannedActivePOS: empty input returns empty output", find_unplanned_active_pos([], set()) == [])
+
+# --- campaignStartsWithin ---
+_plan_w33 = [ActivityPlanWindow(activityType="LOS", activity="Gems", startWeek=33, endWeek=36)]
+check("campaignStartsWithin: finds a campaign starting within the lookahead window",
+      campaign_starts_within(_plan_w33, 31, 3) is True)
+check("campaignStartsWithin: a campaign starting exactly at the lookahead boundary counts",
+      campaign_starts_within(_plan_w33, 30, 3) is True)
+check("campaignStartsWithin: a campaign starting just beyond the lookahead window does not count",
+      campaign_starts_within(_plan_w33, 29, 3) is False)
+check("campaignStartsWithin: a campaign already running does not count",
+      campaign_starts_within(_plan_w33, 33, 3) is False)
+check("campaignStartsWithin: empty activity plan returns false", campaign_starts_within([], 31, 3) is False)
+
+# --- shouldHoldBack ---
+_hb_config = HoldBackConfig(lookaheadWeeks=3, toleranceAWeeks=1, toleranceOtherWeeks=3)
+check("shouldHoldBack: classification A defers only for a campaign within 1 week",
+      should_hold_back("A", 1, 5, [ActivityPlanWindow(activityType="LOS", activity="X", startWeek=32, endWeek=35)], 31, _hb_config) is True)
+check("shouldHoldBack: classification A does NOT defer for a campaign 2 weeks out",
+      should_hold_back("A", 1, 5, [ActivityPlanWindow(activityType="LOS", activity="X", startWeek=33, endWeek=35)], 31, _hb_config) is False)
+check("shouldHoldBack: classification B/C can defer up to 3 weeks out",
+      should_hold_back("B", 1, 5, [ActivityPlanWindow(activityType="LOS", activity="X", startWeek=34, endWeek=35)], 31, _hb_config) is True)
+check("shouldHoldBack: NEVER defers if it would breach the item's own hard deadline",
+      should_hold_back("B", 3, 5, [ActivityPlanWindow(activityType="LOS", activity="X", startWeek=33, endWeek=35)], 31, _hb_config) is False)
+check("shouldHoldBack: never defers unknown history (None)",
+      should_hold_back("B", None, 5, [ActivityPlanWindow(activityType="LOS", activity="X", startWeek=32, endWeek=35)], 31, _hb_config) is False)
+check("shouldHoldBack: never defers a POS with no deadline at all",
+      should_hold_back("B", 1, None, [ActivityPlanWindow(activityType="LOS", activity="X", startWeek=32, endWeek=35)], 31, _hb_config) is False)
+check("shouldHoldBack: no upcoming campaign at all - no hold-back",
+      should_hold_back("B", 1, 5, [], 31, _hb_config) is False)
+
+# --- computeUrgencyBoost ---
+check("computeUrgencyBoost: no boost before the ramp starts",
+      compute_urgency_boost(1, 10, 1000, 0.5) == 0)
+check("computeUrgencyBoost: full boost exactly at the deadline",
+      compute_urgency_boost(10, 10, 1000, 0.5) == 1000)
+check("computeUrgencyBoost: half boost halfway through the ramp",
+      compute_urgency_boost(7.5, 10, 1000, 0.5) == 500)
+check("computeUrgencyBoost: boost is capped at maxBoost even if weeksSinceLastVisit exceeds deadlineWeeks",
+      compute_urgency_boost(20, 10, 1000, 0.5) == 1000)
+check("computeUrgencyBoost: no boost for unknown history (None)",
+      compute_urgency_boost(None, 10, 1000, 0.5) == 0)
+check("computeUrgencyBoost: no boost when there is no deadline at all",
+      compute_urgency_boost(5, None, 1000, 0.5) == 0)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

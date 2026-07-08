@@ -37,6 +37,7 @@ export interface POSItem {
   forceInclude: boolean;
   core: boolean;
   mandatoryRuleId: string | null;
+  deadlineWeeks: number | null;
   premium: boolean;
   score: number;
   reason: string;
@@ -201,6 +202,106 @@ export function isOverdueForCadenceRule(rule: CadenceRule, weeksSinceLastVisit: 
     rule.maxIntervalWeeks != null &&
     (weeksSinceLastVisit === null || weeksSinceLastVisit >= rule.maxIntervalWeeks)
   );
+}
+
+// ============================================================================
+// SMART HOLD-BACK (product owner, 2026-07-09) - a POS that would otherwise
+// be visited THIS week can instead be deferred to align with a NEW campaign
+// starting soon in ACTIVITY_PLAN, so a technician doesn't visit the same POS
+// twice within ~2 weeks (once now, once again right as the new campaign
+// needs attention). Distinct from the existing campaignChangeSoon()/
+// holdPremium mechanism in PlanningEngine.ts (a narrower, single-week-window
+// tie-break inside selectWeekPOS's own sort) - this is a stronger, pre-
+// selection removal from the candidate pool, with an explicit per-
+// classification tolerance and a hard safety limit that campaignChangeSoon
+// does not have. Both mechanisms are kept, not merged, to avoid touching an
+// already-working narrower heuristic.
+// ============================================================================
+
+export interface ActivityPlanWindow {
+  activityType: string; // "LOS" | "LOT"
+  activity: string;
+  startWeek: number;
+  endWeek: number;
+}
+
+// True if any ACTIVITY_PLAN campaign STARTS strictly after `week` and at or
+// before `week + lookaheadWeeks` - a new campaign is about to begin within
+// the lookahead horizon (a campaign already running as of `week` itself
+// does not count - that's not a hold-back trigger, it already started).
+export function campaignStartsWithin(
+  activityPlan: ActivityPlanWindow[],
+  week: number,
+  lookaheadWeeks: number
+): boolean {
+  return activityPlan.some((a) => a.startWeek > week && a.startWeek <= week + lookaheadWeeks);
+}
+
+export interface HoldBackConfig {
+  lookaheadWeeks: number; // widest possible lookahead, e.g. 3
+  toleranceAWeeks: number; // max defer for classification A, e.g. 1
+  toleranceOtherWeeks: number; // max defer for everything else, e.g. 3
+}
+
+// Decides whether `item` (otherwise eligible to be visited THIS week) should
+// instead be held back. Deliberately conservative: never defers a POS with
+// unknown history (weeksSinceLastVisit === null - already maximally urgent
+// by convention elsewhere, e.g. isOverdueForCadenceRule), and never defers
+// past its own deadline (deadlineWeeks - the matched cadence rule's
+// maxIntervalWeeks if any, else the caller-supplied neglected-POS
+// threshold) - the absolute limit always wins over any hold-back.
+export function shouldHoldBack(
+  classification: string,
+  weeksSinceLastVisit: number | null,
+  deadlineWeeks: number | null,
+  activityPlan: ActivityPlanWindow[],
+  week: number,
+  config: HoldBackConfig
+): boolean {
+  if (weeksSinceLastVisit === null || deadlineWeeks === null || deadlineWeeks <= 0) {
+    return false;
+  }
+  const tolerance = classification == "A" ? config.toleranceAWeeks : config.toleranceOtherWeeks;
+  const lookahead = Math.min(tolerance, config.lookaheadWeeks);
+  if (lookahead <= 0) {
+    return false;
+  }
+  if (!campaignStartsWithin(activityPlan, week, lookahead)) {
+    return false;
+  }
+  return weeksSinceLastVisit + lookahead < deadlineWeeks;
+}
+
+// ============================================================================
+// PROACTIVE URGENCY BOOST (product owner, 2026-07-09) - a smooth score ramp
+// as a POS approaches its own deadline (deadlineWeeks - same meaning as
+// shouldHoldBack's parameter), so it isn't starved out of selection by a
+// surge of campaign-driven candidates in the weeks just before it would
+// otherwise become HARD-mandatory. Deliberately smooth (not a step function
+// like the existing NEGLECTED_AFTER_WEEKS bonus in computeScore) - starts
+// ramping at rampStartRatio (e.g. 0.5 = halfway to the deadline) up to
+// maxBoost right at the deadline itself. Applied as a SEPARATE additive pass
+// (like computeGeoClusterBonus), not folded into computeScore, so it never
+// changes computeScore's own tested contract.
+// ============================================================================
+
+export function computeUrgencyBoost(
+  weeksSinceLastVisit: number | null,
+  deadlineWeeks: number | null,
+  maxBoost: number,
+  rampStartRatio: number
+): number {
+  if (weeksSinceLastVisit === null || deadlineWeeks === null || deadlineWeeks <= 0) {
+    return 0;
+  }
+  const ratio = Math.min(1, weeksSinceLastVisit / deadlineWeeks);
+  if (ratio < rampStartRatio) {
+    return 0;
+  }
+  if (rampStartRatio >= 1) {
+    return maxBoost;
+  }
+  return maxBoost * ((ratio - rampStartRatio) / (1 - rampStartRatio));
 }
 
 export function pickMandatory(list: POSItem[], mandatoryRules: CadenceRule[]): POSItem[] {

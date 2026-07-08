@@ -76,6 +76,11 @@ def main(ref_path, out_path):
     control_ws.append(["GEO_CLUSTER_RADIUS_KM", 3, "Confirmed (product owner, 2026-07-06): PlanningEngine.ts's geo cluster bonus - a candidate POS within this radius of another valuable candidate for the same technician gets a small score bonus (see GEO_CLUSTER_BONUS_FACTOR/GEO_CLUSTER_MAX_BONUS), nudging selection toward tighter daily routes without overriding value as the primary driver."])
     control_ws.append(["GEO_CLUSTER_BONUS_FACTOR", 0.01, "Confirmed (product owner, 2026-07-06): fraction of a nearby neighbor's own score added as this candidate's geo cluster bonus (1% by default)."])
     control_ws.append(["GEO_CLUSTER_MAX_BONUS", 5000, "Confirmed (product owner, 2026-07-06): cap on the total geo cluster bonus a single candidate can accumulate - kept well below the smallest meaningful score tier (NEGLECTED_BONUS=50000) so this can only break near-ties, never outweigh being CORE/classification A/neglected."])
+    control_ws.append(["HOLDBACK_LOOKAHEAD_WEEKS", 3, "Confirmed (product owner, 2026-07-09, 'Kriticke'): Smart Hold-back's widest possible elastic lookahead - a non-mandatory POS is only ever considered for deferral if an ACTIVITY_PLAN campaign starts within this many weeks."])
+    control_ws.append(["HOLDBACK_TOLERANCE_A_WEEKS", 1, "Confirmed (product owner, 2026-07-09): classification A POS can only be held back for a campaign starting within 1 week (capped further by HOLDBACK_LOOKAHEAD_WEEKS)."])
+    control_ws.append(["HOLDBACK_TOLERANCE_OTHER_WEEKS", 3, "Confirmed (product owner, 2026-07-09): classification B/C POS can be held back for a campaign starting up to this many weeks out (capped by HOLDBACK_LOOKAHEAD_WEEKS). Smart Hold-back never defers past a POS's own hard deadline (its matched CADENCE_RULES maxIntervalWeeks, else NEGLECTED_AFTER_WEEKS) regardless of this tolerance - see shouldHoldBack() in office-scripts/shared/core.ts."])
+    control_ws.append(["URGENCY_BOOST_MAX", 20000, "Confirmed (product owner, 2026-07-09): max score boost computeUrgencyBoost() adds to a POS as it approaches its own deadline (deadlineWeeks), so it isn't starved out of selection by a campaign-driven surge. Kept well below NEGLECTED_BONUS (50000) and classification A (10000000) - only nudges among non-neglected candidates, never overrides the existing hard priority tiers."])
+    control_ws.append(["URGENCY_BOOST_RAMP_START_RATIO", 0.5, "Confirmed (product owner, 2026-07-09): computeUrgencyBoost() starts ramping once weeksSinceLastVisit reaches this fraction of the POS's own deadline (0.5 = halfway), reaching URGENCY_BOOST_MAX exactly at the deadline. A smooth ramp, not a step function - see computeUrgencyBoost()'s own comment."])
 
     # CATEGORY_RULES: copy reference rows + add explicit confirmed default row
     cat_ws = src_wb["CATEGORY_RULES"]
@@ -96,6 +101,16 @@ def main(ref_path, out_path):
             ["PETROL", "YES"],
             ["CORN", "YES"],
         ],
+    )
+
+    # BLACKLIST (product owner, 2026-07-09): manual paste-list of POS IDs
+    # Planning Engine must ignore completely, regardless of any other data -
+    # a dedicated quick-scan list, distinct from POS_MASTER's per-row
+    # managerOverrideType=FORCE_EXCLUDE dropdown.
+    write_table(
+        dst_wb, "BLACKLIST",
+        ["POS", "NOTES"],
+        [],
     )
 
     # CADENCE_RULES (unifies CORE / Mandatory / GECO / CORN)

@@ -78,6 +78,7 @@ class POSItem:
     forceInclude: bool
     core: bool
     mandatoryRuleId: Optional[str]
+    deadlineWeeks: Optional[float] = None
     premium: bool = False
     score: float = 0.0
     reason: str = ""
@@ -171,6 +172,69 @@ def is_overdue_for_cadence_rule(rule: CadenceRule, weeks_since_last_visit: Optio
     return rule.maxIntervalWeeks is not None and (
         weeks_since_last_visit is None or weeks_since_last_visit >= rule.maxIntervalWeeks
     )
+
+
+@dataclass
+class ActivityPlanWindow:
+    activityType: str  # "LOS" | "LOT"
+    activity: str
+    startWeek: float
+    endWeek: float
+
+
+def campaign_starts_within(activity_plan: list[ActivityPlanWindow], week: float, lookahead_weeks: float) -> bool:
+    """Port of core.ts's campaignStartsWithin() - True if any ACTIVITY_PLAN
+    campaign STARTS strictly after `week` and at or before
+    `week + lookaheadWeeks`."""
+    return any(a.startWeek > week and a.startWeek <= week + lookahead_weeks for a in activity_plan)
+
+
+@dataclass
+class HoldBackConfig:
+    lookaheadWeeks: float
+    toleranceAWeeks: float
+    toleranceOtherWeeks: float
+
+
+def should_hold_back(
+    classification: str,
+    weeks_since_last_visit: Optional[float],
+    deadline_weeks: Optional[float],
+    activity_plan: list[ActivityPlanWindow],
+    week: float,
+    config: HoldBackConfig,
+) -> bool:
+    """Port of core.ts's shouldHoldBack() - see its own comment there for the
+    conservative safety guarantees (never defers unknown history, never
+    defers past the item's own deadline)."""
+    if weeks_since_last_visit is None or deadline_weeks is None or deadline_weeks <= 0:
+        return False
+    tolerance = config.toleranceAWeeks if classification == "A" else config.toleranceOtherWeeks
+    lookahead = min(tolerance, config.lookaheadWeeks)
+    if lookahead <= 0:
+        return False
+    if not campaign_starts_within(activity_plan, week, lookahead):
+        return False
+    return weeks_since_last_visit + lookahead < deadline_weeks
+
+
+def compute_urgency_boost(
+    weeks_since_last_visit: Optional[float],
+    deadline_weeks: Optional[float],
+    max_boost: float,
+    ramp_start_ratio: float,
+) -> float:
+    """Port of core.ts's computeUrgencyBoost() - smooth linear ramp toward
+    maxBoost as weeksSinceLastVisit approaches deadlineWeeks, starting at
+    rampStartRatio."""
+    if weeks_since_last_visit is None or deadline_weeks is None or deadline_weeks <= 0:
+        return 0.0
+    ratio = min(1.0, weeks_since_last_visit / deadline_weeks)
+    if ratio < ramp_start_ratio:
+        return 0.0
+    if ramp_start_ratio >= 1:
+        return max_boost
+    return max_boost * ((ratio - ramp_start_ratio) / (1 - ramp_start_ratio))
 
 
 def pick_mandatory(items: list[POSItem], mandatory_rules: list[CadenceRule]) -> list[POSItem]:

@@ -15,16 +15,20 @@ import datetime
 from typing import Optional
 
 from .core_logic import (
+    ActivityPlanWindow,
     CadenceRule,
     GeoClusterConfig,
     GpsBonusConfig,
+    HoldBackConfig,
     POSItem,
     ScoreWeights,
     add_gps_bonus,
     apply_premium_tier,
+    campaign_starts_within,
     category_rule,
     compute_geo_cluster_bonus,
     compute_score,
+    compute_urgency_boost,
     geo_days,
     iso_week_number,
     is_overdue_for_cadence_rule,
@@ -33,6 +37,7 @@ from .core_logic import (
     pick_mandatory,
     resolve_capacity,
     select_week_pos,
+    should_hold_back,
     WorkDay,
 )
 from .dates_logic import to_cs_cz_date_string, work_days
@@ -58,6 +63,13 @@ def run(workbook: MockWorkbook) -> str:
     capacity_override = read_table("CAPACITY_OVERRIDE")
     plan_lifecycle = read_table("PLAN_LIFECYCLE")
     existing_manager_plan = read_table("MANAGER_PLAN")
+    # BLACKLIST (product owner, 2026-07-09) - see PlanningEngine.ts's matching comment.
+    blacklist_raw = read_table("BLACKLIST")
+    blacklisted_pos: set[str] = set()
+    for i in range(1, len(blacklist_raw)):
+        pos_id = _s(_at(blacklist_raw[i], 0)).strip()
+        if pos_id:
+            blacklisted_pos.add(pos_id)
 
     out_ws = workbook.get_worksheet("MANAGER_PLAN")
 
@@ -82,13 +94,23 @@ def run(workbook: MockWorkbook) -> str:
                 return None if v != v else v  # isNaN(v) ? None : v
         return None
 
-    # Dynamic "current week" (product owner, 2026-07-08: no more manually
-    # rewriting the start week in CONTROL) - defaults to TODAY's real ISO
-    # week/year whenever the CONTROL row is blank; an explicit CONTROL value
-    # still wins if present. See PlanningEngine.ts's matching comment.
+    # Dynamic "current week" (product owner, 2026-07-08/09) - default chain:
+    # explicit CONTROL override, else one past the highest WEEK already in
+    # MANAGER_PLAN ("resume where the last run left off"), else TODAY's real
+    # ISO week (first-ever run only). See PlanningEngine.ts's matching comment.
     now_iso_week, now_iso_year = iso_week_number(datetime.date.today())
+    last_planned_week = 0
+    for i in range(1, len(existing_manager_plan)):
+        w = _js_number(_at(existing_manager_plan[i], 0))
+        if w == w and w > last_planned_week:  # w == w is False only for NaN
+            last_planned_week = w
     start_week_opt = setting_optional("CAMPAIGN_START_WEEK")
-    START_WEEK = int(start_week_opt) if start_week_opt is not None else now_iso_week
+    if start_week_opt is not None:
+        START_WEEK = int(start_week_opt)
+    elif last_planned_week > 0:
+        START_WEEK = int(last_planned_week) + 1
+    else:
+        START_WEEK = now_iso_week
     CAMPAIGN_LENGTH = int(setting("CAMPAIGN_LENGTH", 4))
     TARGET_DAY = setting("TARGET_VISITS_DAY", 8)
     # Optional flat weekly capacity target - see resolve_capacity()'s
@@ -112,6 +134,15 @@ def run(workbook: MockWorkbook) -> str:
         bonusFactor=setting("GEO_CLUSTER_BONUS_FACTOR", 0.01),
         maxBonus=setting("GEO_CLUSTER_MAX_BONUS", 5000),
     )
+    # SMART HOLD-BACK config (product owner, 2026-07-09, "Kriticke") - see
+    # office-scripts/PlanningEngine.ts's identical comment.
+    HOLDBACK_CONFIG = HoldBackConfig(
+        lookaheadWeeks=setting("HOLDBACK_LOOKAHEAD_WEEKS", 3),
+        toleranceAWeeks=setting("HOLDBACK_TOLERANCE_A_WEEKS", 1),
+        toleranceOtherWeeks=setting("HOLDBACK_TOLERANCE_OTHER_WEEKS", 3),
+    )
+    URGENCY_BOOST_MAX = setting("URGENCY_BOOST_MAX", 20000)
+    URGENCY_BOOST_RAMP_START = setting("URGENCY_BOOST_RAMP_START_RATIO", 0.5)
 
     # PLAN LIFECYCLE: locked weeks (Published/Active/Closed) are never
     # regenerated - see PlanningEngine.ts's identical comment.
@@ -255,6 +286,20 @@ def run(workbook: MockWorkbook) -> str:
                 return True
         return False
 
+    # ACTIVITY_PLAN rows reshaped for campaign_starts_within()/should_hold_back()
+    # - see office-scripts/PlanningEngine.ts's identical comment.
+    activity_plan_windows: list[ActivityPlanWindow] = []
+    for i in range(1, len(activity)):
+        row = activity[i]
+        if not _at(row, 0):
+            continue
+        activity_plan_windows.append(ActivityPlanWindow(
+            activityType=norm(_s(_at(row, 0))),
+            activity=_s(_at(row, 1)),
+            startWeek=_num(_at(row, 2)),
+            endWeek=_num(_at(row, 3)),
+        ))
+
     # ==========================================================================
     # BUILD CANDIDATE LIST FROM POS_MASTER
     # ==========================================================================
@@ -271,6 +316,8 @@ def run(workbook: MockWorkbook) -> str:
         if not _at(r, midx("posId")):
             continue
         if _s(_at(r, midx("status"))) != "Active":
+            continue
+        if _s(_at(r, midx("posId"))) in blacklisted_pos:
             continue
 
         override_type = norm(_s(_at(r, midx("managerOverrideType")) or ""))
@@ -331,6 +378,20 @@ def run(workbook: MockWorkbook) -> str:
                     item.mandatoryRuleId = rr.ruleId
                     break
 
+        # deadlineWeeks (Smart Hold-back / urgency boost) - the item's own
+        # matched RECURRING+HARD cadence rule's maxIntervalWeeks (whether or
+        # not it is overdue yet), else the global neglected-POS threshold -
+        # see office-scripts/PlanningEngine.ts's identical comment.
+        matched_hard_rule = next(
+            (rr for rr in recurring_hard_rules if matches_cadence_rule_scope(rr, norm(category), norm(item.market))),
+            None,
+        )
+        item.deadlineWeeks = (
+            matched_hard_rule.maxIntervalWeeks
+            if matched_hard_rule and matched_hard_rule.maxIntervalWeeks is not None
+            else NEGLECTED_AFTER
+        )
+
         if item.core and core_rule:
             min_gap = core_rule.minGapWeeks if core_rule.minGapWeeks is not None else 2
         else:
@@ -359,6 +420,16 @@ def run(workbook: MockWorkbook) -> str:
         eliminated_ids = {p.pos for p in mandatory_eligible if p.pos not in kept}
         if eliminated_ids:
             groups[tech] = [p for p in groups[tech] if p.pos not in eliminated_ids]
+
+    # PROACTIVE URGENCY BOOST - run BEFORE the geo cluster bonus pass, so a
+    # boosted item's real value is what its neighbors' cluster bonus is
+    # computed from - see office-scripts/PlanningEngine.ts's identical
+    # comment.
+    for tech in groups:
+        for item in groups[tech]:
+            item.score += compute_urgency_boost(
+                item.weeksSinceLastVisit, item.deadlineWeeks, URGENCY_BOOST_MAX, URGENCY_BOOST_RAMP_START
+            )
 
     # GEO CLUSTER BONUS - all bonuses computed from each item's BASE score
     # first, THEN applied, so a bonus never leaks into another item's bonus
@@ -399,8 +470,21 @@ def run(workbook: MockWorkbook) -> str:
             if capacity <= 0 or len(days) == 0:
                 continue
 
+            # SMART HOLD-BACK (product owner, 2026-07-09, "Kriticke") - see
+            # office-scripts/PlanningEngine.ts's identical comment. Mandatory
+            # items are never held back.
             used_ids = set(id(p) for p in used)
-            available = [p for p in groups[tech] if id(p) not in used_ids]
+            available = [
+                p
+                for p in groups[tech]
+                if id(p) not in used_ids
+                and not (
+                    not p.mandatoryRuleId
+                    and should_hold_back(
+                        p.classification, p.weeksSinceLastVisit, p.deadlineWeeks, activity_plan_windows, week, HOLDBACK_CONFIG
+                    )
+                )
+            ]
             hold_premium = campaign_change_soon(week)
             base_selection = select_week_pos(available, capacity, all_hard_rules, hold_premium)
             pre_gps_ids = set(p.pos for p in base_selection)

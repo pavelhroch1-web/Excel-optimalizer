@@ -79,6 +79,7 @@ SHEET_GROUPS = [
     ("CONTROL", "BF8F00"),
     ("MARKET_RULES", "BF8F00"),
     ("TERMINAL_RULES", "BF8F00"),
+    ("BLACKLIST", "C00000"),
     ("CATEGORY_RULES", "BF8F00"),
     ("CADENCE_RULES", "BF8F00"),
     ("PARETO_GROUPS", "BF8F00"),
@@ -157,6 +158,7 @@ EDITABLE_COLUMNS = {
     "ACTIVITY_PLAN": ["TYPE", "ACTIVITY", "START_WEEK", "END_WEEK", "PRIORITY", "OVERRIDE_GAP"],
     "TERMINAL_RULES": ["ACTIVE"],
     "MARKET_RULES": ["ACTIVE"],
+    "BLACKLIST": ["POS", "NOTES"],
     "CATEGORY_RULES": ["CATEGORY", "RULE"],
     "CADENCE_RULES": ["scope", "matchValue", "minGapWeeks", "maxIntervalWeeks", "intervalType",
                        "guaranteeType", "dedupBy", "campaignChangeOverride", "priority", "active",
@@ -246,6 +248,11 @@ IMPORT_HUB_GUIDANCE = {
         "Zapni/vypni Ano (YES)/Ne (NO), jaké typy terminálů se mají v dalším běhu Planning "
         "Engine vůbec uvažovat jako kandidáti na návštěvu. Změna se projeví hned při příštím "
         "spuštění Planning Engine, nic dalšího se nemusí nastavovat."
+    ),
+    "BLACKLIST": (
+        "Vlož sem POS ID provozoven, které chceš úplně vynechat z plánování, bez ohledu na "
+        "cokoliv jiného (skóre, kadenční pravidla, filtry). Stačí ID do sloupce POS - engine "
+        "je od dalšího běhu Planning Engine ignoruje úplně."
     ),
     # Core working screens don't get their own title-banner rows the way
     # HOME/DASHBOARD/IMPORT_HUB do - a banner row would push every real data
@@ -948,6 +955,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
         ("POS_MASTER", "POS_MASTER", "7030A0"),
         ("ACTIVITY_PLAN", "ACTIVITY_PLAN", "BF8F00"),
         ("TYPY TERMINÁLŮ", "TERMINAL_RULES", "BF8F00"),
+        ("BLACKLIST", "BLACKLIST", "C00000"),
     ]
     col_idx = 3
     for label, target, color in quick_links:
