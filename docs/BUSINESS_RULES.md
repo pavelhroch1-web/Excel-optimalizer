@@ -993,3 +993,56 @@ Python (`desktop_client/engines/test_core_logic.py`).
 are still empty in the real workbook (no SalesApp import has happened yet), so `EFFICIENCY`/
 `TECHNICIAN_PERFORMANCE_LOG`/`SUMMARY` will show "Zatím žádná data" until the first real import runs
 - this is expected, not a bug, and was verified via the synthetic seed above rather than real data.
+
+## 19. "Manažerské" triggery - podprůměrná návštěvnost, hodnotová hustota, délka návštěvy (2026-07-09)
+
+Product owner, explicitly stepping back from the programmer role to the Field Force team lead role:
+route efficiency alone ("KDO JEZDÍ CIK-CAK") is not enough - a technician can have a great route
+shape while under-visiting relative to peers, or visiting only low-value POS, and GPS-based route
+efficiency is only an estimate that "nemusí být na vinu". Three new signals added, all compared
+against the **network peer average the same week** (a plain average across whichever technicians
+have a bucket that week - deliberately simple, not a median; with ~27 technicians one outlier's own
+pull on the average it's being compared against is small):
+
+- **Návštěvnost (`volumeFlag`)**: `realizedVisits` vs. the network peer average AND the technician's
+  own trailing average (excluding the current week) - both requested explicitly ("obojí najednou"),
+  the flag uses whichever comparison is more severe. Catches a gap Compliance % cannot see: a
+  technician planned very little who hits 100% compliance while doing objectively less work than
+  peers.
+- **Hodnotová hustota (`pptDensityFlag`)**: PPT captured per realized visit (`pptPerVisit`) vs. peer
+  average - independent of route efficiency. "Hodně návštěv, ale jednoúčelové": a technician can have
+  a perfect route shape while visiting only low-value POS; this is the only signal that catches that.
+- **Délka návštěvy (`durationFlag`)**: average `Real duration (h)` from SalesApp
+  (`avgVisitDurationHours`) vs. peer average - a directly-measured signal (not a GPS estimate).
+  Required extending `ComplianceEngine.ts` to parse and carry a new `durationHours` column through
+  `VISIT_HISTORY_ACTUAL`/`OTHER_VISIT_LOG` into `COMPLIANCE_LOG.matchedActualDurationHours` (null,
+  never 0, when the SalesApp export doesn't carry the column or a row's value is non-numeric).
+
+All three follow the same WARNING/CRITICAL-below-a-percentage convention as route efficiency, but
+inverted (LOW is bad): `*_WARNING_PERCENT`=70, `*_CRITICAL_PERCENT`=50 (new `CONTROL` settings:
+`VOLUME_WARNING_PERCENT`/`VOLUME_CRITICAL_PERCENT`, `PPT_DENSITY_WARNING_PERCENT`/`_CRITICAL_PERCENT`,
+`DURATION_WARNING_PERCENT`/`_CRITICAL_PERCENT`), and use the SAME `FLAKANI_WINDOW_WEEKS` sustained
+long-run averaging as flaká riziko/route efficiency on `TECHNICIAN_PERFORMANCE_SUMMARY` (a single bad
+week is never enough on its own).
+
+**Kombinovaný signál (`combinedRiskFlag`)** - the product owner's explicit correction after reviewing
+the route-efficiency-only design: "GPS je odhad, takže to ani nemusí být na vinu". No single signal
+(including a KRITICKÉ route ratio) surfaces a technician as "problémový" on its own anymore. A new
+`PROBLEM_SIGNAL_MIN_COUNT` `CONTROL` setting (default 2) gates it: `combinedRiskFlag='Ano'` only when
+at least that many of {flaká riziko, `volumeFlag`, `pptDensityFlag`, `durationFlag`, `efficiencyFlag`}
+are simultaneously POZOR/KRITICKÉ. This is now what drives every automatic "problémový technik"
+surface - `EFFICIENCY`'s callout and sort order (worst = most corroborating signals, not worst route
+ratio), and HOME's renamed "KDO ZE MĚ DĚLÁ BLBCE" callout (was "KDO JEZDÍ CIK-CAK").
+
+Verified via a dedicated synthetic seed (`LOW_TECH`: 1 realized visit / low PPT / short duration
+against a 4-technician `NORMAL_TECH` peer baseline) producing `volumeFlag`/`pptDensityFlag`/
+`durationFlag` all KRITICKÉ, `activeSignalCount=3`, `combinedRiskFlag='Ano'` - byte-identical in both
+`PerformanceEngine.ts` and `performance_engine.py`. Also re-verified, using the existing
+`efficiency_synth_seed` (KRITICKÉ route ratio, otherwise clean), that a LONE efficiency signal
+produces `activeSignalCount=1` and `combinedRiskFlag='Ne'` - confirming Trigger C's "no single signal
+alone" requirement holds. Full 8-engine pipeline re-checked equivalent on the real 11,605-POS
+production dataset. Full test suites green: 133 TypeScript, 120 Python.
+
+`MANUAL` rewritten with new sections explaining the three triggers, the combined-signal gate as the
+primary thing to look at, and updated escalation guidance (1 signal = watch, `combinedRiskFlag='Ano'`
+= sit down with them, repeated `Ano` / high signal count = full performance conversation).

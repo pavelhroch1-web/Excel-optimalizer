@@ -807,25 +807,27 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     ])
     r += 3
 
-    # ---- "KDO JEZDÍ CIK-CAK" callout (product owner, 2026-07-09, "Monitoring
-    # efektivity" - vedoucí Field Force týmu: "chci se na dashboard jen
-    # podívat a hned vidět, kdo ze mě dělá blbce") - a DIFFERENT signal from
-    # "KDO JEZDÍ NEEFEKTIVNĚ" above (that one is raw km/day; this one is the
-    # actual-vs-optimal ROUTE SHAPE ratio - PerformanceEngine.ts's
-    # efficiencyFlag, sustained over the FLAKANI_WINDOW_WEEKS window, not a
-    # single bad day). Links to the new EFFICIENCY heatmap, same pattern as
-    # every other HOME callout.
-    ws.cell(r, 3, "KDO JEZDÍ CIK-CAK").font = SECTION_FONT
+    # ---- "KDO ZE MĚ DĚLÁ BLBCE" callout (product owner, 2026-07-09,
+    # "Monitoring efektivity" - vedoucí Field Force týmu: "chci se na
+    # dashboard jen podívat a hned vidět, kdo ze mě dělá blbce") - keyed off
+    # combinedRiskFlag (>= PROBLEM_SIGNAL_MIN_COUNT corroborating signals:
+    # návštěvnost, hodnota/návštěva, délka návštěvy, trasa, compliance), NOT
+    # off route efficiency alone - "GPS je odhad, takže to ani nemusí být na
+    # vinu" (product owner, 2026-07-09). Distinct from "KDO JEZDÍ
+    # NEEFEKTIVNĚ" above (that one is raw km/day, a single-day signal).
+    # Links to the new EFFICIENCY heatmap, same pattern as every other HOME
+    # callout.
+    ws.cell(r, 3, "KDO ZE MĚ DĚLÁ BLBCE").font = SECTION_FONT
     r += 1
     ws.merge_cells(f"C{r}:H{r+1}")
     zigzag_cell = ws.cell(r, 3)
     zigzag_cell.value = (
-        '=IFERROR(IF(COUNTIF(TECHNICIAN_PERFORMANCE_SUMMARY!$T:$T,"KRITICKÉ")=0,'
-        '"✅ Žádný technik nejezdí dlouhodobě cik-cak",'
-        '"🚩 "&COUNTIF(TECHNICIAN_PERFORMANCE_SUMMARY!$T:$T,"KRITICKÉ")&'
-        '" technik(ů) KRITICKY neefektivních (nájezd/optimum): "&'
+        '=IFERROR(IF(COUNTIF(TECHNICIAN_PERFORMANCE_SUMMARY!$AC:$AC,"Ano")=0,'
+        '"✅ Žádný technik nemá aktuálně víc než jeden varovný signál najednou",'
+        '"🚩 "&COUNTIF(TECHNICIAN_PERFORMANCE_SUMMARY!$AC:$AC,"Ano")&'
+        '" technik(ů) s více souběžnými signály (návštěvnost/hodnota/délka/trasa): "&'
         'TEXTJOIN(", ",TRUE,FILTER(TECHNICIAN_PERFORMANCE_SUMMARY!$A:$A,'
-        'TECHNICIAN_PERFORMANCE_SUMMARY!$T:$T="KRITICKÉ"))),'
+        'TECHNICIAN_PERFORMANCE_SUMMARY!$AC:$AC="Ano"))),'
         '"Zatím žádná data")'
     )
     zigzag_cell.font = Font(bold=True, size=13, color=NAVY)
@@ -1576,18 +1578,23 @@ def build_efficiency_sheet(wb, n_rows=60):
     """EFFICIENCY: "Monitoring efektivity" (product owner, 2026-07-09,
     speaking as vedoucí Field Force týmu: "chci se na dashboard jen podívat
     a hned vidět, kdo ze mě dělá blbce") - technicians ranked automatically,
-    worst actual-vs-optimal route-km ratio first, so a manager never has to
-    sort anything themselves to find the outlier.
+    most corroborated problem signals first, so a manager never has to sort
+    anything themselves to find the outlier.
+
+    Sorted by activeSignalCount (product owner, 2026-07-09: "GPS je odhad,
+    takže to ani nemusí být na vinu" - a lone route-efficiency flag should
+    never rank someone at the top; a technician with several independent
+    signals corroborating each other is the real outlier), NOT by route
+    efficiency alone - see combinedRiskFlag's rationale in
+    PerformanceEngine.ts and docs/BUSINESS_RULES.md.
 
     Built as a single LET()+SORTBY()+FILTER() dynamic-array spill over
     TECHNICIAN_PERFORMANCE_SUMMARY (PerformanceEngine.ts's per-technician
-    snapshot, sorted DESCENDING by longRunAvgEfficiencyRatio - the sustained,
-    multi-week signal, not a single-week fluke) - deliberately NOT a native
-    Table like PERFORMANCE (that screen's own docstring explains why: Excel
-    does not allow a spilling array formula inside a Table's range). This
-    screen is meant to always already be sorted worst-first, not something a
-    manager filters/re-sorts themselves - a spill is the right tool here,
-    not a workaround.
+    snapshot) - deliberately NOT a native Table like PERFORMANCE (that
+    screen's own docstring explains why: Excel does not allow a spilling
+    array formula inside a Table's range). This screen is meant to always
+    already be sorted worst-first, not something a manager filters/re-sorts
+    themselves - a spill is the right tool here, not a workaround.
     """
     TS = "TECHNICIAN_PERFORMANCE_SUMMARY"
     if "EFFICIENCY" in wb.sheetnames:
@@ -1595,14 +1602,14 @@ def build_efficiency_sheet(wb, n_rows=60):
     ws = wb.create_sheet("EFFICIENCY")
     ws.sheet_view.showGridLines = False
     ws.sheet_view.showRowColHeaders = False
-    for col in "CDEFGHIJ":
-        ws.column_dimensions[col].width = 15
+    for col in "CDEFGHIJKLM":
+        ws.column_dimensions[col].width = 14
     build_nav_rail(ws, "EFFICIENCY")
 
     build_dashboard_banner(
         ws, "MONITORING EFEKTIVITY",
         "Kdo jezdí cik-cak a kdo pracuje - seřazeno automaticky, nejhorší nahoře",
-        col_start="C", col_end="J",
+        col_start="C", col_end="M",
     )
     ws.freeze_panes = "C11"
 
@@ -1611,13 +1618,13 @@ def build_efficiency_sheet(wb, n_rows=60):
     cards = [
         ("C", "D", "Průměrný poměr nájezd/optimum",
          f'=IFERROR(ROUND(AVERAGE({TS}!$Q$2:$Q$5000),0)&"%","-")', NAVY, WHITE),
-        ("E", "F", "Nejhorší technik (dlouhodobě)",
-         f'=IFERROR(INDEX({TS}!$A$2:$A$5000,MATCH(MAX({TS}!$S$2:$S$5000),{TS}!$S$2:$S$5000,0))'
-         f'&" ("&MAX({TS}!$S$2:$S$5000)&"%)","-")', STATUS_CRITICAL, dashboard_ui.TINT_CRITICAL),
-        ("G", "H", "Technik(ů) v KRITICKÉM stavu",
-         f'=COUNTIF({TS}!$T$2:$T$5000,"KRITICKÉ")', STATUS_CRITICAL, dashboard_ui.TINT_CRITICAL),
-        ("I", "J", "Technik(ů) v POZOR stavu",
-         f'=COUNTIF({TS}!$T$2:$T$5000,"POZOR")', STATUS_WARNING, dashboard_ui.TINT_WARNING),
+        ("E", "F", "Nejvíc signálů najednou",
+         f'=IFERROR(INDEX({TS}!$A$2:$A$5000,MATCH(MAX({TS}!$AB$2:$AB$5000),{TS}!$AB$2:$AB$5000,0))'
+         f'&" ("&MAX({TS}!$AB$2:$AB$5000)&")","-")', STATUS_CRITICAL, dashboard_ui.TINT_CRITICAL),
+        ("G", "H", "Technik(ů) - problémový (Ano)",
+         f'=COUNTIF({TS}!$AC$2:$AC$5000,"Ano")', STATUS_CRITICAL, dashboard_ui.TINT_CRITICAL),
+        ("I", "J", "Technik(ů) v KRITICKÉ trase",
+         f'=COUNTIF({TS}!$T$2:$T$5000,"KRITICKÉ")', STATUS_WARNING, dashboard_ui.TINT_WARNING),
     ]
     build_kpi_card_row(ws, cards, label_row=6, value_row_start=7, value_row_end=7)
     for c1, c2, label, formula, color, fill in cards:
@@ -1625,20 +1632,19 @@ def build_efficiency_sheet(wb, n_rows=60):
     ws.row_dimensions[7].height = 22
 
     # ---- Auto-surfaced "problémový technik" callout (product owner: "chci,
-    # aby mi to systém sám vystrčil jako problémového technika") - the same
-    # single-line-callout pattern as HOME's "KDO FLAKÁ"/"KDO JEZDÍ
-    # NEEFEKTIVNĚ", but keyed off the NEW ratio-based signal (efficiencyFlag
-    # == KRITICKÉ, longRunAvgEfficiencyRatio - sustained, not a fluke),
-    # distinct from HOME's existing raw-km-per-day callout. ----
+    # aby mi to systém sám vystrčil jako problémového technika"). Keyed off
+    # combinedRiskFlag (>= PROBLEM_SIGNAL_MIN_COUNT corroborating signals),
+    # NOT off route efficiency alone - "GPS je odhad, takže to ani nemusí
+    # být na vinu" (product owner, 2026-07-09). ----
     ws.cell(9, 3, "PROBLÉMOVÍ TECHNICI").font = SECTION_FONT
     r = 10
-    ws.merge_cells(f"C{r}:J{r+1}")
+    ws.merge_cells(f"C{r}:M{r+1}")
     flag_cell = ws.cell(r, 3)
     flag_cell.value = (
-        f'=IFERROR(IF(COUNTIF({TS}!$T:$T,"KRITICKÉ")=0,'
-        f'"✅ Žádný technik není aktuálně v kritickém stavu (nájezd/optimum)",'
-        f'"🚩 "&COUNTIF({TS}!$T:$T,"KRITICKÉ")&" technik(ů) KRITICKY neefektivních: "&'
-        f'TEXTJOIN(", ",TRUE,FILTER({TS}!$A:$A,{TS}!$T:$T="KRITICKÉ"))),'
+        f'=IFERROR(IF(COUNTIF({TS}!$AC:$AC,"Ano")=0,'
+        f'"✅ Žádný technik nemá aktuálně víc než jeden varovný signál najednou",'
+        f'"🚩 "&COUNTIF({TS}!$AC:$AC,"Ano")&" technik(ů) s více souběžnými signály: "&'
+        f'TEXTJOIN(", ",TRUE,FILTER({TS}!$A:$A,{TS}!$AC:$AC="Ano"))),'
         f'"Zatím žádná data")'
     )
     flag_cell.font = Font(bold=True, size=13, color=NAVY)
@@ -1652,15 +1658,17 @@ def build_efficiency_sheet(wb, n_rows=60):
     ])
 
     # ==========================================================================
-    # HEATMAP - one spill, sorted worst-first by longRunAvgEfficiencyRatio.
+    # HEATMAP - one spill, sorted worst-first by activeSignalCount (how many
+    # independent signals corroborate each other), not by any single metric.
     # ==========================================================================
     header_row = 13
-    build_section_header(ws, f"C{header_row - 1}", "TECHNICI SEŘAZENI OD NEJHORŠÍHO PO NEJLEPŠÍHO")
+    build_section_header(ws, f"C{header_row - 1}", "TECHNICI SEŘAZENI OD NEJVÍCE PROBLÉMOVÝCH")
     headers = [
-        "Technik", "Region", "Poměr nájezd/optimum (tento týden)", "Km na návštěvu",
-        "Dlouhodobý poměr (průměr)", "Km/den (nejhorší)", "Compliance %", "Stav",
+        "Technik", "Region", "Signálů", "Problémový?",
+        "Návštěvnost vs kolegové", "Hodnota/návštěva vs kolegové", "Délka návštěvy vs kolegové",
+        "Trasa vs optimum", "Km/den (nejhorší)", "Compliance %", "Trasa - stav",
     ]
-    for col, label in zip("CDEFGHIJ", headers):
+    for col, label in zip("CDEFGHIJKLM", headers):
         ws[f"{col}{header_row}"] = label
         ws[f"{col}{header_row}"].font = HEADER_FONT
         ws[f"{col}{header_row}"].fill = PatternFill("solid", fgColor=NAVY)
@@ -1669,62 +1677,81 @@ def build_efficiency_sheet(wb, n_rows=60):
 
     first_data_row = header_row + 1
     last_row = first_data_row + n_rows - 1
+    last_src_row = 1 + n_rows * 4
     spill_formula = (
         "=IFERROR(LET("
-        f"src,CHOOSE({{1,2,3,4,5,6,7,8}},"
-        f"{TS}!$A$2:$A${1 + n_rows * 4},{TS}!$B$2:$B${1 + n_rows * 4},"
-        f"{TS}!$Q$2:$Q${1 + n_rows * 4},{TS}!$R$2:$R${1 + n_rows * 4},"
-        f"{TS}!$S$2:$S${1 + n_rows * 4},{TS}!$P$2:$P${1 + n_rows * 4},"
-        f"{TS}!$K$2:$K${1 + n_rows * 4},{TS}!$T$2:$T${1 + n_rows * 4}),"
-        f"filtered,FILTER(src,{TS}!$A$2:$A${1 + n_rows * 4}<>\"\"),"
-        "SORTBY(filtered,INDEX(filtered,0,5),-1)"
+        f"src,CHOOSE({{1,2,3,4,5,6,7,8,9,10,11}},"
+        f"{TS}!$A$2:$A${last_src_row},{TS}!$B$2:$B${last_src_row},"
+        f"{TS}!$AB$2:$AB${last_src_row},{TS}!$AC$2:$AC${last_src_row},"
+        f"{TS}!$V$2:$V${last_src_row},{TS}!$X$2:$X${last_src_row},"
+        f"{TS}!$Z$2:$Z${last_src_row},{TS}!$S$2:$S${last_src_row},"
+        f"{TS}!$P$2:$P${last_src_row},{TS}!$K$2:$K${last_src_row},"
+        f"{TS}!$T$2:$T${last_src_row}),"
+        f"filtered,FILTER(src,{TS}!$A$2:$A${last_src_row}<>\"\"),"
+        "SORTBY(filtered,INDEX(filtered,0,3),-1,INDEX(filtered,0,8),-1)"
         '),"Zatím žádná data - spusť Performance Engine")'
     )
     ws[f"C{first_data_row}"] = spill_formula
-    for col in "CDEFGHIJ":
+    for col in "CDEFGHIJKLM":
         for r2 in range(first_data_row, last_row + 1):
             ws[f"{col}{r2}"].border = CARD_BORDER
             ws[f"{col}{r2}"].alignment = Alignment(horizontal="center", vertical="center")
     ws[f"C{first_data_row}"].alignment = Alignment(horizontal="center", vertical="center")
 
-    # Heatmap color scale on the two ratio columns (E = this week, G =
-    # long-run) - green (near/at 100% = optimal) through yellow through red
-    # (>=150% = the explicit "o 50 %+" CRITICAL bar), the actual "heatmap"
-    # visual the product owner asked for.
-    for col in ("E", "G"):
+    # Heatmap color scales. Volume/PPT-density/duration (F,G,H here) are all
+    # "% of peer average" where LOW is bad (opposite direction from route
+    # efficiency) - red at/below CRITICAL (50%), green at/above 100%. Route
+    # efficiency (I) keeps its own HIGH-is-bad direction.
+    for col in ("F", "G", "H"):
         rng = f"{col}{first_data_row}:{col}{last_row}"
         ws.conditional_formatting.add(
             rng,
             ColorScaleRule(
-                start_type="num", start_value=100, start_color="63BE7B",
-                mid_type="num", mid_value=125, mid_color="FFEB84",
-                end_type="num", end_value=150, end_color="F8696B",
+                start_type="num", start_value=50, start_color="F8696B",
+                mid_type="num", mid_value=75, mid_color="FFEB84",
+                end_type="num", end_value=100, end_color="63BE7B",
             ),
         )
-    # Stav column (H->col J here) text badge - same KRITICKÉ/POZOR/OK
-    # convention as PerformanceEngine.ts's efficiencyFlag.
     ws.conditional_formatting.add(
-        f"J{first_data_row}:J{last_row}",
-        FormulaRule(formula=[f'J{first_data_row}="KRITICKÉ"'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_CRITICAL),
+        f"I{first_data_row}:I{last_row}",
+        ColorScaleRule(
+            start_type="num", start_value=100, start_color="63BE7B",
+            mid_type="num", mid_value=125, mid_color="FFEB84",
+            end_type="num", end_value=150, end_color="F8696B",
+        ),
+    )
+    # "Problémový?" (col F->D here) badge.
+    ws.conditional_formatting.add(
+        f"D{first_data_row}:D{last_row}",
+        FormulaRule(formula=[f'D{first_data_row}="Ano"'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_CRITICAL),
+                    font=Font(bold=True, color=STATUS_CRITICAL)),
+    )
+    # Trasa - stav (col M) - same KRITICKÉ/POZOR/OK convention as
+    # PerformanceEngine.ts's efficiencyFlag - informational only here, does
+    # NOT drive the row highlight (that's combinedRiskFlag's job now).
+    ws.conditional_formatting.add(
+        f"M{first_data_row}:M{last_row}",
+        FormulaRule(formula=[f'M{first_data_row}="KRITICKÉ"'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_CRITICAL),
                     font=Font(bold=True, color=STATUS_CRITICAL)),
     )
     ws.conditional_formatting.add(
-        f"J{first_data_row}:J{last_row}",
-        FormulaRule(formula=[f'J{first_data_row}="POZOR"'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_WARNING),
+        f"M{first_data_row}:M{last_row}",
+        FormulaRule(formula=[f'M{first_data_row}="POZOR"'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_WARNING),
                     font=Font(bold=True, color=STATUS_WARNING)),
     )
     ws.conditional_formatting.add(
-        f"J{first_data_row}:J{last_row}",
-        FormulaRule(formula=[f'J{first_data_row}="OK"'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_GOOD),
+        f"M{first_data_row}:M{last_row}",
+        FormulaRule(formula=[f'M{first_data_row}="OK"'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_GOOD),
                     font=Font(color=STATUS_GOOD)),
     )
-    # Whole-row highlight for KRITICKÉ technicians - the row jumps out even
-    # without reading the Stav column text (product owner: "chci, aby to
-    # začalo svítit červeně").
-    for col in "CDEFGHI":
+    # Whole-row highlight for "Problémový? = Ano" technicians (combinedRiskFlag,
+    # column D here) - the row jumps out even without reading any single
+    # column (product owner: "chci, aby to začalo svítit červeně"). This is
+    # the >= PROBLEM_SIGNAL_MIN_COUNT corroborated signal, not a lone metric.
+    for col in "CDEFGHIJKLM":
         ws.conditional_formatting.add(
             f"{col}{first_data_row}:{col}{last_row}",
-            FormulaRule(formula=[f'$J{first_data_row}="KRITICKÉ"'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_CRITICAL)),
+            FormulaRule(formula=[f'$D{first_data_row}="Ano"'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_CRITICAL)),
         )
 
     ws.row_dimensions[first_data_row].height = 20
@@ -1768,58 +1795,91 @@ def build_manual_sheet(wb):
             "izolované číslo. Technik ve městě bude mít nižší km/návštěvu než technik na "
             "venkově, i když jezdí stejně efektivně - to není chyba dat, to je geografie.",
         ]),
-        ("2. JAK ČÍST BAREVNÉ PÁSMO", [
+        ("2. JAK ČÍST BAREVNÉ PÁSMO (trasa)", [
             "🟢 OK (do 125 %): normální provoz. Sem spadá naprostá většina týdnů - to je "
             "očekávaný stav, ne úspěch, který je třeba oceňovat.",
             "🟡 POZOR (125-149 %): trasa je znatelně horší než ideál. Jeden týden v POZOR "
             "ještě nic neznamená (viz bod 4 - co NENÍ signál) - sleduj, jestli se opakuje.",
             "🔴 KRITICKÉ (150 % a víc): o polovinu nebo víc nad optimem. To je konkrétní "
-            "zadání, kdy má systém začít svítit červeně - a EFFICIENCY i HOME (\"KDO JEZDÍ "
-            "CIK-CAK\") to teď dělají automaticky.",
+            "zadání, kdy má systém začít svítit červeně.",
         ]),
-        ("3. CO JE SIGNÁL A CO JEŠTĚ NENÍ (než začneš řešit)", [
+        ("3. TŘI DALŠÍ TRIGGERY - a proč je NUTNÉ je číst spolu s trasou, ne samostatně", [
+            "Návštěvnost vs kolegové (volumeFlag): kolik návštěv technik reálně zvládl ve "
+            "srovnání s ostatními stejný týden - a zvlášť i se svým vlastním dlouhodobým "
+            "průměrem (obojí najednou, systém bere tu horší z obou hodnot). Tohle chytí "
+            "situaci, kterou Compliance % NEVIDÍ: technik má naplánováno málo, splní to na "
+            "100 %, ale objel dvakrát méně poboček než kolega - na Compliance % to vypadá "
+            "bezvadně, na Návštěvnosti ne.",
+            "",
+            "Hodnota/návštěva vs kolegové (pptDensityFlag): kolik obchodní hodnoty (PPT) "
+            "technik v průměru přinese na jednu návštěvu, oproti kolegům. Přesně tvůj postřeh "
+            "\"hodně návštěv, ale jednoúčelové\" - technik může mít skvělou trasu (nízké "
+            "nájezd/optimum) a přitom objíždět jen bezcenné poblíž ležící POS. Trasa a "
+            "hodnota jsou DVĚ RŮZNÉ VĚCI a tenhle sloupec je jediný, který hlídá tu druhou.",
+            "",
+            "Délka návštěvy vs kolegové (durationFlag): průměrná reálná délka návštěvy "
+            "(\"Real duration (h)\" ze SalesApp) oproti kolegům. Na rozdíl od trasy (GPS "
+            "odhad) je tohle PŘÍMO NAMĚŘENÝ údaj - technik, který je systematicky výrazně "
+            "rychlejší než všichni ostatní, návštěvy pravděpodobně odbývá. Dostupné až po "
+            "prvním importu, který obsahuje sloupec Real duration (h).",
+        ]),
+        ("4. KOMBINOVANÝ SIGNÁL (\"Problémový?\" = Ano/Ne) - tohle je to hlavní, na co se dívat", [
+            "Žádný JEDNOTLIVÝ signál sám o sobě nikdy nespustí \"Problémový? = Ano\" - ani "
+            "KRITICKÁ trasa, ani nízká návštěvnost, ani nic jiného samo o sobě. Musí se "
+            "potkat aspoň 2 signály najednou (nastavitelné v CONTROL jako "
+            "PROBLEM_SIGNAL_MIN_COUNT) - protože \"GPS je odhad, takže to ani nemusí být "
+            "na vinu\" - a stejně tak jeden jediný slabý týden v jakékoli metrice.",
+            "Sloupec \"Signálů\" na EFFICIENCY ukazuje PŘESNĚ kolik z pěti sledovaných "
+            "signálů (compliance/flaká riziko, návštěvnost, hodnota/návštěva, délka "
+            "návštěvy, trasa) je u daného technika aktuálně POZOR/KRITICKÉ zároveň - a "
+            "žebříček je podle tohoto čísla seřazený, ne podle trasy.",
+            "Tohle je přesně ten filtr, který odděluje \"má smůlu s GPS/terénem\" od "
+            "\"má reálný problém\" - jeden signál je šum, dva a víc najednou už je vzorec.",
+        ]),
+        ("5. CO JE SIGNÁL A CO JEŠTĚ NENÍ (než začneš řešit)", [
             "NENÍ signál: jeden KRITICKÝ den v týdnu, kdy měl technik jen 2-3 návštěvy daleko "
             "od sebe (např. servisní výjezd mimo běžnou trasu) - u málo bodů dokáže jedna "
             "vynucená zajížďka rozhodit poměr, aniž by šlo o špatnou práci.",
-            "NENÍ signál: jednorázový týden POZOR/KRITICKÉ bez opakování - podívej se na "
-            "sloupec \"Dlouhodobý poměr (průměr)\" na EFFICIENCY (longRunAvgEfficiencyRatio) - "
-            "ten počítá průměr za posledních několik sledovaných týdnů (stejné okno jako "
-            "\"flaká riziko\"), takže jednu špatnou zajížďku sám vyhladí.",
+            "NENÍ signál: jednorázový týden POZOR/KRITICKÉ v jedné metrice bez opakování - "
+            "všechny čtyři sledované metriky (trasa, návštěvnost, hodnota/návštěva, délka) "
+            "počítají svůj \"long-run\" flag z průměru za posledních několik sledovaných "
+            "týdnů (stejné okno jako \"flaká riziko\"), takže jednu špatnou zajížďku nebo "
+            "jeden náročný týden systém sám vyhladí.",
             "NENÍ signál: POS bez GPS souřadnic v datech - systém takové zastávky do výpočtu "
-            "vůbec nezahrnuje (nehádá vzdálenost), takže chybějící GPS data snižují přesnost, "
-            "ne technikovo skóre.",
-            "JE signál: efficiencyFlag = KRITICKÉ na TECHNICIAN_PERFORMANCE_SUMMARY "
-            "(sloupec efficiencyFlag, počítaný z dlouhodobého průměru, ne z jednoho týdne) "
-            "opakovaně, nebo objeví-li se stejné jméno na EFFICIENCY nahoře žebříčku "
-            "kampaň za kampaní.",
+            "trasy vůbec nezahrnuje (nehádá vzdálenost), takže chybějící GPS data snižují "
+            "přesnost, ne technikovo skóre.",
+            "JE signál: \"Problémový? = Ano\" na EFFICIENCY/TECHNICIAN_PERFORMANCE_SUMMARY "
+            "(sloupec combinedRiskFlag) - to je systém, který už sám zkombinoval aspoň dva "
+            "nezávislé signály za tebe.",
         ]),
-        ("4. KDY JÍT A KONFRONTOVAT TECHNIKA - konkrétní hranice", [
-            "1x KRITICKÉ (jeden týden): nic nedělej, jen sleduj. Otevři si daný den na "
-            "TECHNICIAN_PERFORMANCE_LOG (sloupce posListMon..posListFri) a mrkni, jestli tam "
-            "není zjevný důvod (velký region, vynucená zajížďka, porucha vozu apod.).",
-            "2x KRITICKÉ ZA SEBOU (nebo dlouhodobý průměr přes 150 %): posaď se s technikem. "
-            "V tuhle chvíli už to není náhoda - buď reálně jezdí neefektivně, nebo je problém "
-            "v datech (špatně zadaná adresa POS, chybějící GPS), a obojí stojí za vyřešení.",
-            "3x a víc / trvale nad 150 % dlouhodobě: to je přesně ten technik, kterého má "
-            "HOME/EFFICIENCY \"sám vystrčit\" nahoru žebříčku - kombinuj s Compliance % a "
-            "\"flaká riziko\" (PERFORMANCE) - pokud u něj SOUČASNĚ klesá i compliance, "
-            "nejde jen o styl jízdy, ale o celkový výkon.",
-            "Kombinuj signály, nerozhoduj podle jednoho čísla: vysoký nájezd/optimum + nízká "
-            "compliance % + \"flaká riziko = Ano\" ve stejném období je mnohem silnější důkaz "
-            "než kterýkoli z nich samotný.",
+        ("6. KDY JÍT A KONFRONTOVAT TECHNIKA - konkrétní hranice", [
+            "1 signál (jakýkoli, včetně KRITICKÉ trasy): nic nedělej, jen sleduj. Otevři si "
+            "daný den na TECHNICIAN_PERFORMANCE_LOG (sloupce posListMon..posListFri) a "
+            "mrkni, jestli tam není zjevný důvod (velký region, vynucená zajížďka, porucha "
+            "vozu apod.).",
+            "\"Problémový? = Ano\" (2+ signály najednou): posaď se s technikem. V tuhle "
+            "chvíli už to není náhoda ani jedna metrika, která může být zkreslená - dva "
+            "nezávislé zdroje dat (GPS trasa, počet návštěv, hodnota, délka návštěvy) "
+            "ukazují stejným směrem zároveň.",
+            "\"Problémový? = Ano\" opakovaně kampaň za kampaní / vysoký počet Signálů (4-5 "
+            "najednou): to je přesně ten technik, kterého má HOME/EFFICIENCY \"sám "
+            "vystrčit\" úplně nahoru žebříčku - tady už jde o celkový výkon, ne o jednu "
+            "věc, kterou lze vysvětlit.",
         ]),
-        ("5. POSTUP PŘED SCHŮZKOU S TECHNIKEM", [
-            "1) EFFICIENCY - najdi technika v žebříčku, podívej se na \"Dlouhodobý poměr\" "
-            "(ne jen aktuální týden).",
+        ("7. POSTUP PŘED SCHŮZKOU S TECHNIKEM", [
+            "1) EFFICIENCY - najdi technika v žebříčku (řazeno podle počtu Signálů, "
+            "nejproblémovější nahoře), podívej se, KTERÉ konkrétní signály má aktivní.",
             "2) TECHNICIAN_PERFORMANCE_LOG - najdi jeho řádky za poslední týdny, otevři "
             "sloupce posListMon..posListFri pro dny s vysokým km - uvidíš PŘESNĚ které POS "
-            "ten den navštívil a v jakém pořadí.",
+            "ten den navštívil a v jakém pořadí. Pokud je aktivní i signál hodnoty/návštěvy, "
+            "podívej se, jaké PPT mají POS, které navštěvuje nejčastěji.",
             "3) Porovnej s plánovaným pořadím (TECHNICIAN_PLAN / MANAGER_PLAN_PUBLISHED pro "
             "stejné datum) - liší se realita od plánu? Pokud ano, zeptej se proč (mohl mít "
             "dobrý důvod, který systém nezná - objednávka od klienta, uzavírka silnice...).",
-            "4) Teprve pak jdi na schůzku - s konkrétními dny a čísly, ne s obecným pocitem.",
+            "4) Teprve pak jdi na schůzku - s konkrétními dny, čísly a KONKRÉTNÍMI signály, "
+            "ne s obecným pocitem \"něco mi tu nesedí\".",
         ]),
-        ("6. OMEZENÍ, KTERÁ MUSÍŠ ZNÁT", [
+        ("8. OMEZENÍ, KTERÁ MUSÍŠ ZNÁT", [
             "\"Reálná trasa\" je odhad, ne GPS trasování v reálném čase: systém neví, v jakém "
             "pořadí technik body doopravdy objel - předpokládá, že to bylo v pořadí, v jakém "
             "byly naplánované (MANAGER_PLAN_PUBLISHED). Pokud technik pořadí sám změnil (a "
@@ -1831,6 +1891,13 @@ def build_manual_sheet(wb):
             "Bez reálných dat z SalesApp systém nic neukáže: dokud neproběhne první ostrý "
             "import, TECHNICIAN_PERFORMANCE_LOG/SUMMARY i EFFICIENCY zůstanou prázdné - to "
             "je očekávaný stav, ne chyba.",
+            "Signál délky návštěvy (durationFlag) potřebuje sloupec \"Real duration (h)\" v "
+            "SalesApp exportu - pokud ho konkrétní export neobsahuje, sloupec zůstane "
+            "prázdný a signál se prostě nepočítá (nepočítá se jako 0 ani jako chyba).",
+            "Návštěvnost a hodnota/návštěva se porovnávají PROTI OSTATNÍM TECHNIKŮM TEN "
+            "SAMÝ TÝDEN (prostý průměr) - u malého týmu (do ~10 lidí) může jeden extrémní "
+            "výkyv jednoho technika citelně posunout průměr, ke kterému se ostatní "
+            "poměřují. S 27 techniky, jak máte teď, je to zanedbatelné.",
         ]),
     ]
 

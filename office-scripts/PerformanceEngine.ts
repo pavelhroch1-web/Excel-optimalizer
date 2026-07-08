@@ -434,6 +434,24 @@ function main(workbook: ExcelScript.Workbook) {
   // meaningfully before the hard 50%-over line, not right at it).
   const ROUTE_EFFICIENCY_WARNING_PERCENT = setting("ROUTE_EFFICIENCY_WARNING_PERCENT", 125);
   const ROUTE_EFFICIENCY_CRITICAL_PERCENT = setting("ROUTE_EFFICIENCY_CRITICAL_PERCENT", 150);
+  // "Manažerské" triggers (product owner, 2026-07-09, speaking explicitly as
+  // vedoucí Field Force týmu): below-peer volume/value/duration signals,
+  // each expressed as "% of the network/own average" - below
+  // *_WARNING_PERCENT is a soft flag, below *_CRITICAL_PERCENT is a hard
+  // one, same convention as ROUTE_EFFICIENCY above but inverted (LOW is bad
+  // here, not high).
+  const VOLUME_WARNING_PERCENT = setting("VOLUME_WARNING_PERCENT", 70);
+  const VOLUME_CRITICAL_PERCENT = setting("VOLUME_CRITICAL_PERCENT", 50);
+  const PPT_DENSITY_WARNING_PERCENT = setting("PPT_DENSITY_WARNING_PERCENT", 70);
+  const PPT_DENSITY_CRITICAL_PERCENT = setting("PPT_DENSITY_CRITICAL_PERCENT", 50);
+  const DURATION_WARNING_PERCENT = setting("DURATION_WARNING_PERCENT", 70);
+  const DURATION_CRITICAL_PERCENT = setting("DURATION_CRITICAL_PERCENT", 50);
+  // How many independently corroborating signals are required before the
+  // automatic "problémový technik" callouts (HOME/EFFICIENCY) surface a
+  // name - product owner: efficiency ratio alone should never be enough
+  // ("GPS je odhad, takže to ani nemusí být na vinu"), a real conversation
+  // needs at least this many flags pointing the same direction at once.
+  const PROBLEM_SIGNAL_MIN_COUNT = setting("PROBLEM_SIGNAL_MIN_COUNT", 2);
 
   // ==========================================================================
   // PLAN_LIFECYCLE -> which (CONTROL_YEAR, rawWeek) weeks has the manager
@@ -482,6 +500,11 @@ function main(workbook: ExcelScript.Workbook) {
   let posTechnician: { [posId: string]: string } = {};
   let posName: { [posId: string]: string } = {};
   let posGps: { [posId: string]: { x: number; y: number } } = {};
+  // PPT lookup (product owner, 2026-07-09, "Monitoring efektivity" - hodnotová
+  // hustota) - a technician with great route-km efficiency but visiting only
+  // low-value POS is a different problem than a bad route shape, and route
+  // efficiency alone cannot see it.
+  let posPpt: { [posId: string]: number } = {};
   for (let i = 1; i < posMaster.length; i++) {
     const row = posMaster[i];
     const posId = String(row[pmIdx("posId")]);
@@ -492,6 +515,7 @@ function main(workbook: ExcelScript.Workbook) {
     posName[posId] = String(row[pmIdx("nazev")] ?? "");
     const override = String(row[pmIdx("managerOverrideTechnician")] ?? "");
     posTechnician[posId] = override || String(row[pmIdx("assignedTechnician")] ?? "");
+    posPpt[posId] = Number(row[pmIdx("ppt")]) || 0;
     const gpsX = Number(row[pmIdx("gpsX")]);
     const gpsY = Number(row[pmIdx("gpsY")]);
     if (!isNaN(gpsX) && !isNaN(gpsY) && (gpsX != 0 || gpsY != 0)) {
@@ -518,6 +542,9 @@ function main(workbook: ExcelScript.Workbook) {
     visitsByDay: number[]; // [Mon, Tue, Wed, Thu, Fri] - planned/campaign visits
     otherVisitsByDay: number[]; // [Mon, Tue, Wed, Thu, Fri] - ad-hoc (OTHER_VISIT_LOG) visits, product owner 2026-07-09: "denní statistiky - plnění vs. neplnění"
     possByDay: string[][]; // realized posIds per weekday, unsorted until output time
+    realizedPptSum: number; // sum of posPpt over realized (Splneno_vcas/pozde) POS this week - hodnotová hustota
+    durationHoursSum: number; // sum of matchedActualDurationHours over realized visits with a known duration
+    durationKnownCount: number; // how many of those realized visits actually carried a duration value
   }
   let buckets: { [key: string]: Bucket } = {};
 
@@ -539,6 +566,9 @@ function main(workbook: ExcelScript.Workbook) {
         visitsByDay: [0, 0, 0, 0, 0],
         otherVisitsByDay: [0, 0, 0, 0, 0],
         possByDay: [[], [], [], [], []],
+        realizedPptSum: 0,
+        durationHoursSum: 0,
+        durationKnownCount: 0,
       };
     }
     return buckets[key];
@@ -603,6 +633,7 @@ function main(workbook: ExcelScript.Workbook) {
     year: number;
     status: string;
     matchedActualDate: Date | null;
+    matchedActualDurationHours: number | null;
   }
   let rawRows: ComplianceRow[] = [];
   for (let i = 1; i < complianceLog.length; i++) {
@@ -614,6 +645,7 @@ function main(workbook: ExcelScript.Workbook) {
       continue;
     }
     const dateVal = row[clIdx("matchedActualDate")];
+    const durationRaw = Number(row[clIdx("matchedActualDurationHours")]);
     rawRows.push({
       key: posId + "|" + week + "|" + year,
       timestamp: String(row[clIdx("evaluatedAt")]),
@@ -623,6 +655,7 @@ function main(workbook: ExcelScript.Workbook) {
       year,
       status: String(row[clIdx("status")]),
       matchedActualDate: dateVal instanceof Date ? dateVal : null,
+      matchedActualDurationHours: !isNaN(durationRaw) && durationRaw > 0 ? durationRaw : null,
     });
   }
   const dedupedRows = latestByKey(rawRows);
@@ -654,9 +687,11 @@ function main(workbook: ExcelScript.Workbook) {
     if (r.status == "Splneno_vcas") {
       bucket.splnenoVcas++;
       bucket.realizedVisits++;
+      bucket.realizedPptSum += posPpt[r.posId] || 0;
     } else if (r.status == "Splneno_pozde") {
       bucket.splnenoPozde++;
       bucket.realizedVisits++;
+      bucket.realizedPptSum += posPpt[r.posId] || 0;
     } else if (r.status == "Nesplneno") {
       bucket.nesplneno++;
       const key = tech + "|" + r.posId;
@@ -672,6 +707,10 @@ function main(workbook: ExcelScript.Workbook) {
       if (jsDay in dayIndex) {
         bucket.visitsByDay[dayIndex[jsDay]]++;
         bucket.possByDay[dayIndex[jsDay]].push(r.posId);
+      }
+      if (r.matchedActualDurationHours !== null) {
+        bucket.durationHoursSum += r.matchedActualDurationHours;
+        bucket.durationKnownCount++;
       }
     }
   }
@@ -800,6 +839,73 @@ function main(workbook: ExcelScript.Workbook) {
     return computeOptimalRouteKm(points);
   }
 
+  // ==========================================================================
+  // NETWORK PEER AVERAGES, one pre-pass over every bucket BEFORE either
+  // output loop (product owner, 2026-07-09, speaking as vedoucí Field Force
+  // týmu: "výrazně méně návštěvnosti než ostatní" - a signal that requires
+  // comparing a technician against everyone else the SAME week, not just
+  // against their own plan or their own history). Plain averages across
+  // whichever technicians have a bucket that week - deliberately simple
+  // (not a median), and with ~27 technicians one outlier's own pull on the
+  // average it's being compared against is small.
+  // ==========================================================================
+  interface WeekPeerStats {
+    visitsSum: number;
+    visitsCount: number;
+    pptPerVisitSum: number;
+    pptPerVisitCount: number;
+    durationSum: number;
+    durationCount: number;
+  }
+  let peerStatsByWeek: { [weekKey: string]: WeekPeerStats } = {};
+  for (const key of Object.keys(buckets)) {
+    const b = buckets[key];
+    const weekKey = b.year + "|" + b.week;
+    if (!peerStatsByWeek[weekKey]) {
+      peerStatsByWeek[weekKey] = { visitsSum: 0, visitsCount: 0, pptPerVisitSum: 0, pptPerVisitCount: 0, durationSum: 0, durationCount: 0 };
+    }
+    const stats = peerStatsByWeek[weekKey];
+    stats.visitsSum += b.realizedVisits;
+    stats.visitsCount++;
+    if (b.realizedVisits > 0) {
+      stats.pptPerVisitSum += b.realizedPptSum / b.realizedVisits;
+      stats.pptPerVisitCount++;
+    }
+    if (b.durationKnownCount > 0) {
+      stats.durationSum += b.durationHoursSum / b.durationKnownCount;
+      stats.durationCount++;
+    }
+  }
+  function networkAvgVisits(year: number, week: number): number | null {
+    const s = peerStatsByWeek[year + "|" + week];
+    return s && s.visitsCount > 0 ? s.visitsSum / s.visitsCount : null;
+  }
+  function networkAvgPptPerVisit(year: number, week: number): number | null {
+    const s = peerStatsByWeek[year + "|" + week];
+    return s && s.pptPerVisitCount > 0 ? s.pptPerVisitSum / s.pptPerVisitCount : null;
+  }
+  function networkAvgDuration(year: number, week: number): number | null {
+    const s = peerStatsByWeek[year + "|" + week];
+    return s && s.durationCount > 0 ? s.durationSum / s.durationCount : null;
+  }
+  // vs-peer % helper: null when either side is unmeasurable (never 0 -
+  // "no data" must never look like "0% of peer average").
+  function vsPeerPercent(value: number | null, peerAvg: number | null): number | null {
+    return value !== null && peerAvg !== null && peerAvg > 0 ? Math.round((value / peerAvg) * 100) : null;
+  }
+  function lowFlag(percent: number | null, warningPercent: number, criticalPercent: number): string {
+    if (percent === null) {
+      return "";
+    }
+    if (percent < criticalPercent) {
+      return "KRITICKÉ";
+    }
+    if (percent < warningPercent) {
+      return "POZOR";
+    }
+    return "OK";
+  }
+
   const now = new Date().toISOString();
   let outRows: (string | number)[][] = [];
   for (const key of Object.keys(buckets)) {
@@ -865,6 +971,37 @@ function main(workbook: ExcelScript.Workbook) {
     // compliance za měsíce/kampaně, not just the last 6 weeks).
     const monthDate = isoMonday(b.year, b.week);
     const monthKey = monthDate.getFullYear() * 100 + (monthDate.getMonth() + 1);
+
+    // "MANAŽERSKÉ" TRIGGERY (product owner, 2026-07-09):
+    //  - podprůměrná návštěvnost oproti kolegům TENTO týden.
+    //  - podprůměrná hodnotová hustota (PPT/návštěva) - "hodně návštěv, ale
+    //    jednoúčelové" - dobrá km efektivita neznamená, že ty návštěvy mají
+    //    hodnotu.
+    //  - podprůměrná délka návštěvy (real duration ze SalesApp) - přímo
+    //    naměřený signál, ne GPS odhad.
+    const pptPerVisit = b.realizedVisits > 0 ? Math.round((b.realizedPptSum / b.realizedVisits) * 100) / 100 : null;
+    const avgVisitDurationHours = b.durationKnownCount > 0 ? Math.round((b.durationHoursSum / b.durationKnownCount) * 100) / 100 : null;
+    const volumeVsPeerPercent = vsPeerPercent(b.realizedVisits, networkAvgVisits(b.year, b.week));
+    const pptDensityVsPeerPercent = vsPeerPercent(pptPerVisit, networkAvgPptPerVisit(b.year, b.week));
+    const durationVsPeerPercent = vsPeerPercent(avgVisitDurationHours, networkAvgDuration(b.year, b.week));
+    const volumeFlag = lowFlag(volumeVsPeerPercent, VOLUME_WARNING_PERCENT, VOLUME_CRITICAL_PERCENT);
+    const pptDensityFlag = lowFlag(pptDensityVsPeerPercent, PPT_DENSITY_WARNING_PERCENT, PPT_DENSITY_CRITICAL_PERCENT);
+    const durationFlag = lowFlag(durationVsPeerPercent, DURATION_WARNING_PERCENT, DURATION_CRITICAL_PERCENT);
+    // Kombinovaný signál (Trigger C, product owner: "GPS je odhad, takže to
+    // ani nemusí být na vinu") - žádný jednotlivý flag sám o sobě nespustí
+    // "problémový technik", potřebuje se potkat aspoň PROBLEM_SIGNAL_MIN_COUNT
+    // signálů najednou. compliancePercent below FLAKANI_BAD_WEEK_THRESHOLD_PERCENT
+    // reuses the SAME "bad week" bar flaká riziko already uses, so this stays
+    // consistent with the existing metric rather than inventing another cutoff.
+    const activeSignals = [
+      b.plannedVisits > 0 && compliancePercent < FLAKANI_BAD_WEEK_THRESHOLD_PERCENT,
+      volumeFlag == "POZOR" || volumeFlag == "KRITICKÉ",
+      pptDensityFlag == "POZOR" || pptDensityFlag == "KRITICKÉ",
+      durationFlag == "POZOR" || durationFlag == "KRITICKÉ",
+      efficiencyFlag == "POZOR" || efficiencyFlag == "KRITICKÉ",
+    ].filter(Boolean).length;
+    const combinedRiskFlag = activeSignals >= PROBLEM_SIGNAL_MIN_COUNT ? "Ano" : "Ne";
+
     outRows.push([
       b.technician, b.year, b.week, topArea,
       b.plannedVisits, b.realizedVisits,
@@ -878,6 +1015,9 @@ function main(workbook: ExcelScript.Workbook) {
       monthKey,
       b.otherVisitsByDay[0], b.otherVisitsByDay[1], b.otherVisitsByDay[2], b.otherVisitsByDay[3], b.otherVisitsByDay[4],
       totalActualKm, totalOptimalKm, efficiencyRatioPercent ?? "", kmPerVisit ?? "", efficiencyFlag,
+      pptPerVisit ?? "", avgVisitDurationHours ?? "",
+      volumeVsPeerPercent ?? "", pptDensityVsPeerPercent ?? "", durationVsPeerPercent ?? "",
+      volumeFlag, pptDensityFlag, durationFlag, activeSignals, combinedRiskFlag,
     ]);
   }
 
@@ -900,9 +1040,16 @@ function main(workbook: ExcelScript.Workbook) {
     // ("matematicke minimum") route km this week, the resulting ratio, km
     // per realized visit, and a written flag - see docs/BUSINESS_RULES.md.
     "totalActualKmWeek", "totalOptimalKmWeek", "efficiencyRatioPercent", "kmPerVisit", "efficiencyFlag",
+    // "Manažerské" triggery (product owner, 2026-07-09) - viz
+    // docs/BUSINESS_RULES.md: podprůměrná návštěvnost/hodnotová
+    // hustota/délka návštěvy oproti síti tento týden, a kombinovaný signál
+    // (>= PROBLEM_SIGNAL_MIN_COUNT flagů najednou).
+    "pptPerVisit", "avgVisitDurationHours",
+    "volumeVsPeerPercent", "pptDensityVsPeerPercent", "durationVsPeerPercent",
+    "volumeFlag", "pptDensityFlag", "durationFlag", "activeSignalCount", "combinedRiskFlag",
   ];
   const outWs = workbook.getWorksheet("TECHNICIAN_PERFORMANCE_LOG");
-  outWs.getRange("A2:AM100000").clear(ExcelScript.ClearApplyTo.contents);
+  outWs.getRange("A2:AW100000").clear(ExcelScript.ClearApplyTo.contents);
   outWs.getRangeByIndexes(0, 0, 1, headerRow.length).setValues([headerRow]);
   if (outRows.length > 0) {
     outWs.getRangeByIndexes(1, 0, outRows.length, headerRow.length).setValues(outRows);
@@ -929,6 +1076,9 @@ function main(workbook: ExcelScript.Workbook) {
     maxKmDay: number;
     efficiencyRatioPercent: number | null;
     kmPerVisit: number | null;
+    volumeVsPeerPercent: number | null;
+    pptDensityVsPeerPercent: number | null;
+    durationVsPeerPercent: number | null;
   }
   let byTechWeeks: { [tech: string]: TechWeekEntry[] } = {};
   for (const key of Object.keys(buckets)) {
@@ -963,6 +1113,14 @@ function main(workbook: ExcelScript.Workbook) {
     }
     const efficiencyRatioPercentForSummary = summaryOptimalKm > 0 ? Math.round((summaryActualKm / summaryOptimalKm) * 100) : null;
     const kmPerVisitForSummary = b.realizedVisits > 0 ? Math.round((summaryActualKm / b.realizedVisits) * 10) / 10 : null;
+    // "Manažerské" triggery, per-week values for later long-run averaging -
+    // see the identical TECHNICIAN_PERFORMANCE_LOG computation above for the
+    // full rationale.
+    const pptPerVisitForSummary = b.realizedVisits > 0 ? b.realizedPptSum / b.realizedVisits : null;
+    const avgVisitDurationHoursForSummary = b.durationKnownCount > 0 ? b.durationHoursSum / b.durationKnownCount : null;
+    const volumeVsPeerPercentForSummary = vsPeerPercent(b.realizedVisits, networkAvgVisits(b.year, b.week));
+    const pptDensityVsPeerPercentForSummary = vsPeerPercent(pptPerVisitForSummary, networkAvgPptPerVisit(b.year, b.week));
+    const durationVsPeerPercentForSummary = vsPeerPercent(avgVisitDurationHoursForSummary, networkAvgDuration(b.year, b.week));
     if (!byTechWeeks[b.technician]) {
       byTechWeeks[b.technician] = [];
     }
@@ -973,6 +1131,9 @@ function main(workbook: ExcelScript.Workbook) {
       nesplneno: b.nesplneno, navicEvidovano: b.navicEvidovano,
       compliancePercent, maxKmDay,
       efficiencyRatioPercent: efficiencyRatioPercentForSummary, kmPerVisit: kmPerVisitForSummary,
+      volumeVsPeerPercent: volumeVsPeerPercentForSummary,
+      pptDensityVsPeerPercent: pptDensityVsPeerPercentForSummary,
+      durationVsPeerPercent: durationVsPeerPercentForSummary,
     });
   }
 
@@ -1027,6 +1188,57 @@ function main(workbook: ExcelScript.Workbook) {
         : longRunAvgEfficiencyRatio >= ROUTE_EFFICIENCY_WARNING_PERCENT
         ? "POZOR"
         : "OK";
+
+    // "MANAŽERSKÉ" TRIGGERY - sustained (long-run) view, same
+    // FLAKANI_WINDOW_WEEKS window as flaká riziko/efficiencyFlag above, so a
+    // single fluke week never triggers a flag on its own.
+    //
+    // Volume: BOTH comparisons requested by the product owner ("obojí
+    // najednou") - vs. network peer average that week, AND vs. this
+    // technician's own recent average (excluding the latest week, so a
+    // technician can't be flagged for merely returning to their own normal
+    // after one unusually busy week). The flag uses whichever of the two is
+    // more severe.
+    const weeksWithVolumeRatio = weeks.filter((w) => w.volumeVsPeerPercent !== null).slice(0, FLAKANI_WINDOW_WEEKS);
+    const longRunAvgVolumeVsPeerPercent = weeksWithVolumeRatio.length > 0
+      ? Math.round(weeksWithVolumeRatio.reduce((s, w) => s + (w.volumeVsPeerPercent as number), 0) / weeksWithVolumeRatio.length)
+      : null;
+    const priorWeeksForOwnAvg = weeks.slice(1, 1 + FLAKANI_WINDOW_WEEKS);
+    const ownAvgVisits = priorWeeksForOwnAvg.length > 0
+      ? priorWeeksForOwnAvg.reduce((s, w) => s + w.realizedVisits, 0) / priorWeeksForOwnAvg.length
+      : null;
+    const volumeVsOwnAvgPercent = vsPeerPercent(latest.realizedVisits, ownAvgVisits);
+    const volumeFlagPercentForFlag =
+      longRunAvgVolumeVsPeerPercent !== null && volumeVsOwnAvgPercent !== null
+        ? Math.min(longRunAvgVolumeVsPeerPercent, volumeVsOwnAvgPercent)
+        : longRunAvgVolumeVsPeerPercent ?? volumeVsOwnAvgPercent;
+    const volumeFlagForSummary = lowFlag(volumeFlagPercentForFlag, VOLUME_WARNING_PERCENT, VOLUME_CRITICAL_PERCENT);
+
+    const weeksWithPptDensityRatio = weeks.filter((w) => w.pptDensityVsPeerPercent !== null).slice(0, FLAKANI_WINDOW_WEEKS);
+    const longRunAvgPptDensityVsPeerPercent = weeksWithPptDensityRatio.length > 0
+      ? Math.round(weeksWithPptDensityRatio.reduce((s, w) => s + (w.pptDensityVsPeerPercent as number), 0) / weeksWithPptDensityRatio.length)
+      : null;
+    const pptDensityFlagForSummary = lowFlag(longRunAvgPptDensityVsPeerPercent, PPT_DENSITY_WARNING_PERCENT, PPT_DENSITY_CRITICAL_PERCENT);
+
+    const weeksWithDurationRatio = weeks.filter((w) => w.durationVsPeerPercent !== null).slice(0, FLAKANI_WINDOW_WEEKS);
+    const longRunAvgDurationVsPeerPercent = weeksWithDurationRatio.length > 0
+      ? Math.round(weeksWithDurationRatio.reduce((s, w) => s + (w.durationVsPeerPercent as number), 0) / weeksWithDurationRatio.length)
+      : null;
+    const durationFlagForSummary = lowFlag(longRunAvgDurationVsPeerPercent, DURATION_WARNING_PERCENT, DURATION_CRITICAL_PERCENT);
+
+    // Kombinovaný signál (Trigger C) - sustained version, drives the
+    // automatic "problémový technik" callouts on EFFICIENCY/HOME. A lone
+    // KRITICKÉ efficiencyFlag never surfaces a name by itself anymore - GPS
+    // je odhad, needs corroboration.
+    const activeSignalsForSummary = [
+      flakaRiziko == "Ano",
+      volumeFlagForSummary == "POZOR" || volumeFlagForSummary == "KRITICKÉ",
+      pptDensityFlagForSummary == "POZOR" || pptDensityFlagForSummary == "KRITICKÉ",
+      durationFlagForSummary == "POZOR" || durationFlagForSummary == "KRITICKÉ",
+      efficiencyFlagForSummary == "POZOR" || efficiencyFlagForSummary == "KRITICKÉ",
+    ].filter(Boolean).length;
+    const combinedRiskFlagForSummary = activeSignalsForSummary >= PROBLEM_SIGNAL_MIN_COUNT ? "Ano" : "Ne";
+
     summaryRows.push([
       tech, latest.region, latest.year, latest.week,
       latest.plannedVisits, latest.realizedVisits,
@@ -1035,6 +1247,10 @@ function main(workbook: ExcelScript.Workbook) {
       badWeeksInWindow, flakaRiziko, latest.maxKmDay,
       latest.efficiencyRatioPercent ?? "", latest.kmPerVisit ?? "",
       longRunAvgEfficiencyRatio ?? "", efficiencyFlagForSummary,
+      volumeVsOwnAvgPercent ?? "", longRunAvgVolumeVsPeerPercent ?? "", volumeFlagForSummary,
+      longRunAvgPptDensityVsPeerPercent ?? "", pptDensityFlagForSummary,
+      longRunAvgDurationVsPeerPercent ?? "", durationFlagForSummary,
+      activeSignalsForSummary, combinedRiskFlagForSummary,
     ]);
   }
   const summaryHeaderRow = [
@@ -1045,9 +1261,15 @@ function main(workbook: ExcelScript.Workbook) {
     // Monitoring efektivity (product owner, 2026-07-09) - appended at the
     // end, same rationale as TECHNICIAN_PERFORMANCE_LOG's new columns above.
     "efficiencyRatioPercent", "kmPerVisit", "longRunAvgEfficiencyRatio", "efficiencyFlag",
+    // "Manažerské" triggery (product owner, 2026-07-09) - viz
+    // docs/BUSINESS_RULES.md.
+    "volumeVsOwnAvgPercent", "longRunAvgVolumeVsPeerPercent", "volumeFlag",
+    "longRunAvgPptDensityVsPeerPercent", "pptDensityFlag",
+    "longRunAvgDurationVsPeerPercent", "durationFlag",
+    "activeSignalCount", "combinedRiskFlag",
   ];
   const summaryWs = workbook.getWorksheet("TECHNICIAN_PERFORMANCE_SUMMARY");
-  summaryWs.getRange("A2:T100000").clear(ExcelScript.ClearApplyTo.contents);
+  summaryWs.getRange("A2:AC100000").clear(ExcelScript.ClearApplyTo.contents);
   summaryWs.getRangeByIndexes(0, 0, 1, summaryHeaderRow.length).setValues([summaryHeaderRow]);
   if (summaryRows.length > 0) {
     summaryWs.getRangeByIndexes(1, 0, summaryRows.length, summaryHeaderRow.length).setValues(summaryRows);

@@ -16,7 +16,7 @@ from .mock_workbook import MockWorkbook
 
 
 class _ComplianceRow:
-    def __init__(self, key, timestamp, posId, technician, week, year, status, matchedActualDate):
+    def __init__(self, key, timestamp, posId, technician, week, year, status, matchedActualDate, matchedActualDurationHours=None):
         self.key = key
         self.timestamp = timestamp
         self.posId = posId
@@ -25,6 +25,7 @@ class _ComplianceRow:
         self.year = year
         self.status = status
         self.matchedActualDate = matchedActualDate
+        self.matchedActualDurationHours = matchedActualDurationHours
 
 
 class Bucket:
@@ -42,6 +43,9 @@ class Bucket:
         self.otherVisits = 0
         self.visitsByDay = [0, 0, 0, 0, 0]
         self.otherVisitsByDay = [0, 0, 0, 0, 0]
+        self.realizedPptSum = 0.0
+        self.durationHoursSum = 0.0
+        self.durationKnownCount = 0
         self.possByDay: list[list[str]] = [[], [], [], [], []]
 
 
@@ -87,6 +91,15 @@ def run(workbook: MockWorkbook) -> str:
     # office-scripts/PerformanceEngine.ts's identical comment.
     route_efficiency_warning_percent = setting("ROUTE_EFFICIENCY_WARNING_PERCENT", 125)
     route_efficiency_critical_percent = setting("ROUTE_EFFICIENCY_CRITICAL_PERCENT", 150)
+    # "Manazerske" triggery (product owner, 2026-07-09) - see
+    # office-scripts/PerformanceEngine.ts's identical comment.
+    volume_warning_percent = setting("VOLUME_WARNING_PERCENT", 70)
+    volume_critical_percent = setting("VOLUME_CRITICAL_PERCENT", 50)
+    ppt_density_warning_percent = setting("PPT_DENSITY_WARNING_PERCENT", 70)
+    ppt_density_critical_percent = setting("PPT_DENSITY_CRITICAL_PERCENT", 50)
+    duration_warning_percent = setting("DURATION_WARNING_PERCENT", 70)
+    duration_critical_percent = setting("DURATION_CRITICAL_PERCENT", 50)
+    problem_signal_min_count = setting("PROBLEM_SIGNAL_MIN_COUNT", 2)
 
     # ==========================================================================
     # PLAN_LIFECYCLE -> tracking-started weeks (raw + true-ISO)
@@ -124,6 +137,9 @@ def run(workbook: MockWorkbook) -> str:
     pos_technician: dict[str, str] = {}
     pos_name: dict[str, str] = {}
     pos_gps: dict[str, tuple[float, float]] = {}
+    # PPT lookup (product owner, 2026-07-09) - see
+    # office-scripts/PerformanceEngine.ts's identical comment.
+    pos_ppt: dict[str, float] = {}
     for i in range(1, len(pos_master)):
         row = pos_master[i]
         pos_id = str(_at(row, pm_idx("posId")))
@@ -133,6 +149,7 @@ def run(workbook: MockWorkbook) -> str:
         pos_name[pos_id] = str(_at(row, pm_idx("nazev")) or "")
         override = str(_at(row, pm_idx("managerOverrideTechnician")) or "")
         pos_technician[pos_id] = override or str(_at(row, pm_idx("assignedTechnician")) or "")
+        pos_ppt[pos_id] = _num(_at(row, pm_idx("ppt"))) or 0
         gps_x = _num(_at(row, pm_idx("gpsX")))
         gps_y = _num(_at(row, pm_idx("gpsY")))
         if gps_x != 0 or gps_y != 0:
@@ -203,6 +220,7 @@ def run(workbook: MockWorkbook) -> str:
         if not pos_id or not week or not year:
             continue
         date_val = _at(row, cl_idx("matchedActualDate"))
+        duration_raw = _num(_at(row, cl_idx("matchedActualDurationHours")))
         raw_rows.append(_ComplianceRow(
             key=f"{pos_id}|{week}|{year}",
             timestamp=str(_at(row, cl_idx("evaluatedAt"))),
@@ -211,6 +229,7 @@ def run(workbook: MockWorkbook) -> str:
             week=week, year=year,
             status=str(_at(row, cl_idx("status"))),
             matchedActualDate=_to_date(date_val),
+            matchedActualDurationHours=duration_raw if duration_raw == duration_raw and duration_raw > 0 else None,
         ))
     deduped_rows = latest_by_key(raw_rows)
 
@@ -228,9 +247,11 @@ def run(workbook: MockWorkbook) -> str:
         if r.status == "Splneno_vcas":
             bucket.splnenoVcas += 1
             bucket.realizedVisits += 1
+            bucket.realizedPptSum += pos_ppt.get(r.posId, 0)
         elif r.status == "Splneno_pozde":
             bucket.splnenoPozde += 1
             bucket.realizedVisits += 1
+            bucket.realizedPptSum += pos_ppt.get(r.posId, 0)
         elif r.status == "Nesplneno":
             bucket.nesplneno += 1
             key = f"{tech}|{r.posId}"
@@ -244,6 +265,9 @@ def run(workbook: MockWorkbook) -> str:
             if weekday in day_index:
                 bucket.visitsByDay[day_index[weekday]] += 1
                 bucket.possByDay[day_index[weekday]].append(r.posId)
+            if r.matchedActualDurationHours is not None:
+                bucket.durationHoursSum += r.matchedActualDurationHours
+                bucket.durationKnownCount += 1
 
     # ==========================================================================
     # OTHER_VISIT_LOG -> otherVisits per (technician, year, week)
@@ -323,6 +347,51 @@ def run(workbook: MockWorkbook) -> str:
         return compute_optimal_route_km(points)
 
     # ==========================================================================
+    # NETWORK PEER AVERAGES (product owner, 2026-07-09) - see
+    # office-scripts/PerformanceEngine.ts's identical comment.
+    # ==========================================================================
+
+    peer_stats_by_week: dict[str, dict] = {}
+    for b in buckets.values():
+        week_key = f"{b.year}|{b.week}"
+        stats = peer_stats_by_week.setdefault(week_key, {
+            "visitsSum": 0, "visitsCount": 0, "pptPerVisitSum": 0.0, "pptPerVisitCount": 0,
+            "durationSum": 0.0, "durationCount": 0,
+        })
+        stats["visitsSum"] += b.realizedVisits
+        stats["visitsCount"] += 1
+        if b.realizedVisits > 0:
+            stats["pptPerVisitSum"] += b.realizedPptSum / b.realizedVisits
+            stats["pptPerVisitCount"] += 1
+        if b.durationKnownCount > 0:
+            stats["durationSum"] += b.durationHoursSum / b.durationKnownCount
+            stats["durationCount"] += 1
+
+    def network_avg_visits(year: int, week: int) -> float | None:
+        s = peer_stats_by_week.get(f"{year}|{week}")
+        return s["visitsSum"] / s["visitsCount"] if s and s["visitsCount"] > 0 else None
+
+    def network_avg_ppt_per_visit(year: int, week: int) -> float | None:
+        s = peer_stats_by_week.get(f"{year}|{week}")
+        return s["pptPerVisitSum"] / s["pptPerVisitCount"] if s and s["pptPerVisitCount"] > 0 else None
+
+    def network_avg_duration(year: int, week: int) -> float | None:
+        s = peer_stats_by_week.get(f"{year}|{week}")
+        return s["durationSum"] / s["durationCount"] if s and s["durationCount"] > 0 else None
+
+    def vs_peer_percent(value: float | None, peer_avg: float | None) -> int | None:
+        return round((value / peer_avg) * 100) if value is not None and peer_avg is not None and peer_avg > 0 else None
+
+    def low_flag(percent: float | None, warning_percent: float, critical_percent: float) -> str:
+        if percent is None:
+            return ""
+        if percent < critical_percent:
+            return "KRITICKÉ"
+        if percent < warning_percent:
+            return "POZOR"
+        return "OK"
+
+    # ==========================================================================
     # WRITE TECHNICIAN_PERFORMANCE_LOG
     # ==========================================================================
 
@@ -365,6 +434,28 @@ def run(workbook: MockWorkbook) -> str:
         ]
         month_date = iso_monday(b.year, b.week)
         month_key = month_date.year * 100 + month_date.month
+
+        # "MANAZERSKE" TRIGGERY (product owner, 2026-07-09) - see
+        # office-scripts/PerformanceEngine.ts's identical comment.
+        ppt_per_visit = round((b.realizedPptSum / b.realizedVisits) * 100) / 100 if b.realizedVisits > 0 else None
+        avg_visit_duration_hours = (
+            round((b.durationHoursSum / b.durationKnownCount) * 100) / 100 if b.durationKnownCount > 0 else None
+        )
+        volume_vs_peer_percent = vs_peer_percent(b.realizedVisits, network_avg_visits(b.year, b.week))
+        ppt_density_vs_peer_percent = vs_peer_percent(ppt_per_visit, network_avg_ppt_per_visit(b.year, b.week))
+        duration_vs_peer_percent = vs_peer_percent(avg_visit_duration_hours, network_avg_duration(b.year, b.week))
+        volume_flag = low_flag(volume_vs_peer_percent, volume_warning_percent, volume_critical_percent)
+        ppt_density_flag = low_flag(ppt_density_vs_peer_percent, ppt_density_warning_percent, ppt_density_critical_percent)
+        duration_flag = low_flag(duration_vs_peer_percent, duration_warning_percent, duration_critical_percent)
+        active_signals = sum([
+            b.plannedVisits > 0 and compliance_percent < flakani_bad_week_threshold_percent,
+            volume_flag in ("POZOR", "KRITICKÉ"),
+            ppt_density_flag in ("POZOR", "KRITICKÉ"),
+            duration_flag in ("POZOR", "KRITICKÉ"),
+            efficiency_flag in ("POZOR", "KRITICKÉ"),
+        ])
+        combined_risk_flag = "Ano" if active_signals >= problem_signal_min_count else "Ne"
+
         out_rows.append([
             b.technician, b.year, b.week, top_area,
             b.plannedVisits, b.realizedVisits,
@@ -379,6 +470,12 @@ def run(workbook: MockWorkbook) -> str:
             b.otherVisitsByDay[0], b.otherVisitsByDay[1], b.otherVisitsByDay[2], b.otherVisitsByDay[3], b.otherVisitsByDay[4],
             total_actual_km, total_optimal_km, efficiency_ratio_percent if efficiency_ratio_percent is not None else "",
             km_per_visit if km_per_visit is not None else "", efficiency_flag,
+            ppt_per_visit if ppt_per_visit is not None else "",
+            avg_visit_duration_hours if avg_visit_duration_hours is not None else "",
+            volume_vs_peer_percent if volume_vs_peer_percent is not None else "",
+            ppt_density_vs_peer_percent if ppt_density_vs_peer_percent is not None else "",
+            duration_vs_peer_percent if duration_vs_peer_percent is not None else "",
+            volume_flag, ppt_density_flag, duration_flag, active_signals, combined_risk_flag,
         ])
 
     header_row = [
@@ -394,9 +491,12 @@ def run(workbook: MockWorkbook) -> str:
         "monthKey",
         "otherVisitsMon", "otherVisitsTue", "otherVisitsWed", "otherVisitsThu", "otherVisitsFri",
         "totalActualKmWeek", "totalOptimalKmWeek", "efficiencyRatioPercent", "kmPerVisit", "efficiencyFlag",
+        "pptPerVisit", "avgVisitDurationHours",
+        "volumeVsPeerPercent", "pptDensityVsPeerPercent", "durationVsPeerPercent",
+        "volumeFlag", "pptDensityFlag", "durationFlag", "activeSignalCount", "combinedRiskFlag",
     ]
     out_ws = workbook.get_worksheet("TECHNICIAN_PERFORMANCE_LOG")
-    out_ws.get_range("A2:AM100000").clear()
+    out_ws.get_range("A2:AW100000").clear()
     out_ws.get_range_by_indexes(0, 0, 1, len(header_row)).set_values([header_row])
     if out_rows:
         out_ws.get_range_by_indexes(1, 0, len(out_rows), len(header_row)).set_values(out_rows)
@@ -429,6 +529,19 @@ def run(workbook: MockWorkbook) -> str:
         km_per_visit_for_summary = (
             round((summary_actual_km / b.realizedVisits) * 10) / 10 if b.realizedVisits > 0 else None
         )
+        # "MANAZERSKE" TRIGGERY, per-week values for later long-run averaging
+        # - see office-scripts/PerformanceEngine.ts's identical comment.
+        ppt_per_visit_for_summary = b.realizedPptSum / b.realizedVisits if b.realizedVisits > 0 else None
+        avg_visit_duration_hours_for_summary = (
+            b.durationHoursSum / b.durationKnownCount if b.durationKnownCount > 0 else None
+        )
+        volume_vs_peer_percent_for_summary = vs_peer_percent(b.realizedVisits, network_avg_visits(b.year, b.week))
+        ppt_density_vs_peer_percent_for_summary = vs_peer_percent(
+            ppt_per_visit_for_summary, network_avg_ppt_per_visit(b.year, b.week)
+        )
+        duration_vs_peer_percent_for_summary = vs_peer_percent(
+            avg_visit_duration_hours_for_summary, network_avg_duration(b.year, b.week)
+        )
         by_tech_weeks.setdefault(b.technician, []).append({
             "year": b.year, "week": b.week, "region": top_area,
             "plannedVisits": b.plannedVisits, "realizedVisits": b.realizedVisits,
@@ -436,6 +549,9 @@ def run(workbook: MockWorkbook) -> str:
             "nesplneno": b.nesplneno, "navicEvidovano": b.navicEvidovano,
             "compliancePercent": compliance_percent, "maxKmDay": max_km_day,
             "efficiencyRatioPercent": efficiency_ratio_percent_for_summary, "kmPerVisit": km_per_visit_for_summary,
+            "volumeVsPeerPercent": volume_vs_peer_percent_for_summary,
+            "pptDensityVsPeerPercent": ppt_density_vs_peer_percent_for_summary,
+            "durationVsPeerPercent": duration_vs_peer_percent_for_summary,
         })
 
     summary_rows: list[list] = []
@@ -465,6 +581,55 @@ def run(workbook: MockWorkbook) -> str:
             efficiency_flag_for_summary = "POZOR"
         else:
             efficiency_flag_for_summary = "OK"
+
+        # "MANAZERSKE" TRIGGERY - sustained (long-run) view, see
+        # office-scripts/PerformanceEngine.ts's identical comment.
+        weeks_with_volume_ratio = [w for w in weeks if w["volumeVsPeerPercent"] is not None][:flakani_window_weeks]
+        long_run_avg_volume_vs_peer_percent = (
+            round(sum(w["volumeVsPeerPercent"] for w in weeks_with_volume_ratio) / len(weeks_with_volume_ratio))
+            if weeks_with_volume_ratio else None
+        )
+        prior_weeks_for_own_avg = weeks[1:1 + flakani_window_weeks]
+        own_avg_visits = (
+            sum(w["realizedVisits"] for w in prior_weeks_for_own_avg) / len(prior_weeks_for_own_avg)
+            if prior_weeks_for_own_avg else None
+        )
+        volume_vs_own_avg_percent = vs_peer_percent(latest["realizedVisits"], own_avg_visits)
+        if long_run_avg_volume_vs_peer_percent is not None and volume_vs_own_avg_percent is not None:
+            volume_flag_percent_for_flag = min(long_run_avg_volume_vs_peer_percent, volume_vs_own_avg_percent)
+        else:
+            volume_flag_percent_for_flag = long_run_avg_volume_vs_peer_percent
+            if volume_flag_percent_for_flag is None:
+                volume_flag_percent_for_flag = volume_vs_own_avg_percent
+        volume_flag_for_summary = low_flag(volume_flag_percent_for_flag, volume_warning_percent, volume_critical_percent)
+
+        weeks_with_ppt_density_ratio = [w for w in weeks if w["pptDensityVsPeerPercent"] is not None][:flakani_window_weeks]
+        long_run_avg_ppt_density_vs_peer_percent = (
+            round(sum(w["pptDensityVsPeerPercent"] for w in weeks_with_ppt_density_ratio) / len(weeks_with_ppt_density_ratio))
+            if weeks_with_ppt_density_ratio else None
+        )
+        ppt_density_flag_for_summary = low_flag(
+            long_run_avg_ppt_density_vs_peer_percent, ppt_density_warning_percent, ppt_density_critical_percent
+        )
+
+        weeks_with_duration_ratio = [w for w in weeks if w["durationVsPeerPercent"] is not None][:flakani_window_weeks]
+        long_run_avg_duration_vs_peer_percent = (
+            round(sum(w["durationVsPeerPercent"] for w in weeks_with_duration_ratio) / len(weeks_with_duration_ratio))
+            if weeks_with_duration_ratio else None
+        )
+        duration_flag_for_summary = low_flag(
+            long_run_avg_duration_vs_peer_percent, duration_warning_percent, duration_critical_percent
+        )
+
+        active_signals_for_summary = sum([
+            flaka_riziko == "Ano",
+            volume_flag_for_summary in ("POZOR", "KRITICKÉ"),
+            ppt_density_flag_for_summary in ("POZOR", "KRITICKÉ"),
+            duration_flag_for_summary in ("POZOR", "KRITICKÉ"),
+            efficiency_flag_for_summary in ("POZOR", "KRITICKÉ"),
+        ])
+        combined_risk_flag_for_summary = "Ano" if active_signals_for_summary >= problem_signal_min_count else "Ne"
+
         summary_rows.append([
             tech, latest["region"], latest["year"], latest["week"],
             latest["plannedVisits"], latest["realizedVisits"],
@@ -475,6 +640,14 @@ def run(workbook: MockWorkbook) -> str:
             latest["kmPerVisit"] if latest["kmPerVisit"] is not None else "",
             long_run_avg_efficiency_ratio if long_run_avg_efficiency_ratio is not None else "",
             efficiency_flag_for_summary,
+            volume_vs_own_avg_percent if volume_vs_own_avg_percent is not None else "",
+            long_run_avg_volume_vs_peer_percent if long_run_avg_volume_vs_peer_percent is not None else "",
+            volume_flag_for_summary,
+            long_run_avg_ppt_density_vs_peer_percent if long_run_avg_ppt_density_vs_peer_percent is not None else "",
+            ppt_density_flag_for_summary,
+            long_run_avg_duration_vs_peer_percent if long_run_avg_duration_vs_peer_percent is not None else "",
+            duration_flag_for_summary,
+            active_signals_for_summary, combined_risk_flag_for_summary,
         ])
 
     summary_header_row = [
@@ -483,9 +656,13 @@ def run(workbook: MockWorkbook) -> str:
         "compliancePercent", "longRunAvgCompliance", "trendDelta",
         "badWeeksInWindow", "flakaRiziko", "maxKmDay",
         "efficiencyRatioPercent", "kmPerVisit", "longRunAvgEfficiencyRatio", "efficiencyFlag",
+        "volumeVsOwnAvgPercent", "longRunAvgVolumeVsPeerPercent", "volumeFlag",
+        "longRunAvgPptDensityVsPeerPercent", "pptDensityFlag",
+        "longRunAvgDurationVsPeerPercent", "durationFlag",
+        "activeSignalCount", "combinedRiskFlag",
     ]
     summary_ws = workbook.get_worksheet("TECHNICIAN_PERFORMANCE_SUMMARY")
-    summary_ws.get_range("A2:T100000").clear()
+    summary_ws.get_range("A2:AC100000").clear()
     summary_ws.get_range_by_indexes(0, 0, 1, len(summary_header_row)).set_values([summary_header_row])
     if summary_rows:
         summary_ws.get_range_by_indexes(1, 0, len(summary_rows), len(summary_header_row)).set_values(summary_rows)

@@ -83,6 +83,13 @@ def main(ref_path, out_path):
     control_ws.append(["URGENCY_BOOST_RAMP_START_RATIO", 0.5, "Confirmed (product owner, 2026-07-09): computeUrgencyBoost() starts ramping once weeksSinceLastVisit reaches this fraction of the POS's own deadline (0.5 = halfway), reaching URGENCY_BOOST_MAX exactly at the deadline. A smooth ramp, not a step function - see computeUrgencyBoost()'s own comment."])
     control_ws.append(["ROUTE_EFFICIENCY_WARNING_PERCENT", 125, "Confirmed (product owner, 2026-07-09, 'Monitoring efektivity - kdo jezdi cik-cak'): a technician's weekly actual-vs-optimal ('matematicke minimum') route km ratio at or above this % triggers the POZOR efficiencyFlag on TECHNICIAN_PERFORMANCE_LOG/SUMMARY/PERFORMANCE."])
     control_ws.append(["ROUTE_EFFICIENCY_CRITICAL_PERCENT", 150, "Confirmed (product owner, 2026-07-09): 'o 50 %+ vyssi nez optimum' - the explicit CRITICAL bar for efficiencyRatioPercent (KRITICKE efficiencyFlag)."])
+    control_ws.append(["VOLUME_WARNING_PERCENT", 70, "Confirmed (product owner, 2026-07-09, 'manazerske triggery' - vyrazne mene navstevnosti nez ostatni): realizedVisits below this % of the network peer average (or the technician's own recent average, whichever is worse) triggers the POZOR volumeFlag."])
+    control_ws.append(["VOLUME_CRITICAL_PERCENT", 50, "Confirmed (product owner, 2026-07-09): the KRITICKE bar for volumeFlag."])
+    control_ws.append(["PPT_DENSITY_WARNING_PERCENT", 70, "Confirmed (product owner, 2026-07-09): 'hodne navstev, ale jednoucelove' - PPT captured per realized visit below this % of the network peer average triggers the POZOR pptDensityFlag. Independent of route km efficiency - a technician can have a perfect route and still be visiting low-value POS."])
+    control_ws.append(["PPT_DENSITY_CRITICAL_PERCENT", 50, "Confirmed (product owner, 2026-07-09): the KRITICKE bar for pptDensityFlag."])
+    control_ws.append(["DURATION_WARNING_PERCENT", 70, "Confirmed (product owner, 2026-07-09): average realized-visit duration (Real duration (h) from SalesApp) below this % of the network peer average triggers the POZOR durationFlag - a directly-measured signal, not a GPS estimate."])
+    control_ws.append(["DURATION_CRITICAL_PERCENT", 50, "Confirmed (product owner, 2026-07-09): the KRITICKE bar for durationFlag."])
+    control_ws.append(["PROBLEM_SIGNAL_MIN_COUNT", 2, "Confirmed (product owner, 2026-07-09: 'GPS je odhad, takze to ani nemusi byt na vinu'): how many of {flaka riziko, volumeFlag, pptDensityFlag, durationFlag, efficiencyFlag} must be simultaneously POZOR/KRITICKE before combinedRiskFlag='Ano' - the gate for the automatic 'problemovy technik' callouts on HOME/EFFICIENCY. No single signal alone (including route efficiency) triggers it."])
 
     # CATEGORY_RULES: copy reference rows + add explicit confirmed default row
     cat_ws = src_wb["CATEGORY_RULES"]
@@ -312,7 +319,7 @@ def main(ref_path, out_path):
     # docs/BUSINESS_RULES.md 15c and ARCHITECTURE.md Compliance Engine entry)
     write_table(
         dst_wb, "VISIT_HISTORY_ACTUAL",
-        ["posId", "date", "week", "year", "executor", "state", "salesAppUid"],
+        ["posId", "date", "week", "year", "executor", "state", "salesAppUid", "durationHours"],
         [],
     )
 
@@ -324,7 +331,7 @@ def main(ref_path, out_path):
     # návštěvy" count on TECHNICIAN_SCORECARD (product owner, 2026-07-06).
     write_table(
         dst_wb, "OTHER_VISIT_LOG",
-        ["posId", "date", "week", "year", "executor", "salesAppUid"],
+        ["posId", "date", "week", "year", "executor", "salesAppUid", "durationHours"],
         [],
     )
 
@@ -332,7 +339,7 @@ def main(ref_path, out_path):
     write_table(
         dst_wb, "COMPLIANCE_LOG",
         ["posId", "technician", "plannedWeek", "plannedYear", "status",
-         "matchedActualDate", "matchedActualWeek", "evaluatedAt"],
+         "matchedActualDate", "matchedActualWeek", "evaluatedAt", "matchedActualDurationHours"],
         [],
     )
 
@@ -362,7 +369,10 @@ def main(ref_path, out_path):
          "posListMon", "posListTue", "posListWed", "posListThu", "posListFri",
          "monthKey",
          "otherVisitsMon", "otherVisitsTue", "otherVisitsWed", "otherVisitsThu", "otherVisitsFri",
-         "totalActualKmWeek", "totalOptimalKmWeek", "efficiencyRatioPercent", "kmPerVisit", "efficiencyFlag"],
+         "totalActualKmWeek", "totalOptimalKmWeek", "efficiencyRatioPercent", "kmPerVisit", "efficiencyFlag",
+         "pptPerVisit", "avgVisitDurationHours",
+         "volumeVsPeerPercent", "pptDensityVsPeerPercent", "durationVsPeerPercent",
+         "volumeFlag", "pptDensityFlag", "durationFlag", "activeSignalCount", "combinedRiskFlag"],
         [],
     )
 
@@ -375,7 +385,11 @@ def main(ref_path, out_path):
          "plannedVisits", "realizedVisits", "splnenoVcas", "splnenoPozde", "nesplneno", "navicEvidovano",
          "compliancePercent", "longRunAvgCompliance", "trendDelta",
          "badWeeksInWindow", "flakaRiziko", "maxKmDay",
-         "efficiencyRatioPercent", "kmPerVisit", "longRunAvgEfficiencyRatio", "efficiencyFlag"],
+         "efficiencyRatioPercent", "kmPerVisit", "longRunAvgEfficiencyRatio", "efficiencyFlag",
+         "volumeVsOwnAvgPercent", "longRunAvgVolumeVsPeerPercent", "volumeFlag",
+         "longRunAvgPptDensityVsPeerPercent", "pptDensityFlag",
+         "longRunAvgDurationVsPeerPercent", "durationFlag",
+         "activeSignalCount", "combinedRiskFlag"],
         [],
     )
 

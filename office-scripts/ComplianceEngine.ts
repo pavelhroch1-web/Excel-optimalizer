@@ -48,6 +48,11 @@
 //     Pending - see core.ts determineComplianceStatus for why "Pending"
 //     exists as a bookkeeping state alongside the four states named in
 //     docs/BUSINESS_RULES.md section 12).
+//   - Since 2026-07-09: also parses "Real duration (h)" from SALESAPP_IMPORT
+//     when present, carrying it through VISIT_HISTORY_ACTUAL/OTHER_VISIT_LOG
+//     into COMPLIANCE_LOG's matchedActualDurationHours - a directly-measured
+//     "Monitoring efektivity" signal (PerformanceEngine.ts's avgVisitDurationHours),
+//     null/blank (never 0) when the column is absent or non-numeric for a row.
 //   - Updates POS_MASTER's lastRealVisitDate/Week and weeksSinceLastVisit -
 //     this closes the real-world feedback loop that was completely missing
 //     in V10.5.5 (see docs/ARCHITECTURE.md Phase 0 finding: VISIT_HISTORY
@@ -291,6 +296,15 @@ function main(workbook: ExcelScript.Workbook) {
   const cState = saIdx("STATE");
   const cStoreUID = saIdx("STORE UID");
   const cExecutor = saIdx("EXECUTOR");
+  // "Real duration (h)" (product owner, 2026-07-09, "Monitoring efektivity" -
+  // vedoucí Field Force týmu: a technician whose visits are anomalously
+  // SHORT compared to peers may be checking boxes rather than genuinely
+  // engaging - a directly-measured signal, independent of (and more
+  // reliable than) the GPS-based route-shape estimate. -1 if the column is
+  // absent from this export - callers treat a missing/non-numeric duration
+  // as "unknown", never as 0 (a 0-hour visit is a data gap, not a real
+  // instant visit).
+  const cDuration = saIdx("REAL DURATION (H)");
   // "Ucel navstevy - Technik - MCHD - Nabeh kampane" (Ano/blank) - the only
   // structured signal in SalesApp for "this specific visit serviced the
   // campaign", confirmed by product owner. Matched by stripping ALL
@@ -345,6 +359,7 @@ function main(workbook: ExcelScript.Workbook) {
     executor: string;
     state: string;
     uid: string;
+    durationHours: number | null;
   }
   interface OtherVisit {
     posId: string;
@@ -353,6 +368,7 @@ function main(workbook: ExcelScript.Workbook) {
     year: number;
     executor: string;
     uid: string;
+    durationHours: number | null;
   }
   let newVisits: ActualVisit[] = [];
   let otherVisits: OtherVisit[] = [];
@@ -390,6 +406,8 @@ function main(workbook: ExcelScript.Workbook) {
     // snapshot predates it) cannot be matched to any planned POS visit, so
     // the row is skipped rather than guessed.
     const resolvedPosId = terminalIdToPosId[String(row[cStoreUID])];
+    const durationRaw = cDuration >= 0 ? Number(row[cDuration]) : NaN;
+    const durationHours = !isNaN(durationRaw) && durationRaw > 0 ? durationRaw : null;
     // Only a "MCHD - Nabeh kampane" = Ano row is a realized CAMPAIGN visit -
     // confirmed by product owner. A Completed/Finalized visit for any other
     // purpose (restocking, lottery ticket pickup, etc.) is a real SalesApp
@@ -399,7 +417,7 @@ function main(workbook: ExcelScript.Workbook) {
     // 2026-07-06 (see file header) - informational only.
     if (cCampaignPurpose == -1 || norm(String(row[cCampaignPurpose])) != "ANO") {
       if (resolvedPosId) {
-        otherVisits.push({ posId: resolvedPosId, date, week, year, executor: String(row[cExecutor]), uid });
+        otherVisits.push({ posId: resolvedPosId, date, week, year, executor: String(row[cExecutor]), uid, durationHours });
       }
       continue;
     }
@@ -414,6 +432,7 @@ function main(workbook: ExcelScript.Workbook) {
       executor: String(row[cExecutor]),
       state,
       uid,
+      durationHours,
     });
   }
 
@@ -444,10 +463,10 @@ function main(workbook: ExcelScript.Workbook) {
   const historyWs = workbook.getWorksheet("VISIT_HISTORY_ACTUAL");
   if (newVisits.length > 0) {
     const rows = newVisits.map((v) => [
-      v.posId, v.date.toISOString().slice(0, 10), v.week, v.year, v.executor, v.state, v.uid,
+      v.posId, v.date.toISOString().slice(0, 10), v.week, v.year, v.executor, v.state, v.uid, v.durationHours ?? "",
     ]);
     const startRow = visitHistoryActual.length > 0 ? visitHistoryActual.length : 1;
-    historyWs.getRangeByIndexes(startRow, 0, rows.length, 7).setValues(rows);
+    historyWs.getRangeByIndexes(startRow, 0, rows.length, 8).setValues(rows);
   }
 
   // OTHER_VISIT_LOG: non-campaign-purpose Completed/Finalized visits, logged
@@ -456,31 +475,33 @@ function main(workbook: ExcelScript.Workbook) {
   const otherVisitWs = workbook.getWorksheet("OTHER_VISIT_LOG");
   if (otherVisits.length > 0) {
     const rows = otherVisits.map((v) => [
-      v.posId, v.date.toISOString().slice(0, 10), v.week, v.year, v.executor, v.uid,
+      v.posId, v.date.toISOString().slice(0, 10), v.week, v.year, v.executor, v.uid, v.durationHours ?? "",
     ]);
     const startRow = otherVisitLog.length > 0 ? otherVisitLog.length : 1;
-    otherVisitWs.getRangeByIndexes(startRow, 0, rows.length, 6).setValues(rows);
+    otherVisitWs.getRangeByIndexes(startRow, 0, rows.length, 7).setValues(rows);
   }
 
   // Full actual-visit set (existing + new) grouped by POS, for matching below
   // and for updating POS_MASTER's last-visit fields.
-  let actualByPos: { [pos: string]: { week: number; year: number; date: string }[] } = {};
+  let actualByPos: { [pos: string]: { week: number; year: number; date: string; durationHours: number | null }[] } = {};
   for (let i = 1; i < visitHistoryActual.length; i++) {
     const pos = String(visitHistoryActual[i][0]);
     if (!actualByPos[pos]) {
       actualByPos[pos] = [];
     }
+    const durationRaw = Number(visitHistoryActual[i][7]);
     actualByPos[pos].push({
       week: Number(visitHistoryActual[i][2]),
       year: Number(visitHistoryActual[i][3]),
       date: String(visitHistoryActual[i][1]),
+      durationHours: !isNaN(durationRaw) && durationRaw > 0 ? durationRaw : null,
     });
   }
   for (const v of newVisits) {
     if (!actualByPos[v.posId]) {
       actualByPos[v.posId] = [];
     }
-    actualByPos[v.posId].push({ week: v.week, year: v.year, date: v.date.toISOString().slice(0, 10) });
+    actualByPos[v.posId].push({ week: v.week, year: v.year, date: v.date.toISOString().slice(0, 10), durationHours: v.durationHours });
   }
 
   // ==========================================================================
@@ -545,6 +566,7 @@ function main(workbook: ExcelScript.Workbook) {
     complianceRows.push([
       planned.posId, planned.tech, planned.week, planned.year, status,
       matched ? matched.date : "", matched ? matched.week : "", now,
+      matched && matched.durationHours !== null ? matched.durationHours : "",
     ]);
     const rawKey = CONTROL_YEAR + "|" + planned.rawWeek;
     if (status == "Pending") {
@@ -560,7 +582,7 @@ function main(workbook: ExcelScript.Workbook) {
     for (const a of actualByPos[posId]) {
       const key = posId + "|" + a.week + "|" + a.year;
       if (!plannedSet[key]) {
-        complianceRows.push([posId, "", a.week, a.year, "Navic_evidovano", a.date, a.week, now]);
+        complianceRows.push([posId, "", a.week, a.year, "Navic_evidovano", a.date, a.week, now, a.durationHours ?? ""]);
       }
     }
   }
@@ -570,7 +592,7 @@ function main(workbook: ExcelScript.Workbook) {
   const complianceStartRow = existingCompliance ? existingCompliance.getRowCount() : 1;
   if (complianceRows.length > 0) {
     complianceWs
-      .getRangeByIndexes(complianceStartRow, 0, complianceRows.length, 8)
+      .getRangeByIndexes(complianceStartRow, 0, complianceRows.length, 9)
       .setValues(complianceRows);
   }
 

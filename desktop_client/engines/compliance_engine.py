@@ -80,6 +80,9 @@ def run(workbook: MockWorkbook) -> str:
     c_state = sa_idx("STATE")
     c_store_uid = sa_idx("STORE UID")
     c_executor = sa_idx("EXECUTOR")
+    # "Real duration (h)" (product owner, 2026-07-09) - see
+    # office-scripts/ComplianceEngine.ts's identical comment.
+    c_duration = sa_idx("REAL DURATION (H)")
 
     def no_space(v: str) -> str:
         return "".join(v.split())
@@ -129,18 +132,20 @@ def run(workbook: MockWorkbook) -> str:
             latest_week = week
             latest_year = year
         resolved_pos_id = terminal_id_to_pos_id.get(str(_at(row, c_store_uid)))
+        duration_raw = _num(_at(row, c_duration)) if c_duration >= 0 else float("nan")
+        duration_hours = duration_raw if duration_raw == duration_raw and duration_raw > 0 else None
         if c_campaign_purpose == -1 or norm(str(_at(row, c_campaign_purpose))) != "ANO":
             if resolved_pos_id:
                 other_visits.append({
                     "posId": resolved_pos_id, "date": date, "week": week, "year": year,
-                    "executor": str(_at(row, c_executor)), "uid": uid,
+                    "executor": str(_at(row, c_executor)), "uid": uid, "durationHours": duration_hours,
                 })
             continue
         if not resolved_pos_id:
             continue
         new_visits.append({
             "posId": resolved_pos_id, "date": date, "week": week, "year": year,
-            "executor": str(_at(row, c_executor)), "state": state, "uid": uid,
+            "executor": str(_at(row, c_executor)), "state": state, "uid": uid, "durationHours": duration_hours,
         })
 
     if latest_week == 0 and len(visit_history_actual) < 2:
@@ -160,31 +165,35 @@ def run(workbook: MockWorkbook) -> str:
     history_ws = workbook.get_worksheet("VISIT_HISTORY_ACTUAL")
     if new_visits:
         rows = [
-            [v["posId"], v["date"].isoformat()[:10], v["week"], v["year"], v["executor"], v["state"], v["uid"]]
+            [v["posId"], v["date"].isoformat()[:10], v["week"], v["year"], v["executor"], v["state"], v["uid"],
+             v["durationHours"] if v["durationHours"] is not None else ""]
             for v in new_visits
         ]
         start_row = len(visit_history_actual) if len(visit_history_actual) > 0 else 1
-        history_ws.get_range_by_indexes(start_row, 0, len(rows), 7).set_values(rows)
+        history_ws.get_range_by_indexes(start_row, 0, len(rows), 8).set_values(rows)
 
     other_visit_ws = workbook.get_worksheet("OTHER_VISIT_LOG")
     if other_visits:
         rows = [
-            [v["posId"], v["date"].isoformat()[:10], v["week"], v["year"], v["executor"], v["uid"]]
+            [v["posId"], v["date"].isoformat()[:10], v["week"], v["year"], v["executor"], v["uid"],
+             v["durationHours"] if v["durationHours"] is not None else ""]
             for v in other_visits
         ]
         start_row = len(other_visit_log) if len(other_visit_log) > 0 else 1
-        other_visit_ws.get_range_by_indexes(start_row, 0, len(rows), 6).set_values(rows)
+        other_visit_ws.get_range_by_indexes(start_row, 0, len(rows), 7).set_values(rows)
 
     actual_by_pos: dict[str, list[dict]] = {}
     for i in range(1, len(visit_history_actual)):
         row = visit_history_actual[i]
         pos = str(row[0])
+        duration_raw = _num(_at(row, 7))
         actual_by_pos.setdefault(pos, []).append({
             "week": int(_num(row[2])), "year": int(_num(row[3])), "date": str(row[1]),
+            "durationHours": duration_raw if duration_raw == duration_raw and duration_raw > 0 else None,
         })
     for v in new_visits:
         actual_by_pos.setdefault(v["posId"], []).append(
-            {"week": v["week"], "year": v["year"], "date": v["date"].isoformat()[:10]}
+            {"week": v["week"], "year": v["year"], "date": v["date"].isoformat()[:10], "durationHours": v["durationHours"]}
         )
 
     # ==========================================================================
@@ -229,6 +238,7 @@ def run(workbook: MockWorkbook) -> str:
         compliance_rows.append([
             planned["posId"], planned["tech"], planned["week"], planned["year"], status,
             matched["date"] if matched else "", matched["week"] if matched else "", now,
+            (matched["durationHours"] if matched and matched["durationHours"] is not None else ""),
         ])
         raw_key = f"{control_year}|{planned['rawWeek']}"
         if status == "Pending":
@@ -240,13 +250,16 @@ def run(workbook: MockWorkbook) -> str:
         for a in actuals:
             key = f"{pos_id}|{a['week']}|{a['year']}"
             if key not in planned_set:
-                compliance_rows.append([pos_id, "", a["week"], a["year"], "Navic_evidovano", a["date"], a["week"], now])
+                compliance_rows.append([
+                    pos_id, "", a["week"], a["year"], "Navic_evidovano", a["date"], a["week"], now,
+                    a["durationHours"] if a["durationHours"] is not None else "",
+                ])
 
     compliance_ws = workbook.get_worksheet("COMPLIANCE_LOG")
     existing_compliance = compliance_ws.get_used_range()
     compliance_start_row = existing_compliance.get_row_count() if existing_compliance else 1
     if compliance_rows:
-        compliance_ws.get_range_by_indexes(compliance_start_row, 0, len(compliance_rows), 8).set_values(compliance_rows)
+        compliance_ws.get_range_by_indexes(compliance_start_row, 0, len(compliance_rows), 9).set_values(compliance_rows)
 
     # ==========================================================================
     # ADVANCE PLAN LIFECYCLE (Published -> Active -> Closed)
