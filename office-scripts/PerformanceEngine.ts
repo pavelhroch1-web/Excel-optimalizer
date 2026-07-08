@@ -403,7 +403,8 @@ function main(workbook: ExcelScript.Workbook) {
     nesplneno: number;
     navicEvidovano: number;
     otherVisits: number;
-    visitsByDay: number[]; // [Mon, Tue, Wed, Thu, Fri]
+    visitsByDay: number[]; // [Mon, Tue, Wed, Thu, Fri] - planned/campaign visits
+    otherVisitsByDay: number[]; // [Mon, Tue, Wed, Thu, Fri] - ad-hoc (OTHER_VISIT_LOG) visits, product owner 2026-07-09: "denní statistiky - plnění vs. neplnění"
     possByDay: string[][]; // realized posIds per weekday, unsorted until output time
   }
   let buckets: { [key: string]: Bucket } = {};
@@ -424,6 +425,7 @@ function main(workbook: ExcelScript.Workbook) {
         navicEvidovano: 0,
         otherVisits: 0,
         visitsByDay: [0, 0, 0, 0, 0],
+        otherVisitsByDay: [0, 0, 0, 0, 0],
         possByDay: [[], [], [], [], []],
       };
     }
@@ -586,7 +588,20 @@ function main(workbook: ExcelScript.Workbook) {
     if (!tech) {
       continue; // genuinely unattributable - skip rather than guess
     }
-    bucketFor(tech, year, week).otherVisits++;
+    const bucket = bucketFor(tech, year, week);
+    bucket.otherVisits++;
+    // Daily breakdown (product owner, 2026-07-09: "denní statistiky techniků
+    // - plnění vs. neplnění") - same day-of-week bucketing as
+    // COMPLIANCE_LOG's visitsByDay above, so planned-vs-ad-hoc can be
+    // compared day for day, not just as weekly totals.
+    const ovDateVal = row[ovIdx("date")];
+    const ovDate = typeof ovDateVal === "string" ? new Date(ovDateVal) : ovDateVal instanceof Date ? ovDateVal : null;
+    if (ovDate) {
+      const jsDay = ovDate.getDay();
+      if (jsDay in dayIndex) {
+        bucket.otherVisitsByDay[dayIndex[jsDay]]++;
+      }
+    }
   }
 
   // ==========================================================================
@@ -701,6 +716,7 @@ function main(workbook: ExcelScript.Workbook) {
       b.otherVisits,
       posListByDay[0], posListByDay[1], posListByDay[2], posListByDay[3], posListByDay[4],
       monthKey,
+      b.otherVisitsByDay[0], b.otherVisitsByDay[1], b.otherVisitsByDay[2], b.otherVisitsByDay[3], b.otherVisitsByDay[4],
     ]);
   }
 
@@ -715,9 +731,13 @@ function main(workbook: ExcelScript.Workbook) {
     "otherVisits",
     "posListMon", "posListTue", "posListWed", "posListThu", "posListFri",
     "monthKey",
+    // Daily planned-vs-ad-hoc stats (product owner, 2026-07-09) - appended at
+    // the end so existing column-index-based readers (TECHNICIAN_SCORECARD/
+    // PERFORMANCE) are unaffected.
+    "otherVisitsMon", "otherVisitsTue", "otherVisitsWed", "otherVisitsThu", "otherVisitsFri",
   ];
   const outWs = workbook.getWorksheet("TECHNICIAN_PERFORMANCE_LOG");
-  outWs.getRange("A2:AC100000").clear(ExcelScript.ClearApplyTo.contents);
+  outWs.getRange("A2:AH100000").clear(ExcelScript.ClearApplyTo.contents);
   outWs.getRangeByIndexes(0, 0, 1, headerRow.length).setValues([headerRow]);
   if (outRows.length > 0) {
     outWs.getRangeByIndexes(1, 0, outRows.length, headerRow.length).setValues(outRows);

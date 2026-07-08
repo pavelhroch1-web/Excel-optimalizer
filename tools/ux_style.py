@@ -866,6 +866,69 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
         r += 1
     r += 1
 
+    # ---- Post-generation summary (product owner, 2026-07-09): "Vybráno X
+    # poboček, PPT: Y" - a one-line answer to "what did the last Planning
+    # Engine run actually produce", right under the pipeline stages so it's
+    # the immediate next thing seen after stage 3 (ROZPIS TECHNIKŮ). Reads
+    # MANAGER_PLAN directly - no new engine field needed (distinct-POS-count
+    # is the same SUMPRODUCT/COUNTIF pattern as "POS pokryto plánem" below,
+    # PPT is a plain SUM). ----
+    ws.merge_cells(f"C{r}:J{r}")
+    plan_summary_cell = ws.cell(r, 3)
+    _summary_pos_range = "MANAGER_PLAN!E2:E200000"
+    plan_summary_cell.value = (
+        f'=IF(COUNTA(MANAGER_PLAN!A:A)<=1,"Zatím žádný vygenerovaný plán",'
+        f'"✅ Vybráno "&SUMPRODUCT(({_summary_pos_range}<>"")/COUNTIF({_summary_pos_range},{_summary_pos_range}&""))'
+        f'&" poboček do plánu, celkové PPT: "&TEXT(SUM(MANAGER_PLAN!M2:M200000),"#,##0"))'
+    )
+    plan_summary_cell.font = Font(bold=True, size=12, color=NAVY)
+    plan_summary_cell.fill = PatternFill("solid", fgColor="E2EFDA")
+    plan_summary_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[r].height = 20
+    r += 2
+
+    # ---- Terminal-type "last used" countdown (product owner, 2026-07-09):
+    # per terminal type (VELKY/SMALL/LI, from TERMINAL_RULES), how many
+    # weeks on average since Active POS of that type were last visited - a
+    # network-wide early-warning signal distinct from any single technician's
+    # scorecard. Higher = worse (opposite direction from the compliance %
+    # cards above), so severity coloring is applied manually rather than via
+    # apply_severity_conditional_formatting's "higher is better" convention.
+    # Reuses NEGLECTED_AFTER_WEEKS/ADVISOR_NEGLECT_WARNING_RATIO_PERCENT
+    # (already the WARNING/CRITICAL cutoffs Advisor Engine itself uses) so
+    # this headline agrees with whatever ADVISOR_LOG would eventually flag,
+    # rather than inventing a second threshold.
+    # ==========================================================================
+    build_section_header(ws, f"C{r}", "TERMINÁLY - PRŮMĚRNÝ POČET TÝDNŮ OD NÁVŠTĚVY")
+    r += 1
+    term_status_range = "POS_MASTER!Q2:Q20000"
+    term_type_range = "POS_MASTER!E2:E20000"
+    term_weeks_range = "POS_MASTER!AA2:AA20000"
+    neglected_after_formula = 'IFERROR(VLOOKUP("NEGLECTED_AFTER_WEEKS",CONTROL!$A:$B,2,FALSE),26)'
+    warn_ratio_formula = 'IFERROR(VLOOKUP("ADVISOR_NEGLECT_WARNING_RATIO_PERCENT",CONTROL!$A:$B,2,FALSE),80)/100'
+    terminal_types = [("VELKY TERMINAL", "C", "D"), ("SMALL TERMINAL", "E", "F"), ("LI", "G", "H")]
+    for term_type, label_col, _value_col in terminal_types:
+        ws[f"{label_col}{r}"] = term_type
+        ws[f"{label_col}{r}"].font = Font(size=9, color="595959")
+        value_cell = f"{label_col}{r+1}"
+        ws[value_cell] = (
+            f'=IFERROR(ROUND(AVERAGEIFS({term_weeks_range},{term_status_range},"Active",'
+            f'{term_type_range},"{term_type}"),1)&" týdnů","Žádná data")'
+        )
+        ws[value_cell].font = Font(bold=True, size=16, color=NAVY)
+        numeric_cell = f'AVERAGEIFS({term_weeks_range},{term_status_range},"Active",{term_type_range},"{term_type}")'
+        ws.conditional_formatting.add(
+            value_cell,
+            FormulaRule(formula=[f"{numeric_cell}>={neglected_after_formula}"], fill=PatternFill("solid", fgColor=STATUS_CRITICAL)),
+        )
+        ws.conditional_formatting.add(
+            value_cell,
+            FormulaRule(formula=[f"{numeric_cell}>={neglected_after_formula}*{warn_ratio_formula}"], fill=PatternFill("solid", fgColor=STATUS_WARNING)),
+        )
+    ws.row_dimensions[r].height = 14
+    ws.row_dimensions[r + 1].height = 20
+    r += 3
+
     # ---- Status strip (live formulas - stays accurate without any manual
     # update). Operational numbers distinct from the compliance KPI cards
     # above (plan size/coverage, not plan vs. reality). Two rows of 3 tiles.

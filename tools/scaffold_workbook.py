@@ -358,7 +358,8 @@ def main(ref_path, out_path):
          "kmMon", "kmTue", "kmWed", "kmThu", "kmFri",
          "otherVisits",
          "posListMon", "posListTue", "posListWed", "posListThu", "posListFri",
-         "monthKey"],
+         "monthKey",
+         "otherVisitsMon", "otherVisitsTue", "otherVisitsWed", "otherVisitsThu", "otherVisitsFri"],
         [],
     )
 

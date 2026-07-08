@@ -41,6 +41,7 @@ class Bucket:
         self.navicEvidovano = 0
         self.otherVisits = 0
         self.visitsByDay = [0, 0, 0, 0, 0]
+        self.otherVisitsByDay = [0, 0, 0, 0, 0]
         self.possByDay: list[list[str]] = [[], [], [], [], []]
 
 
@@ -49,7 +50,10 @@ def _to_date(v) -> datetime.date | None:
         return v.date()
     if isinstance(v, datetime.date):
         return v
-    return None
+    try:
+        return datetime.date.fromisoformat(str(v)[:10])
+    except (ValueError, TypeError):
+        return None
 
 
 def run(workbook: MockWorkbook) -> str:
@@ -258,7 +262,15 @@ def run(workbook: MockWorkbook) -> str:
         tech = planned_tech_by_pos_week.get(f"{pos_id}|{week}|{year}") or pos_technician.get(pos_id, "") or ""
         if not tech:
             continue
-        bucket_for(tech, year, week).otherVisits += 1
+        bucket = bucket_for(tech, year, week)
+        bucket.otherVisits += 1
+        # Daily breakdown (product owner, 2026-07-09) - see
+        # office-scripts/PerformanceEngine.ts's identical comment.
+        ov_date = _to_date(_at(row, ov_idx("date")))
+        if ov_date is not None:
+            weekday = ov_date.weekday()  # Mon=0..Sun=6
+            if weekday in day_index:
+                bucket.otherVisitsByDay[day_index[weekday]] += 1
 
     # ==========================================================================
     # Route-efficiency helpers
@@ -331,6 +343,7 @@ def run(workbook: MockWorkbook) -> str:
             b.otherVisits,
             pos_list_by_day[0], pos_list_by_day[1], pos_list_by_day[2], pos_list_by_day[3], pos_list_by_day[4],
             month_key,
+            b.otherVisitsByDay[0], b.otherVisitsByDay[1], b.otherVisitsByDay[2], b.otherVisitsByDay[3], b.otherVisitsByDay[4],
         ])
 
     header_row = [
@@ -344,9 +357,10 @@ def run(workbook: MockWorkbook) -> str:
         "otherVisits",
         "posListMon", "posListTue", "posListWed", "posListThu", "posListFri",
         "monthKey",
+        "otherVisitsMon", "otherVisitsTue", "otherVisitsWed", "otherVisitsThu", "otherVisitsFri",
     ]
     out_ws = workbook.get_worksheet("TECHNICIAN_PERFORMANCE_LOG")
-    out_ws.get_range("A2:AC100000").clear()
+    out_ws.get_range("A2:AH100000").clear()
     out_ws.get_range_by_indexes(0, 0, 1, len(header_row)).set_values([header_row])
     if out_rows:
         out_ws.get_range_by_indexes(1, 0, len(out_rows), len(header_row)).set_values(out_rows)

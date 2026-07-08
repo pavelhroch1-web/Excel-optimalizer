@@ -907,11 +907,29 @@ All five new `CONTROL` settings (`HOLDBACK_LOOKAHEAD_WEEKS`, `HOLDBACK_TOLERANCE
 config-driven with documented defaults (section 0 "config over code"), added to
 `tools/scaffold_workbook.py` and patched into the real workbook's `CONTROL` sheet.
 
-**5. HOME UI (terminal-type countdown, post-generation summary) and daily technician stats -
-NOT YET IMPLEMENTED**, tracked as the next piece of this round of work.
+**5. HOME UI additions - IMPLEMENTED** (`tools/ux_style.py`'s `build_home()`):
+- Post-generation summary: a one-line live-formula callout right under the pipeline stages -
+  "✅ Vybráno X poboček do plánu, celkové PPT: Y" (distinct-POS count over `MANAGER_PLAN`, same
+  `SUMPRODUCT`/`COUNTIF` distinct-count pattern already used elsewhere on HOME; PPT is a plain
+  `SUM`), or "Zatím žádný vygenerovaný plán" before the first Planning Engine run.
+- Terminal-type "last used" countdown: a new "TERMINÁLY - PRŮMĚRNÝ POČET TÝDNŮ OD NÁVŠTĚVY" section
+  with one tile per terminal type (VELKY TERMINAL / SMALL TERMINAL / LI), each an `AVERAGEIFS` over
+  `POS_MASTER.weeksSinceLastVisit` for `status=Active` POS of that type. Severity-colored (WARNING/
+  CRITICAL) using the SAME `NEGLECTED_AFTER_WEEKS`/`ADVISOR_NEGLECT_WARNING_RATIO_PERCENT` `CONTROL`
+  thresholds Advisor Engine itself uses, deliberately - this headline agrees with whatever
+  `ADVISOR_LOG` would eventually flag rather than inventing a second threshold.
+
+**6. Daily technician stats (planned vs. ad-hoc, per day) - IMPLEMENTED.** `PerformanceEngine.ts`'s
+`Bucket` gained `otherVisitsByDay` (Mon-Fri), populated from `OTHER_VISIT_LOG`'s own `date` column
+with the same day-of-week bucketing `visitsByDay` already uses for `COMPLIANCE_LOG`'s realized-visit
+dates. Five new `TECHNICIAN_PERFORMANCE_LOG` columns (`otherVisitsMon`..`otherVisitsFri`) appended at
+the END of the row (after `monthKey`) so existing column-index-based readers
+(`TECHNICIAN_SCORECARD`/`PERFORMANCE`) are unaffected. Verified via a synthetic seed (3 ad-hoc visits
+- 2 Monday, 1 Tuesday - run through both `PerformanceEngine.ts` and `performance_engine.py`) showing
+byte-identical `otherVisitsMon=2, otherVisitsTue=1` output.
 
 All TypeScript changes synced (`tools/check_sync.py` passes, 18 blocks), mirrored into
 `desktop_client/engines/`, and verified equivalent (`tools/sim/compare_engines.py`) on the real
-production dataset (11,605 POS, `ImportEngine.ts`+`PlanningEngine.ts` pipeline) plus the synthetic
-Smart Hold-back seed. Full test suites green: 127 TypeScript (`tests/core.test.ts`), 114 Python
-(`desktop_client/engines/test_core_logic.py`).
+production dataset (11,605 POS, `ImportEngine.ts`+`PlanningEngine.ts` pipeline) plus synthetic Smart
+Hold-back and daily-stats seeds. Full test suites green: 127 TypeScript (`tests/core.test.ts`), 114
+Python (`desktop_client/engines/test_core_logic.py`).
