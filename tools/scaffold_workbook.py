@@ -46,6 +46,13 @@ def main(ref_path, out_path):
 
     for name in REFERENCE_SHEETS_KEEP_AS_IS:
         copy_sheet(src_wb, dst_wb, name)
+    # TERMINAL_RULES is copied verbatim above, including whatever
+    # sheet_state the reference workbook happened to have - explicitly force
+    # it visible (product owner, 2026-07-08: wants the VELKY TERMINAL/SMALL
+    # TERMINAL/LI Ano/Ne toggles reachable, not hidden) rather than relying
+    # on ux_style.HIDDEN_SHEETS alone, since that set only ever HIDES sheets
+    # named in it - it never un-hides a sheet that arrived already hidden.
+    dst_wb["TERMINAL_RULES"].sheet_state = "visible"
 
     # Add GPS bonus config keys to CONTROL (docs/BUSINESS_RULES.md 6a - corrected
     # spec: bounded, capacity-aware overflow, not a hard cap at capacity).
@@ -106,13 +113,17 @@ def main(ref_path, out_path):
              "ONCE_PER_CAMPAIGN", "HARD", "ADDRESS", "NO", 100, "YES", "", "",
              "Preserves V10.5.5 mandatoryPodnik(): one guaranteed slot per campaign run, "
              "best-PTT POS per street+city."],
-            ["GECO", "category", "1GECO", "", 5, "RECURRING", "HARD", "NONE", "NO",
+            ["GECO", "category", "1GECO", "", 5, "RECURRING", "HARD", "ADDRESS", "NO",
              80, "YES", "", "",
              "Scope confirmed as 1GECO only (not the broader KA PARTNERS market), "
-             "guaranteeType=HARD confirmed - product owner, 2026-07-03."],
-            ["CORN", "market", "CORN", "", 4, "RECURRING", "HARD", "NONE", "NO",
+             "guaranteeType=HARD confirmed - product owner, 2026-07-03. dedupBy=ADDRESS "
+             "added 2026-07-08 (product owner: two same-address terminals under the same "
+             "cadence rule must dedupe to the higher-PPT one, same mechanism already used "
+             "by MANDATORY_9PODNIK - see pickMandatory() in core.ts, no code change needed)."],
+            ["CORN", "market", "CORN", "", 4, "RECURRING", "HARD", "ADDRESS", "NO",
              80, "YES", "", "",
-             "HARD/4 weeks confirmed (16 POS = negligible capacity impact)."],
+             "HARD/4 weeks confirmed (16 POS = negligible capacity impact). dedupBy=ADDRESS "
+             "added 2026-07-08 - see GECO's note above, same rationale."],
         ],
     )
 

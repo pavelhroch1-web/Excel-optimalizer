@@ -181,7 +181,10 @@ def pick_mandatory(items: list[POSItem], mandatory_rules: list[CadenceRule]) -> 
             continue
         rule = next((r for r in mandatory_rules if r.ruleId == p.mandatoryRuleId), None)
         if rule and rule.dedupBy == "ADDRESS":
-            key = normalize_address_key(p.ulice + "|" + p.mesto)
+            # Keyed by ruleId + address, not address alone - two POS at the
+            # same address only compete against each other if they fall
+            # under the SAME cadence rule (product owner, 2026-07-08).
+            key = p.mandatoryRuleId + "|" + normalize_address_key(p.ulice + "|" + p.mesto)
             if key not in by_address or p.ppt > by_address[key].ppt:
                 by_address[key] = p
         else:

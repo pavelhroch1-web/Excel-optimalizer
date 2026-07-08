@@ -144,6 +144,18 @@ function main(workbook: ExcelScript.Workbook) {
   // Verbatim from office-scripts/shared/core.ts - do not hand-edit here.
   // ==========================================================================
 
+  function isoWeekNumber(date: Date): { week: number; year: number } {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = (d.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+    d.setUTCDate(d.getUTCDate() - dayNum + 3); // shift to nearest Thursday
+    const isoYear = d.getUTCFullYear();
+    const firstThursday = new Date(Date.UTC(isoYear, 0, 4));
+    const firstDayNum = (firstThursday.getUTCDay() + 6) % 7;
+    firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNum + 3);
+    const week = 1 + Math.round((d.getTime() - firstThursday.getTime()) / (7 * 24 * 3600 * 1000));
+    return { week, year: isoYear };
+  }
+
   interface POSItem {
     pos: string;
     tech: string;
@@ -314,7 +326,14 @@ function main(workbook: ExcelScript.Workbook) {
       }
       const rule = mandatoryRules.find((r) => r.ruleId == p.mandatoryRuleId);
       if (rule && rule.dedupBy == "ADDRESS") {
-        const key = normalizeAddressKey(p.ulice + "|" + p.mesto);
+        // Keyed by ruleId + address, not address alone - two POS at the same
+        // address only compete against each other if they fall under the
+        // SAME cadence rule (product owner, 2026-07-08: "spadaji do stejneho
+        // planovaciho pravidla"). Without the ruleId, a MANDATORY_9PODNIK POS
+        // and a GECO POS that happen to share a street+city would be cross-
+        // deduped against each other, which is a different (unintended)
+        // guarantee than either rule actually makes.
+        const key = p.mandatoryRuleId + "|" + normalizeAddressKey(p.ulice + "|" + p.mesto);
         if (!byAddress[key] || p.ppt > byAddress[key].ppt) {
           byAddress[key] = p;
         }
@@ -560,7 +579,17 @@ function main(workbook: ExcelScript.Workbook) {
     return null;
   }
 
-  const START_WEEK = setting("CAMPAIGN_START_WEEK", 30);
+  // Dynamic "current week" (product owner, 2026-07-08: "uz zadne manualni
+  // prepisovani startovniho tydne v Excelu") - CAMPAIGN_START_WEEK/YEAR
+  // default to TODAY's real ISO week/year (isoWeekNumber, same SYNC-BLOCK
+  // function ComplianceEngine.ts/ReportingEngine.ts already use for the real
+  // calendar "now") whenever the CONTROL row is left blank, so a fresh
+  // Planning Engine run always starts its rolling window at the actual
+  // current week with zero manual upkeep. A CONTROL value, if present,
+  // still wins - kept as an explicit escape hatch (testing, or a deliberate
+  // future-dated start), not the default path.
+  const nowIso = isoWeekNumber(new Date());
+  const START_WEEK = settingOptional("CAMPAIGN_START_WEEK") ?? nowIso.week;
   const CAMPAIGN_LENGTH = setting("CAMPAIGN_LENGTH", 4);
   const TARGET_DAY = setting("TARGET_VISITS_DAY", 8);
   // Optional: a flat weekly capacity target, used instead of deriving
@@ -571,7 +600,7 @@ function main(workbook: ExcelScript.Workbook) {
   const TARGET_WEEK = settingOptional("TARGET_VISITS_WEEK");
   const STANDARD_GAP = setting("STANDARD_VISIT_GAP", 8);
   const NEGLECTED_AFTER = setting("NEGLECTED_AFTER_WEEKS", 26);
-  const YEAR = setting("YEAR", new Date().getFullYear());
+  const YEAR = settingOptional("YEAR") ?? nowIso.year;
   const SYNC_WINDOW = setting("SYNC_WINDOW_WEEKS", 1);
   const GPS_CONFIG: GpsBonusConfig = {
     enabled: setting("GPS_EXTRA_ENABLED", 0) === 1,
@@ -871,6 +900,32 @@ function main(workbook: ExcelScript.Workbook) {
       groups[tech] = [];
     }
     groups[tech].push(item);
+  }
+
+  // ADDRESS DEDUP FOR MANDATORY-ELIGIBLE ITEMS (product owner, 2026-07-08,
+  // "Kriticke"): two POS with the same street+city under the SAME cadence
+  // rule (dedupBy=ADDRESS - MANDATORY_9PODNIK, GECO, CORN) must never both
+  // be candidates - only the higher-PPT one should survive, for the WHOLE
+  // run, not just within a single pickMandatory() call. Doing this here
+  // (once, right after the candidate list is built, removing the loser from
+  // groups[tech] entirely) - rather than relying on pickMandatory() alone,
+  // which only runs inside each week's selectWeekPOS() - is required
+  // because addGpsBonus() draws from the wider `available` pool afterward:
+  // two same-address POS are very often GPS-adjacent too, so without this
+  // upfront removal the "nearby" GPS bonus could silently re-add the loser
+  // right back in the same week, defeating the dedup entirely (found via
+  // testing 2026-07-08).
+  for (const tech of Object.keys(groups)) {
+    const mandatoryEligible = groups[tech].filter((p) => p.mandatoryRuleId);
+    if (mandatoryEligible.length == 0) {
+      continue;
+    }
+    const kept = new Set(pickMandatory(mandatoryEligible, allHardRules).map((p) => p.pos));
+    const eliminated = mandatoryEligible.filter((p) => !kept.has(p.pos));
+    if (eliminated.length > 0) {
+      const eliminatedIds = new Set(eliminated.map((p) => p.pos));
+      groups[tech] = groups[tech].filter((p) => !eliminatedIds.has(p.pos));
+    }
   }
 
   // GEO CLUSTER BONUS (see computeGeoClusterBonus's comment above) - all

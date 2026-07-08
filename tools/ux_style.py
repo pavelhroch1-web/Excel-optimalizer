@@ -104,7 +104,14 @@ IMPORT_UTILITY_SHEETS = ["RAW_DATA", "POS_STATUS_IMPORT", "SALESAPP_IMPORT"]
 # restricted via the API, only invisible in the tab bar).
 HIDDEN_SHEETS = {
     "MANAGER_PLAN", "MANAGER_PLAN_PUBLISHED", "PLAN_LIFECYCLE",
-    "CONTROL", "MARKET_RULES", "TERMINAL_RULES", "CATEGORY_RULES",
+    "CONTROL", "MARKET_RULES", "CATEGORY_RULES",
+    # TERMINAL_RULES deliberately NOT hidden (product owner, 2026-07-08:
+    # wants simple Ano/Ne toggles for VELKY TERMINAL/SMALL TERMINAL/LI on
+    # the main control screen, easy to find) - it already has exactly that
+    # (a YES/NO dropdown per terminal type, read directly by
+    # PlanningEngine.ts's terminalOK() filter), it just needed to be
+    # reachable instead of buried in the hidden technical tab group. See
+    # the HOME quick-link and add_sheet_purpose_notes() entry below.
     "CADENCE_RULES", "PARETO_GROUPS", "SCORE_PROFILES", "ADVISOR_RULES",
     "CAPACITY_OVERRIDE", "COMPLIANCE_LOG", "ADVISOR_LOG",
     "VISIT_HISTORY_ACTUAL", "VISIT_HISTORY", "PLANNING_HORIZON_RULES",
@@ -234,6 +241,11 @@ IMPORT_HUB_GUIDANCE = {
         "Sem vlož export ze SalesApp. Klidně více exportů najednou (např. 2-3 měsíce) - "
         "přidávej pod poslední řádek. Compliance Engine automaticky odstraní duplicity "
         "podle UID návštěvy a zachová historii - bezpečné i pro překrývající se exporty."
+    ),
+    "TERMINAL_RULES": (
+        "Zapni/vypni Ano (YES)/Ne (NO), jaké typy terminálů se mají v dalším běhu Planning "
+        "Engine vůbec uvažovat jako kandidáti na návštěvu. Změna se projeví hned při příštím "
+        "spuštění Planning Engine, nic dalšího se nemusí nastavovat."
     ),
     # Core working screens don't get their own title-banner rows the way
     # HOME/DASHBOARD/IMPORT_HUB do - a banner row would push every real data
@@ -935,6 +947,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
         ("TECHNICIAN_PLAN", "TECHNICIAN_PLAN", "375623"),
         ("POS_MASTER", "POS_MASTER", "7030A0"),
         ("ACTIVITY_PLAN", "ACTIVITY_PLAN", "BF8F00"),
+        ("TYPY TERMINÁLŮ", "TERMINAL_RULES", "BF8F00"),
     ]
     col_idx = 3
     for label, target, color in quick_links:
@@ -2123,6 +2136,11 @@ def hide_technical_sheets(wb):
     for name in HIDDEN_SHEETS:
         if name in wb.sheetnames:
             wb[name].sheet_state = "hidden"
+    # TERMINAL_RULES is deliberately excluded from HIDDEN_SHEETS (see that
+    # set's comment) - forced visible here too, not just at scaffold-build
+    # time, in case a workbook copy ever had it hidden from an older run.
+    if "TERMINAL_RULES" in wb.sheetnames:
+        wb["TERMINAL_RULES"].sheet_state = "visible"
 
 
 def build_dashboard_template(wb):

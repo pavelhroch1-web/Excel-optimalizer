@@ -155,6 +155,26 @@ c = make_item("A3", mand=None)
 mandatory = pick_mandatory([a, b, c], rules)
 check("pickMandatory dedups by address, keeps higher ppt", mandatory == [b])
 
+# --- pickMandatory dedup scoped PER RULE (2026-07-08 fix) ---
+geco_rule = CadenceRule(ruleId="GECO", scope="CATEGORY", matchValue=["1GECO"], minGapWeeks=None,
+                         maxIntervalWeeks=5, intervalType="RECURRING", guaranteeType="HARD",
+                         dedupBy="ADDRESS", campaignChangeOverride=False, priority=80)
+podnik_a = make_item("PODNIK_A", ppt=900, mand="R1")
+podnik_a.ulice, podnik_a.mesto = "Sdilena", "Praha"
+geco_b = make_item("GECO_B", ppt=500, mand="GECO")
+geco_b.ulice, geco_b.mesto = "Sdilena", "Praha"
+cross_rule_result = pick_mandatory([podnik_a, geco_b], [rules[0], geco_rule])
+check("pickMandatory: different rules at the same address are NOT cross-deduped",
+      set(p.pos for p in cross_rule_result) == {"PODNIK_A", "GECO_B"})
+
+geco_low = make_item("GECO_LOW", ppt=100, mand="GECO")
+geco_low.ulice, geco_low.mesto = "Sdilena", "Praha"
+geco_high = make_item("GECO_HIGH", ppt=999, mand="GECO")
+geco_high.ulice, geco_high.mesto = "Sdilena", "Praha"
+same_rule_result = pick_mandatory([geco_low, geco_high, podnik_a], [rules[0], geco_rule])
+check("pickMandatory: same rule at the same address still dedups to higher ppt",
+      set(p.pos for p in same_rule_result) == {"GECO_HIGH", "PODNIK_A"})
+
 # --- selectWeekPOS ---
 pool = [make_item(f"S{i}", score=10 - i) for i in range(5)]
 selected = select_week_pos(pool, capacity=3, mandatory_rules=[], hold_premium=False)

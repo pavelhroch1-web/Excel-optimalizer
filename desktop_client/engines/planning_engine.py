@@ -26,9 +26,11 @@ from .core_logic import (
     compute_geo_cluster_bonus,
     compute_score,
     geo_days,
+    iso_week_number,
     is_overdue_for_cadence_rule,
     matches_cadence_rule_scope,
     norm,
+    pick_mandatory,
     resolve_capacity,
     select_week_pos,
     WorkDay,
@@ -80,7 +82,13 @@ def run(workbook: MockWorkbook) -> str:
                 return None if v != v else v  # isNaN(v) ? None : v
         return None
 
-    START_WEEK = int(setting("CAMPAIGN_START_WEEK", 30))
+    # Dynamic "current week" (product owner, 2026-07-08: no more manually
+    # rewriting the start week in CONTROL) - defaults to TODAY's real ISO
+    # week/year whenever the CONTROL row is blank; an explicit CONTROL value
+    # still wins if present. See PlanningEngine.ts's matching comment.
+    now_iso_week, now_iso_year = iso_week_number(datetime.date.today())
+    start_week_opt = setting_optional("CAMPAIGN_START_WEEK")
+    START_WEEK = int(start_week_opt) if start_week_opt is not None else now_iso_week
     CAMPAIGN_LENGTH = int(setting("CAMPAIGN_LENGTH", 4))
     TARGET_DAY = setting("TARGET_VISITS_DAY", 8)
     # Optional flat weekly capacity target - see resolve_capacity()'s
@@ -88,7 +96,8 @@ def run(workbook: MockWorkbook) -> str:
     TARGET_WEEK = setting_optional("TARGET_VISITS_WEEK")
     STANDARD_GAP = setting("STANDARD_VISIT_GAP", 8)
     NEGLECTED_AFTER = setting("NEGLECTED_AFTER_WEEKS", 26)
-    YEAR = int(setting("YEAR", datetime.date.today().year))
+    year_opt = setting_optional("YEAR")
+    YEAR = int(year_opt) if year_opt is not None else now_iso_year
     SYNC_WINDOW = int(setting("SYNC_WINDOW_WEEKS", 1))
     GPS_CONFIG = GpsBonusConfig(
         enabled=setting("GPS_EXTRA_ENABLED", 0) == 1,
@@ -331,6 +340,25 @@ def run(workbook: MockWorkbook) -> str:
         item.reason += gap_reason
 
         groups.setdefault(tech, []).append(item)
+
+    # ADDRESS DEDUP FOR MANDATORY-ELIGIBLE ITEMS (product owner, 2026-07-08,
+    # "Kriticke"): two POS with the same street+city under the SAME cadence
+    # rule (dedupBy=ADDRESS) must never both be candidates - only the
+    # higher-PPT one should survive, for the WHOLE run, not just within a
+    # single select_week_pos() call. Doing this here (once, removing the
+    # loser from groups[tech] entirely) rather than relying on
+    # pick_mandatory() alone is required because add_gps_bonus() draws from
+    # the wider `available` pool afterward: two same-address POS are very
+    # often GPS-adjacent too, so without this upfront removal the "nearby"
+    # GPS bonus could silently re-add the loser right back in the same week.
+    for tech in groups:
+        mandatory_eligible = [p for p in groups[tech] if p.mandatoryRuleId]
+        if not mandatory_eligible:
+            continue
+        kept = {p.pos for p in pick_mandatory(mandatory_eligible, all_hard_rules)}
+        eliminated_ids = {p.pos for p in mandatory_eligible if p.pos not in kept}
+        if eliminated_ids:
+            groups[tech] = [p for p in groups[tech] if p.pos not in eliminated_ids]
 
     # GEO CLUSTER BONUS - all bonuses computed from each item's BASE score
     # first, THEN applied, so a bonus never leaks into another item's bonus

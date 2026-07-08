@@ -313,6 +313,51 @@ test("address dedup is case- and diacritics-insensitive (Hlavni vs HLAVNÍ is th
   assert.strictEqual(result.length, 1); // deduped to the higher-PPT POS (B)
   assert.strictEqual(result[0].pos, "B");
 });
+test("address dedup is scoped PER RULE, not address alone (2026-07-08 fix): two POS at the same address under DIFFERENT dedupBy=ADDRESS rules must NOT be cross-deduped", () => {
+  const gecoRule: CadenceRule = {
+    ruleId: "GECO",
+    scope: "CATEGORY",
+    matchValue: ["1GECO"],
+    minGapWeeks: null,
+    maxIntervalWeeks: 5,
+    intervalType: "RECURRING",
+    guaranteeType: "HARD",
+    dedupBy: "ADDRESS",
+    campaignChangeOverride: false,
+    priority: 80,
+  };
+  const list = [
+    makeItem({ pos: "PODNIK_A", mandatoryRuleId: "MANDATORY_9PODNIK", ulice: "Sdilena", mesto: "Praha", ppt: 900 }),
+    makeItem({ pos: "GECO_B", mandatoryRuleId: "GECO", ulice: "Sdilena", mesto: "Praha", ppt: 500 }),
+  ];
+  const result = pickMandatory(list, [mandatoryRule, gecoRule]);
+  // Both must survive - each is the sole (and therefore highest-PPT) POS
+  // within its OWN rule's address group, even though they share an address.
+  assert.strictEqual(result.length, 2);
+  assert.ok(result.find((p) => p.pos == "PODNIK_A"));
+  assert.ok(result.find((p) => p.pos == "GECO_B"));
+});
+test("address dedup WITHIN the same rule still applies even with multiple rules present", () => {
+  const gecoRule: CadenceRule = {
+    ruleId: "GECO",
+    scope: "CATEGORY",
+    matchValue: ["1GECO"],
+    minGapWeeks: null,
+    maxIntervalWeeks: 5,
+    intervalType: "RECURRING",
+    guaranteeType: "HARD",
+    dedupBy: "ADDRESS",
+    campaignChangeOverride: false,
+    priority: 80,
+  };
+  const list = [
+    makeItem({ pos: "GECO_LOW", mandatoryRuleId: "GECO", ulice: "Sdilena", mesto: "Praha", ppt: 100 }),
+    makeItem({ pos: "GECO_HIGH", mandatoryRuleId: "GECO", ulice: "Sdilena", mesto: "Praha", ppt: 999 }),
+  ];
+  const result = pickMandatory(list, [mandatoryRule, gecoRule]);
+  assert.strictEqual(result.length, 1);
+  assert.strictEqual(result[0].pos, "GECO_HIGH");
+});
 
 // ==========================================================================
 console.log("selectWeekPOS()");

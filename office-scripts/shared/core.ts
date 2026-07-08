@@ -212,7 +212,14 @@ export function pickMandatory(list: POSItem[], mandatoryRules: CadenceRule[]): P
     }
     const rule = mandatoryRules.find((r) => r.ruleId == p.mandatoryRuleId);
     if (rule && rule.dedupBy == "ADDRESS") {
-      const key = normalizeAddressKey(p.ulice + "|" + p.mesto);
+      // Keyed by ruleId + address, not address alone - two POS at the same
+      // address only compete against each other if they fall under the
+      // SAME cadence rule (product owner, 2026-07-08: "spadaji do stejneho
+      // planovaciho pravidla"). Without the ruleId, a MANDATORY_9PODNIK POS
+      // and a GECO POS that happen to share a street+city would be cross-
+      // deduped against each other, which is a different (unintended)
+      // guarantee than either rule actually makes.
+      const key = p.mandatoryRuleId + "|" + normalizeAddressKey(p.ulice + "|" + p.mesto);
       if (!byAddress[key] || p.ppt > byAddress[key].ppt) {
         byAddress[key] = p;
       }

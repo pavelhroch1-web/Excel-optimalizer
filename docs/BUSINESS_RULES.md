@@ -744,3 +744,98 @@ STATUS: CONFIRMED
 None of these block starting implementation of the *mechanisms* (they are all config-table shaped
 decisions). Per agreement, these are now treated as config values to be tuned during
 implementation, not gates on starting engine-by-engine build-out.
+
+## 16. Import/Planning decoupling, dynamic week, terminal toggles, CORN/GECO address dedup (2026-07-08)
+
+Product owner requested 5 changes; investigation found most of the underlying mechanisms already
+existed (built across earlier sessions) - this section records what was CONFIRMED already working,
+what was a genuine gap and got fixed, and what was explicitly decided against, rather than blindly
+re-implementing everything requested.
+
+**1. Import/Planning decoupling**: ALREADY TRUE architecturally - `ImportEngine.ts` never reads
+SalesApp/writes `weeksSinceLastVisit`/`VISIT_HISTORY_ACTUAL` (only `ComplianceEngine.ts` does), and
+no engine ever calls another engine's logic; all 8 are independent scripts run manually one at a
+time. Running Import never regenerates or touches `MANAGER_PLAN`. `ComplianceEngine.ts` (not
+`ImportEngine.ts`, despite the ask referring to "ImportEngine") is already the "load SalesApp,
+update history + weeksSinceLastVisit" engine, and it too never touches Planning. No code change.
+Note: there is a legacy `VISIT_HISTORY` sheet (distinct from `VISIT_HISTORY_ACTUAL`) carried over
+from V10.5.5 - it is dead data, read by no V11 engine, kept only for reference.
+
+**2. Dynamic week - FIXED**: `CAMPAIGN_START_WEEK`/`YEAR` in `PlanningEngine.ts` now default to
+TODAY's real ISO week/year (`isoWeekNumber(new Date())`, added to `PlanningEngine.ts`'s SYNC-BLOCK -
+it wasn't there before, only in the compliance/reporting/performance engines) whenever the CONTROL
+row is blank. An explicit CONTROL value, if present, still wins - kept as an opt-in escape hatch
+(testing, or a deliberate future-dated start), not the default path. To get fully automatic
+behavior, clear `CAMPAIGN_START_WEEK` and `YEAR` in `CONTROL`. Verified via `tools/sim/`: with both
+blank, Planning Engine picked weeks 28-31 on 2026-07-08 (today's real ISO week 28), TS and Python
+ports produce identical output.
+
+**3. User-friendly terminal type toggles**: ALREADY FULLY IMPLEMENTED as asked - `TERMINAL_RULES`
+(YES/NO per terminal type: VELKY TERMINAL, SMALL TERMINAL, LI) already exists, already has exactly
+this shape, and `PlanningEngine.ts`'s `terminalOK()` already reads it before filtering candidates.
+The only real gap was UX: it was hidden in the technical-sheets tab group. FIXED: unhidden (removed
+from `ux_style.py`'s `HIDDEN_SHEETS`, `hide_technical_sheets()` now explicitly forces it visible),
+given a header-cell guidance comment, and added as a HOME quick-link ("TYPY TERMINÁLŮ"). No new
+mechanism was built - the existing YES/NO dropdown-validated table is now just reachable.
+
+**4a. CORN/GECO maxIntervalWeeks/RECURRING**: ALREADY CONFIRMED CORRECT (from an earlier session) -
+`CADENCE_RULES`: CORN `maxIntervalWeeks=4, intervalType=RECURRING, guaranteeType=HARD`; GECO
+`maxIntervalWeeks=5` (same). No change needed.
+
+**4b. "Náběh kampaně" flexible timing (CORN doesn't have to go in week 1 if capacity is tight, as
+long as it doesn't breach the hard limit)**: INVESTIGATED, NOT IMPLEMENTED - found to be a phantom
+requirement given the current architecture. A CORN/GECO POS only becomes a forced/mandatory
+candidate (`mandatoryRuleId` set) via `isOverdueForCadenceRule()`, which only returns true once
+`weeksSinceLastVisit >= maxIntervalWeeks` (or is unknown/null) - i.e. exactly when there is no more
+slack left to give. Before that point, it is already just a normal scored candidate, competing on
+value like everything else, which already gives it the flexibility to land in whichever week
+capacity allows, without any special-casing. Attempting to add an explicit "defer while there's
+still slack" mechanism on top of this is provably dead code (verified: a synthetic item with
+slack never has `mandatoryRuleId` set in the first place, so the deferral check never fires) -
+implemented, tested, found to have zero effect, and reverted rather than shipped as unexplained
+complexity. If a future need to actively pre-empt lower-value POS for an *approaching* (not yet
+overdue) CORN/GECO deadline arises, that would need a scoring-side change (a bonus as
+`weeksSinceLastVisit` approaches the rule's own `maxIntervalWeeks`), not a scheduling-side one -
+flagged here as a real option, not built now since it wasn't what was actually asked for.
+
+**4c. Address deduplication - FIXED, two real bugs found via testing**:
+- `CADENCE_RULES.dedupBy` for CORN and GECO changed from `NONE` to `ADDRESS` (config-only change,
+  `tools/scaffold_workbook.py` and the real workbook's `CADENCE_RULES` sheet) - the existing
+  `pickMandatory()` mechanism (already used by `MANDATORY_9PODNIK`) needed no code change to start
+  covering CORN/GECO too.
+- BUG FOUND: `pickMandatory()`'s dedup key was address-only, not scoped to the matching rule - two
+  same-address POS under *different* dedupBy=ADDRESS rules (e.g. one MANDATORY_9PODNIK, one GECO)
+  would have been cross-deduped against each other, a different (unintended) guarantee than either
+  rule actually makes. FIXED: key is now `ruleId + "|" + address` (`core.ts`, synced into
+  `PlanningEngine.ts`, ported to `core_logic.py`) - matches "spadají do stejného plánovacího
+  pravidla" exactly. Existing `MANDATORY_9PODNIK` behavior is unchanged (its ruleId was already
+  constant across all its matches).
+- BUG FOUND: `pickMandatory()`'s dedup only ran inside `selectWeekPOS()`, per week - but
+  `addGpsBonus()` afterward draws from the wider `available` pool (not `pickMandatory()`'s
+  filtered result), and two same-address POS are very often GPS-adjacent too (within
+  `GPS_EXTRA_RADIUS_METERS`), so the "nearby" GPS bonus could silently re-add the just-deduped
+  loser right back into the same week's plan, defeating the dedup entirely. Verified with a
+  synthetic same-GPS-location test: both POS were selected despite dedupBy=ADDRESS, until fixed.
+  FIXED: address dedup for mandatory-eligible items now runs ONCE, right after the candidate list
+  is built (before ANY week is planned), physically removing the loser from `groups[tech]` so it
+  can never re-enter via any path (`PlanningEngine.ts`, ported to `planning_engine.py`).
+- Real-data finding: the 16 active CORN-market POS are currently ALL also `9PODNIKC` category, so
+  they were already being deduped via `MANDATORY_9PODNIK` (15/16 survived) before this change -
+  CORN's own dedup rule has not yet been observed to independently trigger on real data (all 16
+  are currently at `weeksSinceLastVisit=4`, one week short of CORN's own deadline). GECO's 387
+  active POS include 18 same-address pairs, all currently at `weeksSinceLastVisit=4` (one week
+  short of GECO's `maxIntervalWeeks=5`) - the fix is verified correct via synthetic testing
+  (`tools/sim/`) but has not yet been observed firing on real data either, since nothing is
+  overdue yet as of 2026-07-08.
+
+**5. Rolling multi-week export**: ALREADY SATISFIED - `TECHNICIAN_PLAN` (`tools/ux_style.py`'s
+`build_technician_plan()`) already shows a technician's ENTIRE current campaign (every week in
+`MANAGER_PLAN`, Draft included, grouped by week), live-formula-driven, exportable via Print/PDF or
+the desktop app's per-technician export - not just the single most-recently-published week. No
+code change.
+
+All TypeScript changes synced (`tools/check_sync.py` passes, 18 blocks), mirrored into
+`desktop_client/engines/` (Python port), and verified equivalent (`tools/sim/compare_engines.py`)
+on the real production dataset (11,605 POS) plus 2 synthetic edge-case seeds (GECO address dedup,
+CORN deferral phantom-requirement check). Full test suites green: 107 TypeScript
+(`tests/core.test.ts`), 94 Python (`desktop_client/engines/test_core_logic.py`).
