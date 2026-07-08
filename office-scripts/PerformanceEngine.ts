@@ -202,6 +202,111 @@ function main(workbook: ExcelScript.Workbook) {
     }
     return Object.values(latest);
   }
+
+  interface GeoPoint {
+    x: number;
+    y: number;
+  }
+
+  // Fallback for computeOptimalRouteKm() when there are too many points for
+  // the exact Held-Karp DP to stay cheap (see that function's comment) - tries
+  // a nearest-neighbor construction from every possible starting point and
+  // keeps the shortest one found. Deterministic, not guaranteed optimal, but a
+  // reasonable approximation rather than refusing to compute anything.
+  function nearestNeighborRouteKm(points: GeoPoint[]): number {
+    const n = points.length;
+    let best = Infinity;
+    for (let start = 0; start < n; start++) {
+      const visited: boolean[] = new Array(n).fill(false);
+      visited[start] = true;
+      let total = 0;
+      let current = start;
+      for (let step = 1; step < n; step++) {
+        let nearest = -1;
+        let nearestDist = Infinity;
+        for (let k = 0; k < n; k++) {
+          if (visited[k]) {
+            continue;
+          }
+          const d = distanceKm(points[current].x, points[current].y, points[k].x, points[k].y);
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearest = k;
+          }
+        }
+        total += nearestDist;
+        visited[nearest] = true;
+        current = nearest;
+      }
+      if (total < best) {
+        best = total;
+      }
+    }
+    return Math.round(best * 10) / 10;
+  }
+
+  // The "matematicke minimum" (product owner, 2026-07-09) a technician's
+  // realized route for one day is compared against: the shortest possible
+  // OPEN path (free start, free end - there is no known depot, see
+  // geoDays()'s own comment on why a fixed start point is deliberately not
+  // assumed) visiting every one of that day's GPS-resolvable stops exactly
+  // once. Exact Held-Karp dynamic program, multi-source (dp[mask][j] =
+  // shortest path visiting exactly the stops in `mask`, ending at stop j,
+  // having started anywhere within `mask` - base case dp[{i}][i] = 0 for every
+  // i, since any single stop could be the start) - O(2^n * n^2), exact and
+  // cheap for n up to ~13 (a realistic daily visit count given
+  // TARGET_VISITS_DAY plus GPS bonus overflow); falls back to
+  // nearestNeighborRouteKm() beyond that rather than growing exponentially
+  // unbounded.
+  function computeOptimalRouteKm(points: GeoPoint[]): number {
+    const n = points.length;
+    if (n < 2) {
+      return 0;
+    }
+    if (n > 13) {
+      return nearestNeighborRouteKm(points);
+    }
+    const dist: number[][] = [];
+    for (let i = 0; i < n; i++) {
+      dist.push([]);
+      for (let j = 0; j < n; j++) {
+        dist[i].push(distanceKm(points[i].x, points[i].y, points[j].x, points[j].y));
+      }
+    }
+    const full = 1 << n;
+    const INF = Infinity;
+    let dp: number[][] = [];
+    for (let mask = 0; mask < full; mask++) {
+      dp.push(new Array(n).fill(INF));
+    }
+    for (let i = 0; i < n; i++) {
+      dp[1 << i][i] = 0;
+    }
+    for (let mask = 1; mask < full; mask++) {
+      for (let j = 0; j < n; j++) {
+        if (!(mask & (1 << j)) || dp[mask][j] == INF) {
+          continue;
+        }
+        for (let k = 0; k < n; k++) {
+          if (mask & (1 << k)) {
+            continue;
+          }
+          const nextMask = mask | (1 << k);
+          const candidate = dp[mask][j] + dist[j][k];
+          if (candidate < dp[nextMask][k]) {
+            dp[nextMask][k] = candidate;
+          }
+        }
+      }
+    }
+    let best = INF;
+    for (let j = 0; j < n; j++) {
+      if (dp[full - 1][j] < best) {
+        best = dp[full - 1][j];
+      }
+    }
+    return Math.round(best * 10) / 10;
+  }
   // SYNC-BLOCK-END: core.ts (performance)
 
   // SYNC-BLOCK-START: text.ts
@@ -322,6 +427,13 @@ function main(workbook: ExcelScript.Workbook) {
   const FLAKANI_WINDOW_WEEKS = setting("FLAKANI_WINDOW_WEEKS", 4);
   const FLAKANI_BAD_WEEK_THRESHOLD_PERCENT = setting("FLAKANI_BAD_WEEK_THRESHOLD_PERCENT", 70);
   const FLAKANI_BAD_WEEKS_COUNT = setting("FLAKANI_BAD_WEEKS_COUNT", 2);
+  // Monitoring efektivity (product owner, 2026-07-09): actual-vs-optimal
+  // route km ratio thresholds - "o 50 %+ vyšší než optimum" was given
+  // explicitly as the CRITICAL bar (>=150%), WARNING set at a milder 125%
+  // (product owner's own "cik-cak" framing implies WARNING should trigger
+  // meaningfully before the hard 50%-over line, not right at it).
+  const ROUTE_EFFICIENCY_WARNING_PERCENT = setting("ROUTE_EFFICIENCY_WARNING_PERCENT", 125);
+  const ROUTE_EFFICIENCY_CRITICAL_PERCENT = setting("ROUTE_EFFICIENCY_CRITICAL_PERCENT", 150);
 
   // ==========================================================================
   // PLAN_LIFECYCLE -> which (CONTROL_YEAR, rawWeek) weeks has the manager
@@ -671,6 +783,23 @@ function main(workbook: ExcelScript.Workbook) {
     return resolvedStops >= 2 ? Math.round(totalKm * 10) / 10 : 0;
   }
 
+  // Monitoring efektivity (product owner, 2026-07-09: "chci vidět, kdo jezdí
+  // cik-cak"): the same day's GPS-resolvable stops as routeKmForDay above,
+  // but run through computeOptimalRouteKm() instead of the planned-order
+  // assumption - "matematicke minimum" a manager can compare the realized
+  // route against. Order of posIds does not matter here (computeOptimalRouteKm
+  // finds its own optimal order), unlike routeKmForDay.
+  function optimalRouteKmForDay(posIds: string[]): number {
+    const points: { x: number; y: number }[] = [];
+    for (const posId of [...new Set(posIds)]) {
+      const gps = posGps[posId];
+      if (gps) {
+        points.push(gps);
+      }
+    }
+    return computeOptimalRouteKm(points);
+  }
+
   const now = new Date().toISOString();
   let outRows: (string | number)[][] = [];
   for (const key of Object.keys(buckets)) {
@@ -685,6 +814,37 @@ function main(workbook: ExcelScript.Workbook) {
     }
     const compliancePercent = b.plannedVisits > 0 ? Math.round((b.realizedVisits / b.plannedVisits) * 1000) / 10 : 0;
     const kmByDay = b.possByDay.map((posIds, dayIdx) => routeKmForDay(b.technician, b.year, b.week, dayIdx, posIds));
+    // MONITORING EFEKTIVITY (product owner, 2026-07-09, "vedoucí Field Force
+    // týmu, který mě má krýt záda"): weekly actual-vs-optimal route km and
+    // km-per-visit, the two headline "je to cik-cak, nebo pracuje" signals.
+    // Both totals only count days with >=2 GPS-resolvable stops on EITHER
+    // side (a single-stop day has no "route" to be efficient or inefficient
+    // about) - summed across the week rather than averaged day by day, so a
+    // handful of single-stop/no-GPS days don't dilute or distort the ratio.
+    const optimalKmByDay = b.possByDay.map((posIds) => optimalRouteKmForDay(posIds));
+    let totalActualKm = 0;
+    let totalOptimalKm = 0;
+    for (let d = 0; d < 5; d++) {
+      if (kmByDay[d] > 0 && optimalKmByDay[d] > 0) {
+        totalActualKm += kmByDay[d];
+        totalOptimalKm += optimalKmByDay[d];
+      }
+    }
+    totalActualKm = Math.round(totalActualKm * 10) / 10;
+    totalOptimalKm = Math.round(totalOptimalKm * 10) / 10;
+    // null (blank in the sheet), not 0, when there is nothing measurable yet
+    // this week - a real 0% "perfect" ratio must never be indistinguishable
+    // from "no data".
+    const efficiencyRatioPercent = totalOptimalKm > 0 ? Math.round((totalActualKm / totalOptimalKm) * 100) : null;
+    const kmPerVisit = b.realizedVisits > 0 ? Math.round((totalActualKm / b.realizedVisits) * 10) / 10 : null;
+    const efficiencyFlag =
+      efficiencyRatioPercent === null
+        ? ""
+        : efficiencyRatioPercent >= ROUTE_EFFICIENCY_CRITICAL_PERCENT
+        ? "KRITICKÉ"
+        : efficiencyRatioPercent >= ROUTE_EFFICIENCY_WARNING_PERCENT
+        ? "POZOR"
+        : "OK";
     // Display list of that day's realized POS, in the same order the km
     // figure above was computed from (see orderedPosForDay's comment) - "id
     // - name" per stop, comma-separated, so a manager can see WHICH POS a
@@ -717,6 +877,7 @@ function main(workbook: ExcelScript.Workbook) {
       posListByDay[0], posListByDay[1], posListByDay[2], posListByDay[3], posListByDay[4],
       monthKey,
       b.otherVisitsByDay[0], b.otherVisitsByDay[1], b.otherVisitsByDay[2], b.otherVisitsByDay[3], b.otherVisitsByDay[4],
+      totalActualKm, totalOptimalKm, efficiencyRatioPercent ?? "", kmPerVisit ?? "", efficiencyFlag,
     ]);
   }
 
@@ -735,9 +896,13 @@ function main(workbook: ExcelScript.Workbook) {
     // the end so existing column-index-based readers (TECHNICIAN_SCORECARD/
     // PERFORMANCE) are unaffected.
     "otherVisitsMon", "otherVisitsTue", "otherVisitsWed", "otherVisitsThu", "otherVisitsFri",
+    // Monitoring efektivity (product owner, 2026-07-09) - actual vs. optimal
+    // ("matematicke minimum") route km this week, the resulting ratio, km
+    // per realized visit, and a written flag - see docs/BUSINESS_RULES.md.
+    "totalActualKmWeek", "totalOptimalKmWeek", "efficiencyRatioPercent", "kmPerVisit", "efficiencyFlag",
   ];
   const outWs = workbook.getWorksheet("TECHNICIAN_PERFORMANCE_LOG");
-  outWs.getRange("A2:AH100000").clear(ExcelScript.ClearApplyTo.contents);
+  outWs.getRange("A2:AM100000").clear(ExcelScript.ClearApplyTo.contents);
   outWs.getRangeByIndexes(0, 0, 1, headerRow.length).setValues([headerRow]);
   if (outRows.length > 0) {
     outWs.getRangeByIndexes(1, 0, outRows.length, headerRow.length).setValues(outRows);
@@ -762,6 +927,8 @@ function main(workbook: ExcelScript.Workbook) {
     splnenoVcas: number; splnenoPozde: number; nesplneno: number; navicEvidovano: number;
     compliancePercent: number;
     maxKmDay: number;
+    efficiencyRatioPercent: number | null;
+    kmPerVisit: number | null;
   }
   let byTechWeeks: { [tech: string]: TechWeekEntry[] } = {};
   for (const key of Object.keys(buckets)) {
@@ -782,6 +949,20 @@ function main(workbook: ExcelScript.Workbook) {
     // no way to scan the whole team for who had a bad day.
     const kmByDayForSummary = b.possByDay.map((posIds, dayIdx) => routeKmForDay(b.technician, b.year, b.week, dayIdx, posIds));
     const maxKmDay = Math.max(...kmByDayForSummary);
+    // Same actual-vs-optimal weekly aggregation as the TECHNICIAN_PERFORMANCE_LOG
+    // pass above (not reused directly - buckets are iterated in a separate
+    // pass here - but the same >=2-GPS-resolvable-stops-on-both-sides rule).
+    const optimalKmByDayForSummary = b.possByDay.map((posIds) => optimalRouteKmForDay(posIds));
+    let summaryActualKm = 0;
+    let summaryOptimalKm = 0;
+    for (let d = 0; d < 5; d++) {
+      if (kmByDayForSummary[d] > 0 && optimalKmByDayForSummary[d] > 0) {
+        summaryActualKm += kmByDayForSummary[d];
+        summaryOptimalKm += optimalKmByDayForSummary[d];
+      }
+    }
+    const efficiencyRatioPercentForSummary = summaryOptimalKm > 0 ? Math.round((summaryActualKm / summaryOptimalKm) * 100) : null;
+    const kmPerVisitForSummary = b.realizedVisits > 0 ? Math.round((summaryActualKm / b.realizedVisits) * 10) / 10 : null;
     if (!byTechWeeks[b.technician]) {
       byTechWeeks[b.technician] = [];
     }
@@ -791,6 +972,7 @@ function main(workbook: ExcelScript.Workbook) {
       splnenoVcas: b.splnenoVcas, splnenoPozde: b.splnenoPozde,
       nesplneno: b.nesplneno, navicEvidovano: b.navicEvidovano,
       compliancePercent, maxKmDay,
+      efficiencyRatioPercent: efficiencyRatioPercentForSummary, kmPerVisit: kmPerVisitForSummary,
     });
   }
 
@@ -827,12 +1009,32 @@ function main(workbook: ExcelScript.Workbook) {
     const recentWeeks = weeksWithPlan.slice(0, FLAKANI_WINDOW_WEEKS);
     const badWeeksInWindow = recentWeeks.filter((w) => w.compliancePercent < FLAKANI_BAD_WEEK_THRESHOLD_PERCENT).length;
     const flakaRiziko = badWeeksInWindow >= FLAKANI_BAD_WEEKS_COUNT ? "Ano" : "Ne";
+    // Monitoring efektivity, long-run view (product owner, 2026-07-09): a
+    // sustained pattern over FLAKANI_WINDOW_WEEKS, same window as flaka
+    // riziko above, not just the latest single week - one bad-route week can
+    // be a fluke (a diverted GPS track, an unplanned detour); a sustained
+    // ratio is a real signal. Only weeks with a measurable ratio count
+    // (a week with no multi-stop route days has nothing to average in).
+    const weeksWithRatio = weeks.filter((w) => w.efficiencyRatioPercent !== null).slice(0, FLAKANI_WINDOW_WEEKS);
+    const longRunAvgEfficiencyRatio = weeksWithRatio.length > 0
+      ? Math.round(weeksWithRatio.reduce((s, w) => s + (w.efficiencyRatioPercent as number), 0) / weeksWithRatio.length)
+      : null;
+    const efficiencyFlagForSummary =
+      longRunAvgEfficiencyRatio === null
+        ? ""
+        : longRunAvgEfficiencyRatio >= ROUTE_EFFICIENCY_CRITICAL_PERCENT
+        ? "KRITICKÉ"
+        : longRunAvgEfficiencyRatio >= ROUTE_EFFICIENCY_WARNING_PERCENT
+        ? "POZOR"
+        : "OK";
     summaryRows.push([
       tech, latest.region, latest.year, latest.week,
       latest.plannedVisits, latest.realizedVisits,
       latest.splnenoVcas, latest.splnenoPozde, latest.nesplneno, latest.navicEvidovano,
       latest.compliancePercent, longRunAvgCompliance, trendDelta,
       badWeeksInWindow, flakaRiziko, latest.maxKmDay,
+      latest.efficiencyRatioPercent ?? "", latest.kmPerVisit ?? "",
+      longRunAvgEfficiencyRatio ?? "", efficiencyFlagForSummary,
     ]);
   }
   const summaryHeaderRow = [
@@ -840,9 +1042,12 @@ function main(workbook: ExcelScript.Workbook) {
     "plannedVisits", "realizedVisits", "splnenoVcas", "splnenoPozde", "nesplneno", "navicEvidovano",
     "compliancePercent", "longRunAvgCompliance", "trendDelta",
     "badWeeksInWindow", "flakaRiziko", "maxKmDay",
+    // Monitoring efektivity (product owner, 2026-07-09) - appended at the
+    // end, same rationale as TECHNICIAN_PERFORMANCE_LOG's new columns above.
+    "efficiencyRatioPercent", "kmPerVisit", "longRunAvgEfficiencyRatio", "efficiencyFlag",
   ];
   const summaryWs = workbook.getWorksheet("TECHNICIAN_PERFORMANCE_SUMMARY");
-  summaryWs.getRange("A2:P100000").clear(ExcelScript.ClearApplyTo.contents);
+  summaryWs.getRange("A2:T100000").clear(ExcelScript.ClearApplyTo.contents);
   summaryWs.getRangeByIndexes(0, 0, 1, summaryHeaderRow.length).setValues([summaryHeaderRow]);
   if (summaryRows.length > 0) {
     summaryWs.getRangeByIndexes(1, 0, summaryRows.length, summaryHeaderRow.length).setValues(summaryRows);

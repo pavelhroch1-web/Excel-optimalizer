@@ -17,6 +17,7 @@ from core_logic import (
     ComplianceOutcome,
     DriftAlert,
     GeoClusterConfig,
+    GeoPoint,
     GpsBonusConfig,
     HoldBackConfig,
     NeglectCandidate,
@@ -33,6 +34,7 @@ from core_logic import (
     category_rule,
     compute_failure_rate_by_group,
     compute_geo_cluster_bonus,
+    compute_optimal_route_km,
     compute_score,
     compute_urgency_boost,
     compute_volume_trend,
@@ -460,6 +462,20 @@ check("computeUrgencyBoost: no boost for unknown history (None)",
       compute_urgency_boost(None, 10, 1000, 0.5) == 0)
 check("computeUrgencyBoost: no boost when there is no deadline at all",
       compute_urgency_boost(5, None, 1000, 0.5) == 0)
+
+# --- computeOptimalRouteKm ---
+check("computeOptimalRouteKm: empty points list returns 0", compute_optimal_route_km([]) == 0)
+check("computeOptimalRouteKm: single point returns 0",
+      compute_optimal_route_km([GeoPoint(50, 14)]) == 0)
+check("computeOptimalRouteKm: two points is the direct distance",
+      compute_optimal_route_km([GeoPoint(0, 0), GeoPoint(10, 0)]) == 1110)
+check("computeOptimalRouteKm: three collinear points - end to end, not a detour",
+      compute_optimal_route_km([GeoPoint(0, 0), GeoPoint(10, 0), GeoPoint(20, 0)]) == 2220)
+check("computeOptimalRouteKm: order of input points does not change the result",
+      compute_optimal_route_km([GeoPoint(0, 0), GeoPoint(10, 0), GeoPoint(20, 0)]) ==
+      compute_optimal_route_km([GeoPoint(20, 0), GeoPoint(0, 0), GeoPoint(10, 0)]))
+check("computeOptimalRouteKm: more than 13 points falls back to nearest-neighbor without crashing",
+      compute_optimal_route_km([GeoPoint(i * 10, 0) for i in range(14)]) == 13 * 1110)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

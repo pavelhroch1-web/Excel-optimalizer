@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import datetime
 
-from .core_logic import distance_km, iso_now, iso_week_number, latest_by_key, norm
+from .core_logic import GeoPoint, compute_optimal_route_km, distance_km, iso_now, iso_week_number, latest_by_key, norm
 from .dates_logic import iso_monday
 from .js_compat import at as _at, num as _num
 from .mock_workbook import MockWorkbook
@@ -83,6 +83,10 @@ def run(workbook: MockWorkbook) -> str:
     flakani_window_weeks = int(setting("FLAKANI_WINDOW_WEEKS", 4))
     flakani_bad_week_threshold_percent = setting("FLAKANI_BAD_WEEK_THRESHOLD_PERCENT", 70)
     flakani_bad_weeks_count = int(setting("FLAKANI_BAD_WEEKS_COUNT", 2))
+    # Monitoring efektivity (product owner, 2026-07-09) - see
+    # office-scripts/PerformanceEngine.ts's identical comment.
+    route_efficiency_warning_percent = setting("ROUTE_EFFICIENCY_WARNING_PERCENT", 125)
+    route_efficiency_critical_percent = setting("ROUTE_EFFICIENCY_CRITICAL_PERCENT", 150)
 
     # ==========================================================================
     # PLAN_LIFECYCLE -> tracking-started weeks (raw + true-ISO)
@@ -308,6 +312,16 @@ def run(workbook: MockWorkbook) -> str:
             prev = gps
         return round(total_km * 10) / 10 if resolved_stops >= 2 else 0
 
+    def optimal_route_km_for_day(pos_ids: list[str]) -> float:
+        """Monitoring efektivity (product owner, 2026-07-09) - see
+        office-scripts/PerformanceEngine.ts's identical comment."""
+        points = []
+        for pos_id in dict.fromkeys(pos_ids):
+            gps = pos_gps.get(pos_id)
+            if gps is not None:
+                points.append(GeoPoint(gps[0], gps[1]))
+        return compute_optimal_route_km(points)
+
     # ==========================================================================
     # WRITE TECHNICIAN_PERFORMANCE_LOG
     # ==========================================================================
@@ -323,6 +337,25 @@ def run(workbook: MockWorkbook) -> str:
                 top_area_count = cnt
         compliance_percent = round((b.realizedVisits / b.plannedVisits) * 1000) / 10 if b.plannedVisits > 0 else 0
         km_by_day = [route_km_for_day(b.technician, b.year, b.week, i, pos_ids) for i, pos_ids in enumerate(b.possByDay)]
+        optimal_km_by_day = [optimal_route_km_for_day(pos_ids) for pos_ids in b.possByDay]
+        total_actual_km = 0.0
+        total_optimal_km = 0.0
+        for d in range(5):
+            if km_by_day[d] > 0 and optimal_km_by_day[d] > 0:
+                total_actual_km += km_by_day[d]
+                total_optimal_km += optimal_km_by_day[d]
+        total_actual_km = round(total_actual_km * 10) / 10
+        total_optimal_km = round(total_optimal_km * 10) / 10
+        efficiency_ratio_percent = round((total_actual_km / total_optimal_km) * 100) if total_optimal_km > 0 else None
+        km_per_visit = round((total_actual_km / b.realizedVisits) * 10) / 10 if b.realizedVisits > 0 else None
+        if efficiency_ratio_percent is None:
+            efficiency_flag = ""
+        elif efficiency_ratio_percent >= route_efficiency_critical_percent:
+            efficiency_flag = "KRITICKÉ"
+        elif efficiency_ratio_percent >= route_efficiency_warning_percent:
+            efficiency_flag = "POZOR"
+        else:
+            efficiency_flag = "OK"
         pos_list_by_day = [
             ", ".join(
                 pid + (f" - {pos_name[pid]}" if pos_name.get(pid) else "")
@@ -344,6 +377,8 @@ def run(workbook: MockWorkbook) -> str:
             pos_list_by_day[0], pos_list_by_day[1], pos_list_by_day[2], pos_list_by_day[3], pos_list_by_day[4],
             month_key,
             b.otherVisitsByDay[0], b.otherVisitsByDay[1], b.otherVisitsByDay[2], b.otherVisitsByDay[3], b.otherVisitsByDay[4],
+            total_actual_km, total_optimal_km, efficiency_ratio_percent if efficiency_ratio_percent is not None else "",
+            km_per_visit if km_per_visit is not None else "", efficiency_flag,
         ])
 
     header_row = [
@@ -358,9 +393,10 @@ def run(workbook: MockWorkbook) -> str:
         "posListMon", "posListTue", "posListWed", "posListThu", "posListFri",
         "monthKey",
         "otherVisitsMon", "otherVisitsTue", "otherVisitsWed", "otherVisitsThu", "otherVisitsFri",
+        "totalActualKmWeek", "totalOptimalKmWeek", "efficiencyRatioPercent", "kmPerVisit", "efficiencyFlag",
     ]
     out_ws = workbook.get_worksheet("TECHNICIAN_PERFORMANCE_LOG")
-    out_ws.get_range("A2:AH100000").clear()
+    out_ws.get_range("A2:AM100000").clear()
     out_ws.get_range_by_indexes(0, 0, 1, len(header_row)).set_values([header_row])
     if out_rows:
         out_ws.get_range_by_indexes(1, 0, len(out_rows), len(header_row)).set_values(out_rows)
@@ -380,12 +416,26 @@ def run(workbook: MockWorkbook) -> str:
         compliance_percent = round((b.realizedVisits / b.plannedVisits) * 1000) / 10 if b.plannedVisits > 0 else 0
         km_by_day_for_summary = [route_km_for_day(b.technician, b.year, b.week, i, pos_ids) for i, pos_ids in enumerate(b.possByDay)]
         max_km_day = max(km_by_day_for_summary)
+        optimal_km_by_day_for_summary = [optimal_route_km_for_day(pos_ids) for pos_ids in b.possByDay]
+        summary_actual_km = 0.0
+        summary_optimal_km = 0.0
+        for d in range(5):
+            if km_by_day_for_summary[d] > 0 and optimal_km_by_day_for_summary[d] > 0:
+                summary_actual_km += km_by_day_for_summary[d]
+                summary_optimal_km += optimal_km_by_day_for_summary[d]
+        efficiency_ratio_percent_for_summary = (
+            round((summary_actual_km / summary_optimal_km) * 100) if summary_optimal_km > 0 else None
+        )
+        km_per_visit_for_summary = (
+            round((summary_actual_km / b.realizedVisits) * 10) / 10 if b.realizedVisits > 0 else None
+        )
         by_tech_weeks.setdefault(b.technician, []).append({
             "year": b.year, "week": b.week, "region": top_area,
             "plannedVisits": b.plannedVisits, "realizedVisits": b.realizedVisits,
             "splnenoVcas": b.splnenoVcas, "splnenoPozde": b.splnenoPozde,
             "nesplneno": b.nesplneno, "navicEvidovano": b.navicEvidovano,
             "compliancePercent": compliance_percent, "maxKmDay": max_km_day,
+            "efficiencyRatioPercent": efficiency_ratio_percent_for_summary, "kmPerVisit": km_per_visit_for_summary,
         })
 
     summary_rows: list[list] = []
@@ -402,12 +452,29 @@ def run(workbook: MockWorkbook) -> str:
         recent_weeks = weeks_with_plan[:flakani_window_weeks]
         bad_weeks_in_window = sum(1 for w in recent_weeks if w["compliancePercent"] < flakani_bad_week_threshold_percent)
         flaka_riziko = "Ano" if bad_weeks_in_window >= flakani_bad_weeks_count else "Ne"
+        weeks_with_ratio = [w for w in weeks if w["efficiencyRatioPercent"] is not None][:flakani_window_weeks]
+        long_run_avg_efficiency_ratio = (
+            round(sum(w["efficiencyRatioPercent"] for w in weeks_with_ratio) / len(weeks_with_ratio))
+            if weeks_with_ratio else None
+        )
+        if long_run_avg_efficiency_ratio is None:
+            efficiency_flag_for_summary = ""
+        elif long_run_avg_efficiency_ratio >= route_efficiency_critical_percent:
+            efficiency_flag_for_summary = "KRITICKÉ"
+        elif long_run_avg_efficiency_ratio >= route_efficiency_warning_percent:
+            efficiency_flag_for_summary = "POZOR"
+        else:
+            efficiency_flag_for_summary = "OK"
         summary_rows.append([
             tech, latest["region"], latest["year"], latest["week"],
             latest["plannedVisits"], latest["realizedVisits"],
             latest["splnenoVcas"], latest["splnenoPozde"], latest["nesplneno"], latest["navicEvidovano"],
             latest["compliancePercent"], long_run_avg_compliance, trend_delta,
             bad_weeks_in_window, flaka_riziko, latest["maxKmDay"],
+            latest["efficiencyRatioPercent"] if latest["efficiencyRatioPercent"] is not None else "",
+            latest["kmPerVisit"] if latest["kmPerVisit"] is not None else "",
+            long_run_avg_efficiency_ratio if long_run_avg_efficiency_ratio is not None else "",
+            efficiency_flag_for_summary,
         ])
 
     summary_header_row = [
@@ -415,9 +482,10 @@ def run(workbook: MockWorkbook) -> str:
         "plannedVisits", "realizedVisits", "splnenoVcas", "splnenoPozde", "nesplneno", "navicEvidovano",
         "compliancePercent", "longRunAvgCompliance", "trendDelta",
         "badWeeksInWindow", "flakaRiziko", "maxKmDay",
+        "efficiencyRatioPercent", "kmPerVisit", "longRunAvgEfficiencyRatio", "efficiencyFlag",
     ]
     summary_ws = workbook.get_worksheet("TECHNICIAN_PERFORMANCE_SUMMARY")
-    summary_ws.get_range("A2:P100000").clear()
+    summary_ws.get_range("A2:T100000").clear()
     summary_ws.get_range_by_indexes(0, 0, 1, len(summary_header_row)).set_values([summary_header_row])
     if summary_rows:
         summary_ws.get_range_by_indexes(1, 0, len(summary_rows), len(summary_header_row)).set_values(summary_rows)

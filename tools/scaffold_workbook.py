@@ -81,6 +81,8 @@ def main(ref_path, out_path):
     control_ws.append(["HOLDBACK_TOLERANCE_OTHER_WEEKS", 3, "Confirmed (product owner, 2026-07-09): classification B/C POS can be held back for a campaign starting up to this many weeks out (capped by HOLDBACK_LOOKAHEAD_WEEKS). Smart Hold-back never defers past a POS's own hard deadline (its matched CADENCE_RULES maxIntervalWeeks, else NEGLECTED_AFTER_WEEKS) regardless of this tolerance - see shouldHoldBack() in office-scripts/shared/core.ts."])
     control_ws.append(["URGENCY_BOOST_MAX", 20000, "Confirmed (product owner, 2026-07-09): max score boost computeUrgencyBoost() adds to a POS as it approaches its own deadline (deadlineWeeks), so it isn't starved out of selection by a campaign-driven surge. Kept well below NEGLECTED_BONUS (50000) and classification A (10000000) - only nudges among non-neglected candidates, never overrides the existing hard priority tiers."])
     control_ws.append(["URGENCY_BOOST_RAMP_START_RATIO", 0.5, "Confirmed (product owner, 2026-07-09): computeUrgencyBoost() starts ramping once weeksSinceLastVisit reaches this fraction of the POS's own deadline (0.5 = halfway), reaching URGENCY_BOOST_MAX exactly at the deadline. A smooth ramp, not a step function - see computeUrgencyBoost()'s own comment."])
+    control_ws.append(["ROUTE_EFFICIENCY_WARNING_PERCENT", 125, "Confirmed (product owner, 2026-07-09, 'Monitoring efektivity - kdo jezdi cik-cak'): a technician's weekly actual-vs-optimal ('matematicke minimum') route km ratio at or above this % triggers the POZOR efficiencyFlag on TECHNICIAN_PERFORMANCE_LOG/SUMMARY/PERFORMANCE."])
+    control_ws.append(["ROUTE_EFFICIENCY_CRITICAL_PERCENT", 150, "Confirmed (product owner, 2026-07-09): 'o 50 %+ vyssi nez optimum' - the explicit CRITICAL bar for efficiencyRatioPercent (KRITICKE efficiencyFlag)."])
 
     # CATEGORY_RULES: copy reference rows + add explicit confirmed default row
     cat_ws = src_wb["CATEGORY_RULES"]
@@ -359,7 +361,8 @@ def main(ref_path, out_path):
          "otherVisits",
          "posListMon", "posListTue", "posListWed", "posListThu", "posListFri",
          "monthKey",
-         "otherVisitsMon", "otherVisitsTue", "otherVisitsWed", "otherVisitsThu", "otherVisitsFri"],
+         "otherVisitsMon", "otherVisitsTue", "otherVisitsWed", "otherVisitsThu", "otherVisitsFri",
+         "totalActualKmWeek", "totalOptimalKmWeek", "efficiencyRatioPercent", "kmPerVisit", "efficiencyFlag"],
         [],
     )
 
@@ -371,7 +374,8 @@ def main(ref_path, out_path):
         ["technician", "region", "latestYear", "latestWeek",
          "plannedVisits", "realizedVisits", "splnenoVcas", "splnenoPozde", "nesplneno", "navicEvidovano",
          "compliancePercent", "longRunAvgCompliance", "trendDelta",
-         "badWeeksInWindow", "flakaRiziko", "maxKmDay"],
+         "badWeeksInWindow", "flakaRiziko", "maxKmDay",
+         "efficiencyRatioPercent", "kmPerVisit", "longRunAvgEfficiencyRatio", "efficiencyFlag"],
         [],
     )
 

@@ -933,3 +933,63 @@ All TypeScript changes synced (`tools/check_sync.py` passes, 18 blocks), mirrore
 production dataset (11,605 POS, `ImportEngine.ts`+`PlanningEngine.ts` pipeline) plus synthetic Smart
 Hold-back and daily-stats seeds. Full test suites green: 127 TypeScript (`tests/core.test.ts`), 114
 Python (`desktop_client/engines/test_core_logic.py`).
+
+## 18. Monitoring efektivity - route efficiency detection (2026-07-09)
+
+Product owner, speaking explicitly as vedoucí Field Force týmu ("chci se na dashboard jen podívat a
+hned vidět, kdo ze mě dělá blbce"): implement a real actual-vs-optimal route efficiency signal, not
+just raw daily km (which already existed - `maxKmDay`/`ROUTE_KM_WARNING_KM`/`ROUTE_KM_CRITICAL_KM`).
+
+**"Matematické minimum" - `computeOptimalRouteKm()`** (`office-scripts/shared/core.ts`, synced into
+`PerformanceEngine.ts`, ported to `core_logic.py`): the shortest possible OPEN path (free start, free
+end - no known depot, same reasoning as `geoDays()`'s own comment) visiting a given day's
+GPS-resolvable stops exactly once. Exact multi-source Held-Karp dynamic program for up to 13 points
+(a realistic daily visit count given `TARGET_VISITS_DAY` + GPS bonus overflow), `O(2^n * n^2)`; falls
+back to a nearest-neighbor heuristic (tried from every possible start, keeping the best) beyond that,
+rather than growing exponentially unbounded. Verified via 6 new unit tests per language (collinear
+points, order-independence, the >13-point fallback).
+
+**Weekly metrics** (`PerformanceEngine.ts`/`performance_engine.py`, both `TECHNICIAN_PERFORMANCE_LOG`
+and `TECHNICIAN_PERFORMANCE_SUMMARY`):
+- `totalActualKmWeek` / `totalOptimalKmWeek`: summed only across days where BOTH actual and optimal
+  are measurable (>=2 GPS-resolvable stops) - a single-stop day has no "route" to be efficient or
+  inefficient about, and would otherwise dilute the ratio with a meaningless 0/0.
+- `efficiencyRatioPercent` = actual/optimal * 100 (blank, not 0, when nothing is measurable yet -
+  a real 0% "perfect" score must never be indistinguishable from "no data").
+- `kmPerVisit` = totalActualKmWeek / realizedVisits.
+- `efficiencyFlag` = "KRITICKÉ" (>= `ROUTE_EFFICIENCY_CRITICAL_PERCENT`, default 150 - the explicit
+  "o 50 %+ vyšší než optimum" bar given by the product owner), "POZOR" (>= `ROUTE_EFFICIENCY_WARNING_PERCENT`,
+  default 125), else "OK".
+- `TECHNICIAN_PERFORMANCE_SUMMARY` additionally carries `longRunAvgEfficiencyRatio` - the SAME
+  `FLAKANI_WINDOW_WEEKS` trailing window already used for "flaká riziko", so a single bad-route week
+  (a diverted/forced detour) doesn't trigger KRITICKÉ on its own; a sustained pattern does. This is the
+  signal the summary's own `efficiencyFlag` is actually based on, not the latest single week.
+
+**New screens** (`tools/ux_style.py`):
+- `EFFICIENCY` - a ranked heatmap, technicians sorted worst-to-best by `longRunAvgEfficiencyRatio`
+  automatically (a single `LET()`+`FILTER()`+`SORTBY()` dynamic-array spill, deliberately NOT a native
+  Table like `PERFORMANCE` - Excel does not allow a spilling formula inside a Table's range, and this
+  screen is meant to already be sorted, not something a manager re-sorts themselves), a green→yellow→red
+  `ColorScaleRule` on both ratio columns (the actual "heatmap"), and an auto-surfaced "🚩 X technik(ů)
+  KRITICKY neefektivních: [jména]" callout - the "systém mi to sám vystrčí" requirement.
+- `MANUAL` - static interpretation guide (Czech), written from the Field Force lead's own perspective:
+  what the two headline numbers mean, how to read the color bands, what is/isn't a real signal (a
+  single bad day vs. a sustained pattern, POS with no GPS on record, the "assumed planned order"
+  limitation), concrete escalation thresholds (1x KRITICKÉ = watch, 2x in a row = sit down with them,
+  3x+/sustained = combine with compliance % and flaká riziko), and a step-by-step pre-confrontation
+  checklist.
+- `HOME` gained a new "KDO JEZDÍ CIK-CAK" callout (distinct from the existing raw-km-based "KDO JEZDÍ
+  NEEFEKTIVNĚ") keyed off the new ratio signal, linking straight to `EFFICIENCY`.
+
+Two new `CONTROL` settings (`ROUTE_EFFICIENCY_WARNING_PERCENT`=125, `ROUTE_EFFICIENCY_CRITICAL_PERCENT`=150),
+config-driven per section 0. Verified end-to-end with a synthetic seed (a deliberately zig-zagged
+`MANAGER_PLAN_PUBLISHED` visiting order against 3 collinear GPS points) producing a byte-identical
+150% ratio / KRITICKÉ flag in both `PerformanceEngine.ts` and `performance_engine.py`
+(`tools/sim/compare_engines.py`), plus the full 8-engine pipeline re-verified equivalent on the real
+11,605-POS production dataset. Full test suites green: 133 TypeScript (`tests/core.test.ts`), 120
+Python (`desktop_client/engines/test_core_logic.py`).
+
+**Known limitation, stated plainly to the product owner**: `VISIT_HISTORY_ACTUAL`/`OTHER_VISIT_LOG`
+are still empty in the real workbook (no SalesApp import has happened yet), so `EFFICIENCY`/
+`TECHNICIAN_PERFORMANCE_LOG`/`SUMMARY` will show "Zatím žádná data" until the first real import runs
+- this is expected, not a bug, and was verified via the synthetic seed above rather than real data.

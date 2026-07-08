@@ -69,6 +69,111 @@ export function distanceKm(ax: number, ay: number, bx: number, by: number): numb
   return Math.sqrt(dx * dx + dy * dy);
 }
 
+export interface GeoPoint {
+  x: number;
+  y: number;
+}
+
+// Fallback for computeOptimalRouteKm() when there are too many points for
+// the exact Held-Karp DP to stay cheap (see that function's comment) - tries
+// a nearest-neighbor construction from every possible starting point and
+// keeps the shortest one found. Deterministic, not guaranteed optimal, but a
+// reasonable approximation rather than refusing to compute anything.
+function nearestNeighborRouteKm(points: GeoPoint[]): number {
+  const n = points.length;
+  let best = Infinity;
+  for (let start = 0; start < n; start++) {
+    const visited: boolean[] = new Array(n).fill(false);
+    visited[start] = true;
+    let total = 0;
+    let current = start;
+    for (let step = 1; step < n; step++) {
+      let nearest = -1;
+      let nearestDist = Infinity;
+      for (let k = 0; k < n; k++) {
+        if (visited[k]) {
+          continue;
+        }
+        const d = distanceKm(points[current].x, points[current].y, points[k].x, points[k].y);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearest = k;
+        }
+      }
+      total += nearestDist;
+      visited[nearest] = true;
+      current = nearest;
+    }
+    if (total < best) {
+      best = total;
+    }
+  }
+  return Math.round(best * 10) / 10;
+}
+
+// The "matematicke minimum" (product owner, 2026-07-09) a technician's
+// realized route for one day is compared against: the shortest possible
+// OPEN path (free start, free end - there is no known depot, see
+// geoDays()'s own comment on why a fixed start point is deliberately not
+// assumed) visiting every one of that day's GPS-resolvable stops exactly
+// once. Exact Held-Karp dynamic program, multi-source (dp[mask][j] =
+// shortest path visiting exactly the stops in `mask`, ending at stop j,
+// having started anywhere within `mask` - base case dp[{i}][i] = 0 for every
+// i, since any single stop could be the start) - O(2^n * n^2), exact and
+// cheap for n up to ~13 (a realistic daily visit count given
+// TARGET_VISITS_DAY plus GPS bonus overflow); falls back to
+// nearestNeighborRouteKm() beyond that rather than growing exponentially
+// unbounded.
+export function computeOptimalRouteKm(points: GeoPoint[]): number {
+  const n = points.length;
+  if (n < 2) {
+    return 0;
+  }
+  if (n > 13) {
+    return nearestNeighborRouteKm(points);
+  }
+  const dist: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    dist.push([]);
+    for (let j = 0; j < n; j++) {
+      dist[i].push(distanceKm(points[i].x, points[i].y, points[j].x, points[j].y));
+    }
+  }
+  const full = 1 << n;
+  const INF = Infinity;
+  let dp: number[][] = [];
+  for (let mask = 0; mask < full; mask++) {
+    dp.push(new Array(n).fill(INF));
+  }
+  for (let i = 0; i < n; i++) {
+    dp[1 << i][i] = 0;
+  }
+  for (let mask = 1; mask < full; mask++) {
+    for (let j = 0; j < n; j++) {
+      if (!(mask & (1 << j)) || dp[mask][j] == INF) {
+        continue;
+      }
+      for (let k = 0; k < n; k++) {
+        if (mask & (1 << k)) {
+          continue;
+        }
+        const nextMask = mask | (1 << k);
+        const candidate = dp[mask][j] + dist[j][k];
+        if (candidate < dp[nextMask][k]) {
+          dp[nextMask][k] = candidate;
+        }
+      }
+    }
+  }
+  let best = INF;
+  for (let j = 0; j < n; j++) {
+    if (dp[full - 1][j] < best) {
+      best = dp[full - 1][j];
+    }
+  }
+  return Math.round(best * 10) / 10;
+}
+
 // Category filter with an explicit "*" default row - replaces V10.5.5's
 // implicit startsWith("1")->CORE / else NORMAL code fallback with a visible
 // config row (docs/BUSINESS_RULES.md 15b).

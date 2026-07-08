@@ -31,6 +31,7 @@ import {
   campaignStartsWithin,
   shouldHoldBack,
   computeUrgencyBoost,
+  computeOptimalRouteKm,
 } from "../office-scripts/shared/core";
 
 let passed = 0;
@@ -982,6 +983,36 @@ test("no boost for unknown history (null)", () => {
 });
 test("no boost when there is no deadline at all", () => {
   assert.strictEqual(computeUrgencyBoost(3, null, 1000, 0.5), 0);
+});
+
+console.log("computeOptimalRouteKm()");
+test("empty points list returns 0", () => {
+  assert.strictEqual(computeOptimalRouteKm([]), 0);
+});
+test("single point returns 0 - nothing to travel between", () => {
+  assert.strictEqual(computeOptimalRouteKm([{ x: 50, y: 14 }]), 0);
+});
+test("two points: the only possible path is the direct distance", () => {
+  const km = computeOptimalRouteKm([{ x: 0, y: 0 }, { x: 10, y: 0 }]);
+  assert.strictEqual(km, 1110); // 10 * 111
+});
+test("three collinear points: optimal path is end-to-end, not via a detour", () => {
+  const points = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: 0 }];
+  const km = computeOptimalRouteKm(points);
+  assert.strictEqual(km, 2220); // 1110 + 1110, the two short hops, not 1110+2220 via a bad order
+});
+test("order of input points does not change the optimal result (free start/end)", () => {
+  const forward = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: 0 }];
+  const shuffled = [{ x: 20, y: 0 }, { x: 0, y: 0 }, { x: 10, y: 0 }];
+  assert.strictEqual(computeOptimalRouteKm(forward), computeOptimalRouteKm(shuffled));
+});
+test("more than 13 points falls back to nearest-neighbor without crashing", () => {
+  const points = Array.from({ length: 14 }, (_, i) => ({ x: i * 10, y: 0 }));
+  const km = computeOptimalRouteKm(points);
+  // 14 evenly spaced collinear points, 10 apart - optimal (and what a
+  // nearest-neighbor search starting from either end also finds) is the
+  // straight sweep: 13 hops * 10 * 111.
+  assert.strictEqual(km, 13 * 1110);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

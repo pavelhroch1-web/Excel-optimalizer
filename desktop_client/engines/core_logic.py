@@ -45,6 +45,71 @@ def distance_km(ax: float, ay: float, bx: float, by: float) -> float:
     return math.sqrt(dx * dx + dy * dy)
 
 
+@dataclass
+class GeoPoint:
+    x: float
+    y: float
+
+
+def _nearest_neighbor_route_km(points: list[GeoPoint]) -> float:
+    """Fallback for compute_optimal_route_km() when there are too many
+    points for the exact Held-Karp DP to stay cheap - see that function's
+    docstring. Port of core.ts's nearestNeighborRouteKm()."""
+    n = len(points)
+    best = math.inf
+    for start in range(n):
+        visited = [False] * n
+        visited[start] = True
+        total = 0.0
+        current = start
+        for _step in range(1, n):
+            nearest = -1
+            nearest_dist = math.inf
+            for k in range(n):
+                if visited[k]:
+                    continue
+                d = distance_km(points[current].x, points[current].y, points[k].x, points[k].y)
+                if d < nearest_dist:
+                    nearest_dist = d
+                    nearest = k
+            total += nearest_dist
+            visited[nearest] = True
+            current = nearest
+        best = min(best, total)
+    return round(best * 10) / 10
+
+
+def compute_optimal_route_km(points: list[GeoPoint]) -> float:
+    """Port of core.ts's computeOptimalRouteKm() - the shortest possible
+    OPEN path (free start, free end) visiting every point exactly once.
+    Exact multi-source Held-Karp DP for n<=13, nearest-neighbor fallback
+    beyond that - see core.ts's own comment for the full rationale."""
+    n = len(points)
+    if n < 2:
+        return 0
+    if n > 13:
+        return _nearest_neighbor_route_km(points)
+    dist = [[distance_km(points[i].x, points[i].y, points[j].x, points[j].y) for j in range(n)] for i in range(n)]
+    full = 1 << n
+    INF = math.inf
+    dp = [[INF] * n for _ in range(full)]
+    for i in range(n):
+        dp[1 << i][i] = 0
+    for mask in range(1, full):
+        for j in range(n):
+            if not (mask & (1 << j)) or dp[mask][j] == INF:
+                continue
+            for k in range(n):
+                if mask & (1 << k):
+                    continue
+                next_mask = mask | (1 << k)
+                candidate = dp[mask][j] + dist[j][k]
+                if candidate < dp[next_mask][k]:
+                    dp[next_mask][k] = candidate
+    best = min(dp[full - 1][j] for j in range(n))
+    return round(best * 10) / 10
+
+
 def category_rule(category_rules_table: list[dict], category_normalized: str) -> str:
     """category_rules_table: list of {"key": str, "value": str}, already normalized."""
     star_prefix_rule: Optional[str] = None

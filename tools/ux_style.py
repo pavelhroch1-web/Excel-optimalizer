@@ -19,7 +19,7 @@ get color-only "please don't hand-edit this" cues, never real protection -
 this trade-off is documented in the legend so it isn't a silent gap.
 """
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.formatting.rule import FormulaRule, DataBarRule, IconSetRule
+from openpyxl.formatting.rule import FormulaRule, DataBarRule, IconSetRule, ColorScaleRule
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter, column_index_from_string
@@ -63,6 +63,8 @@ SHEET_GROUPS = [
     ("HOME", "404040"),
     ("TECHNICIAN_SCORECARD", "2E75B6"),
     ("PERFORMANCE", "2E75B6"),
+    ("EFFICIENCY", "2E75B6"),
+    ("MANUAL", "808080"),
     ("WEEK_DASHBOARD", "2E75B6"),
     ("MAP", "2E75B6"),
     ("DASHBOARD", "375623"),
@@ -700,7 +702,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     # reads the actual sheet the stage produces/consumes, not a static
     # instruction. Row numbers are fixed here so the "DALŠÍ KROK" callout
     # above can reference them even though it's written first. ----
-    PIPE_FIRST_ROW = 23  # shifted +1 (KDO FLAKÁ) +4 (KDO JEZDÍ NEEFEKTIVNĚ) from 18
+    PIPE_FIRST_ROW = 27  # shifted +1 (KDO FLAKÁ) +4 (KDO JEZDÍ NEEFEKTIVNĚ) +4 (KDO JEZDÍ CIK-CAK) from 18
     stages = [
         # (num, name, description, status formula, target sheet or None, color)
         (
@@ -803,6 +805,39 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
         ("✅", "E2EFDA", None),
         ("⚠", STATUS_SERIOUS, None),
     ])
+    r += 3
+
+    # ---- "KDO JEZDÍ CIK-CAK" callout (product owner, 2026-07-09, "Monitoring
+    # efektivity" - vedoucí Field Force týmu: "chci se na dashboard jen
+    # podívat a hned vidět, kdo ze mě dělá blbce") - a DIFFERENT signal from
+    # "KDO JEZDÍ NEEFEKTIVNĚ" above (that one is raw km/day; this one is the
+    # actual-vs-optimal ROUTE SHAPE ratio - PerformanceEngine.ts's
+    # efficiencyFlag, sustained over the FLAKANI_WINDOW_WEEKS window, not a
+    # single bad day). Links to the new EFFICIENCY heatmap, same pattern as
+    # every other HOME callout.
+    ws.cell(r, 3, "KDO JEZDÍ CIK-CAK").font = SECTION_FONT
+    r += 1
+    ws.merge_cells(f"C{r}:H{r+1}")
+    zigzag_cell = ws.cell(r, 3)
+    zigzag_cell.value = (
+        '=IFERROR(IF(COUNTIF(TECHNICIAN_PERFORMANCE_SUMMARY!$T:$T,"KRITICKÉ")=0,'
+        '"✅ Žádný technik nejezdí dlouhodobě cik-cak",'
+        '"🚩 "&COUNTIF(TECHNICIAN_PERFORMANCE_SUMMARY!$T:$T,"KRITICKÉ")&'
+        '" technik(ů) KRITICKY neefektivních (nájezd/optimum): "&'
+        'TEXTJOIN(", ",TRUE,FILTER(TECHNICIAN_PERFORMANCE_SUMMARY!$A:$A,'
+        'TECHNICIAN_PERFORMANCE_SUMMARY!$T:$T="KRITICKÉ"))),'
+        '"Zatím žádná data")'
+    )
+    zigzag_cell.font = Font(bold=True, size=13, color=NAVY)
+    zigzag_cell.fill = PatternFill("solid", fgColor="FFF2CC")
+    zigzag_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1, wrap_text=True)
+    ws.row_dimensions[r].height = 20
+    ws.row_dimensions[r + 1].height = 20
+    build_status_badge_conditional(ws, zigzag_cell.coordinate, zigzag_cell.coordinate, rules=[
+        ("✅", "E2EFDA", None),
+        ("🚩", STATUS_SERIOUS, None),
+    ])
+    _nav_button(ws, f"I{r}", "Detail →", "EFFICIENCY", color="2E75B6")
     r += 3
 
     # ---- "DALŠÍ KROK" callout: one live sentence, always the first
@@ -1008,6 +1043,8 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     quick_links = [
         ("SCORECARD", "TECHNICIAN_SCORECARD", "2E75B6"),
         ("PERFORMANCE", "PERFORMANCE", "2E75B6"),
+        ("EFEKTIVITA", "EFFICIENCY", "2E75B6"),
+        ("MANUÁL", "MANUAL", "808080"),
         ("WEEK DASHBOARD", "WEEK_DASHBOARD", "2E75B6"),
         # BUG FIX (found 2026-07-06 during a full test pass): MAP was added
         # to the shared nav rail (dashboard_ui.NAV_RAIL_SHEETS) but never
@@ -1531,6 +1568,290 @@ def build_performance_sheet(wb, n_rows=60):
         o_rng, FormulaRule(formula=[f"O{first_data_row}>$Q$2"], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_CRITICAL),
                             font=Font(bold=True, color=STATUS_CRITICAL), stopIfTrue=True),
     )
+
+    return ws
+
+
+def build_efficiency_sheet(wb, n_rows=60):
+    """EFFICIENCY: "Monitoring efektivity" (product owner, 2026-07-09,
+    speaking as vedoucí Field Force týmu: "chci se na dashboard jen podívat
+    a hned vidět, kdo ze mě dělá blbce") - technicians ranked automatically,
+    worst actual-vs-optimal route-km ratio first, so a manager never has to
+    sort anything themselves to find the outlier.
+
+    Built as a single LET()+SORTBY()+FILTER() dynamic-array spill over
+    TECHNICIAN_PERFORMANCE_SUMMARY (PerformanceEngine.ts's per-technician
+    snapshot, sorted DESCENDING by longRunAvgEfficiencyRatio - the sustained,
+    multi-week signal, not a single-week fluke) - deliberately NOT a native
+    Table like PERFORMANCE (that screen's own docstring explains why: Excel
+    does not allow a spilling array formula inside a Table's range). This
+    screen is meant to always already be sorted worst-first, not something a
+    manager filters/re-sorts themselves - a spill is the right tool here,
+    not a workaround.
+    """
+    TS = "TECHNICIAN_PERFORMANCE_SUMMARY"
+    if "EFFICIENCY" in wb.sheetnames:
+        del wb["EFFICIENCY"]
+    ws = wb.create_sheet("EFFICIENCY")
+    ws.sheet_view.showGridLines = False
+    ws.sheet_view.showRowColHeaders = False
+    for col in "CDEFGHIJ":
+        ws.column_dimensions[col].width = 15
+    build_nav_rail(ws, "EFFICIENCY")
+
+    build_dashboard_banner(
+        ws, "MONITORING EFEKTIVITY",
+        "Kdo jezdí cik-cak a kdo pracuje - seřazeno automaticky, nejhorší nahoře",
+        col_start="C", col_end="J",
+    )
+    ws.freeze_panes = "C11"
+
+    # ---- Team KPI summary row ----
+    build_section_header(ws, "C5", "TÝM CELKEM")
+    cards = [
+        ("C", "D", "Průměrný poměr nájezd/optimum",
+         f'=IFERROR(ROUND(AVERAGE({TS}!$Q$2:$Q$5000),0)&"%","-")', NAVY, WHITE),
+        ("E", "F", "Nejhorší technik (dlouhodobě)",
+         f'=IFERROR(INDEX({TS}!$A$2:$A$5000,MATCH(MAX({TS}!$S$2:$S$5000),{TS}!$S$2:$S$5000,0))'
+         f'&" ("&MAX({TS}!$S$2:$S$5000)&"%)","-")', STATUS_CRITICAL, dashboard_ui.TINT_CRITICAL),
+        ("G", "H", "Technik(ů) v KRITICKÉM stavu",
+         f'=COUNTIF({TS}!$T$2:$T$5000,"KRITICKÉ")', STATUS_CRITICAL, dashboard_ui.TINT_CRITICAL),
+        ("I", "J", "Technik(ů) v POZOR stavu",
+         f'=COUNTIF({TS}!$T$2:$T$5000,"POZOR")', STATUS_WARNING, dashboard_ui.TINT_WARNING),
+    ]
+    build_kpi_card_row(ws, cards, label_row=6, value_row_start=7, value_row_end=7)
+    for c1, c2, label, formula, color, fill in cards:
+        ws[f"{c1}7"].font = font_card_value(size=13, color=color)
+    ws.row_dimensions[7].height = 22
+
+    # ---- Auto-surfaced "problémový technik" callout (product owner: "chci,
+    # aby mi to systém sám vystrčil jako problémového technika") - the same
+    # single-line-callout pattern as HOME's "KDO FLAKÁ"/"KDO JEZDÍ
+    # NEEFEKTIVNĚ", but keyed off the NEW ratio-based signal (efficiencyFlag
+    # == KRITICKÉ, longRunAvgEfficiencyRatio - sustained, not a fluke),
+    # distinct from HOME's existing raw-km-per-day callout. ----
+    ws.cell(9, 3, "PROBLÉMOVÍ TECHNICI").font = SECTION_FONT
+    r = 10
+    ws.merge_cells(f"C{r}:J{r+1}")
+    flag_cell = ws.cell(r, 3)
+    flag_cell.value = (
+        f'=IFERROR(IF(COUNTIF({TS}!$T:$T,"KRITICKÉ")=0,'
+        f'"✅ Žádný technik není aktuálně v kritickém stavu (nájezd/optimum)",'
+        f'"🚩 "&COUNTIF({TS}!$T:$T,"KRITICKÉ")&" technik(ů) KRITICKY neefektivních: "&'
+        f'TEXTJOIN(", ",TRUE,FILTER({TS}!$A:$A,{TS}!$T:$T="KRITICKÉ"))),'
+        f'"Zatím žádná data")'
+    )
+    flag_cell.font = Font(bold=True, size=13, color=NAVY)
+    flag_cell.fill = PatternFill("solid", fgColor="FFF2CC")
+    flag_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1, wrap_text=True)
+    ws.row_dimensions[r].height = 20
+    ws.row_dimensions[r + 1].height = 20
+    build_status_badge_conditional(ws, flag_cell.coordinate, flag_cell.coordinate, rules=[
+        ("✅", "E2EFDA", None),
+        ("🚩", STATUS_SERIOUS, None),
+    ])
+
+    # ==========================================================================
+    # HEATMAP - one spill, sorted worst-first by longRunAvgEfficiencyRatio.
+    # ==========================================================================
+    header_row = 13
+    build_section_header(ws, f"C{header_row - 1}", "TECHNICI SEŘAZENI OD NEJHORŠÍHO PO NEJLEPŠÍHO")
+    headers = [
+        "Technik", "Region", "Poměr nájezd/optimum (tento týden)", "Km na návštěvu",
+        "Dlouhodobý poměr (průměr)", "Km/den (nejhorší)", "Compliance %", "Stav",
+    ]
+    for col, label in zip("CDEFGHIJ", headers):
+        ws[f"{col}{header_row}"] = label
+        ws[f"{col}{header_row}"].font = HEADER_FONT
+        ws[f"{col}{header_row}"].fill = PatternFill("solid", fgColor=NAVY)
+        ws[f"{col}{header_row}"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[header_row].height = 30
+
+    first_data_row = header_row + 1
+    last_row = first_data_row + n_rows - 1
+    spill_formula = (
+        "=IFERROR(LET("
+        f"src,CHOOSE({{1,2,3,4,5,6,7,8}},"
+        f"{TS}!$A$2:$A${1 + n_rows * 4},{TS}!$B$2:$B${1 + n_rows * 4},"
+        f"{TS}!$Q$2:$Q${1 + n_rows * 4},{TS}!$R$2:$R${1 + n_rows * 4},"
+        f"{TS}!$S$2:$S${1 + n_rows * 4},{TS}!$P$2:$P${1 + n_rows * 4},"
+        f"{TS}!$K$2:$K${1 + n_rows * 4},{TS}!$T$2:$T${1 + n_rows * 4}),"
+        f"filtered,FILTER(src,{TS}!$A$2:$A${1 + n_rows * 4}<>\"\"),"
+        "SORTBY(filtered,INDEX(filtered,0,5),-1)"
+        '),"Zatím žádná data - spusť Performance Engine")'
+    )
+    ws[f"C{first_data_row}"] = spill_formula
+    for col in "CDEFGHIJ":
+        for r2 in range(first_data_row, last_row + 1):
+            ws[f"{col}{r2}"].border = CARD_BORDER
+            ws[f"{col}{r2}"].alignment = Alignment(horizontal="center", vertical="center")
+    ws[f"C{first_data_row}"].alignment = Alignment(horizontal="center", vertical="center")
+
+    # Heatmap color scale on the two ratio columns (E = this week, G =
+    # long-run) - green (near/at 100% = optimal) through yellow through red
+    # (>=150% = the explicit "o 50 %+" CRITICAL bar), the actual "heatmap"
+    # visual the product owner asked for.
+    for col in ("E", "G"):
+        rng = f"{col}{first_data_row}:{col}{last_row}"
+        ws.conditional_formatting.add(
+            rng,
+            ColorScaleRule(
+                start_type="num", start_value=100, start_color="63BE7B",
+                mid_type="num", mid_value=125, mid_color="FFEB84",
+                end_type="num", end_value=150, end_color="F8696B",
+            ),
+        )
+    # Stav column (H->col J here) text badge - same KRITICKÉ/POZOR/OK
+    # convention as PerformanceEngine.ts's efficiencyFlag.
+    ws.conditional_formatting.add(
+        f"J{first_data_row}:J{last_row}",
+        FormulaRule(formula=[f'J{first_data_row}="KRITICKÉ"'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_CRITICAL),
+                    font=Font(bold=True, color=STATUS_CRITICAL)),
+    )
+    ws.conditional_formatting.add(
+        f"J{first_data_row}:J{last_row}",
+        FormulaRule(formula=[f'J{first_data_row}="POZOR"'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_WARNING),
+                    font=Font(bold=True, color=STATUS_WARNING)),
+    )
+    ws.conditional_formatting.add(
+        f"J{first_data_row}:J{last_row}",
+        FormulaRule(formula=[f'J{first_data_row}="OK"'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_GOOD),
+                    font=Font(color=STATUS_GOOD)),
+    )
+    # Whole-row highlight for KRITICKÉ technicians - the row jumps out even
+    # without reading the Stav column text (product owner: "chci, aby to
+    # začalo svítit červeně").
+    for col in "CDEFGHI":
+        ws.conditional_formatting.add(
+            f"{col}{first_data_row}:{col}{last_row}",
+            FormulaRule(formula=[f'$J{first_data_row}="KRITICKÉ"'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_CRITICAL)),
+        )
+
+    ws.row_dimensions[first_data_row].height = 20
+
+    return ws
+
+
+def build_manual_sheet(wb):
+    """MANUAL: interpretation guide for the efficiency metrics (product
+    owner, 2026-07-09, speaking as vedoucí Field Force týmu: "napiš, jak mám
+    ty metriky interpretovat a co je už za hranou, kdy je potřeba jít a
+    technika konfrontovat"). Static guidance text, not live formulas - this
+    sheet explains HOW to read EFFICIENCY/PERFORMANCE, it does not duplicate
+    their numbers."""
+    if "MANUAL" in wb.sheetnames:
+        del wb["MANUAL"]
+    ws = wb.create_sheet("MANUAL")
+    ws.sheet_view.showGridLines = False
+    ws.sheet_view.showRowColHeaders = False
+    ws.column_dimensions["A"].width = 3
+    ws.column_dimensions["B"].width = 3
+    ws.column_dimensions["C"].width = 100
+    build_dashboard_banner(
+        ws, "MANUÁL - MONITORING EFEKTIVITY",
+        "Jak číst metriky a kdy jít technika konfrontovat (pohled vedoucího Field Force týmu)",
+        col_start="C", col_end="C", title_size=20,
+    )
+    ws.freeze_panes = "C4"
+
+    sections = [
+        ("1. CO TY DVĚ ČÍSLA ZNAMENAJÍ", [
+            "Poměr nájezd/optimum (efficiencyRatioPercent): kolik % nad matematickým minimem "
+            "technik reálně najezdil. Minimum počítá systém sám pro KAŽDÝ den zvlášť - je to "
+            "nejkratší možná trasa mezi body, které ten den skutečně navštívil (ne odhad, "
+            "přesný výpočet). 100 % = jel prakticky ideálně. 150 % = najezdil o polovinu víc, "
+            "než musel - to je přesně ta hranice, kterou jsi zadal jako kritickou.",
+            "",
+            "Km na návštěvu (kmPerVisit): celkové km za týden děleno počtem realizovaných "
+            "návštěv. Na rozdíl od poměru nájezd/optimum nebere v úvahu, jak blízko u sebe POS "
+            "reálně jsou - proto ho čti VŽDY ve srovnání s kolegy na EFFICIENCY, ne jako "
+            "izolované číslo. Technik ve městě bude mít nižší km/návštěvu než technik na "
+            "venkově, i když jezdí stejně efektivně - to není chyba dat, to je geografie.",
+        ]),
+        ("2. JAK ČÍST BAREVNÉ PÁSMO", [
+            "🟢 OK (do 125 %): normální provoz. Sem spadá naprostá většina týdnů - to je "
+            "očekávaný stav, ne úspěch, který je třeba oceňovat.",
+            "🟡 POZOR (125-149 %): trasa je znatelně horší než ideál. Jeden týden v POZOR "
+            "ještě nic neznamená (viz bod 4 - co NENÍ signál) - sleduj, jestli se opakuje.",
+            "🔴 KRITICKÉ (150 % a víc): o polovinu nebo víc nad optimem. To je konkrétní "
+            "zadání, kdy má systém začít svítit červeně - a EFFICIENCY i HOME (\"KDO JEZDÍ "
+            "CIK-CAK\") to teď dělají automaticky.",
+        ]),
+        ("3. CO JE SIGNÁL A CO JEŠTĚ NENÍ (než začneš řešit)", [
+            "NENÍ signál: jeden KRITICKÝ den v týdnu, kdy měl technik jen 2-3 návštěvy daleko "
+            "od sebe (např. servisní výjezd mimo běžnou trasu) - u málo bodů dokáže jedna "
+            "vynucená zajížďka rozhodit poměr, aniž by šlo o špatnou práci.",
+            "NENÍ signál: jednorázový týden POZOR/KRITICKÉ bez opakování - podívej se na "
+            "sloupec \"Dlouhodobý poměr (průměr)\" na EFFICIENCY (longRunAvgEfficiencyRatio) - "
+            "ten počítá průměr za posledních několik sledovaných týdnů (stejné okno jako "
+            "\"flaká riziko\"), takže jednu špatnou zajížďku sám vyhladí.",
+            "NENÍ signál: POS bez GPS souřadnic v datech - systém takové zastávky do výpočtu "
+            "vůbec nezahrnuje (nehádá vzdálenost), takže chybějící GPS data snižují přesnost, "
+            "ne technikovo skóre.",
+            "JE signál: efficiencyFlag = KRITICKÉ na TECHNICIAN_PERFORMANCE_SUMMARY "
+            "(sloupec efficiencyFlag, počítaný z dlouhodobého průměru, ne z jednoho týdne) "
+            "opakovaně, nebo objeví-li se stejné jméno na EFFICIENCY nahoře žebříčku "
+            "kampaň za kampaní.",
+        ]),
+        ("4. KDY JÍT A KONFRONTOVAT TECHNIKA - konkrétní hranice", [
+            "1x KRITICKÉ (jeden týden): nic nedělej, jen sleduj. Otevři si daný den na "
+            "TECHNICIAN_PERFORMANCE_LOG (sloupce posListMon..posListFri) a mrkni, jestli tam "
+            "není zjevný důvod (velký region, vynucená zajížďka, porucha vozu apod.).",
+            "2x KRITICKÉ ZA SEBOU (nebo dlouhodobý průměr přes 150 %): posaď se s technikem. "
+            "V tuhle chvíli už to není náhoda - buď reálně jezdí neefektivně, nebo je problém "
+            "v datech (špatně zadaná adresa POS, chybějící GPS), a obojí stojí za vyřešení.",
+            "3x a víc / trvale nad 150 % dlouhodobě: to je přesně ten technik, kterého má "
+            "HOME/EFFICIENCY \"sám vystrčit\" nahoru žebříčku - kombinuj s Compliance % a "
+            "\"flaká riziko\" (PERFORMANCE) - pokud u něj SOUČASNĚ klesá i compliance, "
+            "nejde jen o styl jízdy, ale o celkový výkon.",
+            "Kombinuj signály, nerozhoduj podle jednoho čísla: vysoký nájezd/optimum + nízká "
+            "compliance % + \"flaká riziko = Ano\" ve stejném období je mnohem silnější důkaz "
+            "než kterýkoli z nich samotný.",
+        ]),
+        ("5. POSTUP PŘED SCHŮZKOU S TECHNIKEM", [
+            "1) EFFICIENCY - najdi technika v žebříčku, podívej se na \"Dlouhodobý poměr\" "
+            "(ne jen aktuální týden).",
+            "2) TECHNICIAN_PERFORMANCE_LOG - najdi jeho řádky za poslední týdny, otevři "
+            "sloupce posListMon..posListFri pro dny s vysokým km - uvidíš PŘESNĚ které POS "
+            "ten den navštívil a v jakém pořadí.",
+            "3) Porovnej s plánovaným pořadím (TECHNICIAN_PLAN / MANAGER_PLAN_PUBLISHED pro "
+            "stejné datum) - liší se realita od plánu? Pokud ano, zeptej se proč (mohl mít "
+            "dobrý důvod, který systém nezná - objednávka od klienta, uzavírka silnice...).",
+            "4) Teprve pak jdi na schůzku - s konkrétními dny a čísly, ne s obecným pocitem.",
+        ]),
+        ("6. OMEZENÍ, KTERÁ MUSÍŠ ZNÁT", [
+            "\"Reálná trasa\" je odhad, ne GPS trasování v reálném čase: systém neví, v jakém "
+            "pořadí technik body doopravdy objel - předpokládá, že to bylo v pořadí, v jakém "
+            "byly naplánované (MANAGER_PLAN_PUBLISHED). Pokud technik pořadí sám změnil (a "
+            "měl k tomu dobrý důvod), číslo to nepozná a může ho neprávem penalizovat.",
+            "Vzdálenost je vzdušná čára s korekcí (ne silniční síť) - v členitém terénu nebo "
+            "městě s řekou/dálnicí uprostřed může být reálná silniční vzdálenost delší než "
+            "vzdušná čára, u všech techniků stejně, takže srovnání mezi nimi zůstává férové, "
+            "ale absolutní % může být u všech mírně nadhodnocené.",
+            "Bez reálných dat z SalesApp systém nic neukáže: dokud neproběhne první ostrý "
+            "import, TECHNICIAN_PERFORMANCE_LOG/SUMMARY i EFFICIENCY zůstanou prázdné - to "
+            "je očekávaný stav, ne chyba.",
+        ]),
+    ]
+
+    r = 5
+    for title, paragraphs in sections:
+        ws.cell(r, 3, title).font = TITLE_FONT
+        r += 1
+        for para in paragraphs:
+            if para == "":
+                r += 1
+                continue
+            ws.merge_cells(f"C{r}:C{r}")
+            cell = ws.cell(r, 3, para)
+            cell.font = Font(size=11)
+            cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            # Rough row height estimate for wrapped text at this column width
+            # (100 chars wide, ~11pt font) - generous enough that text is
+            # never clipped, occasionally a little tall rather than cut off.
+            ws.row_dimensions[r].height = 15 * (1 + len(para) // 95)
+            r += 1
+        r += 1
 
     return ws
 
@@ -2461,6 +2782,8 @@ def apply_all(wb, control_rows):
         build_technician_scorecard(wb)
     if "TECHNICIAN_PERFORMANCE_SUMMARY" in wb.sheetnames:
         build_performance_sheet(wb)
+        build_efficiency_sheet(wb)
+        build_manual_sheet(wb)
     if scorecard_built:
         # Must run after build_technician_scorecard() (just above) - reuses
         # its unique-technician spill (TECHNICIAN_SCORECARD!$P$2#) rather
