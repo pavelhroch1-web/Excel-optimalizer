@@ -54,6 +54,37 @@ def _to_datetime(v) -> datetime.datetime | None:
 
 _OZ_EXECUTOR_RE = re.compile(r"^3\d*$")
 
+_CZ_DATE_RE = re.compile(r"^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})$")
+
+
+def _parse_plan_date(v) -> datetime.date | None:
+    """Parses MANAGER_PLAN_PUBLISHED's DATE column - PlanningEngine.ts writes
+    it as a locale-formatted STRING (toLocaleDateString("cs-CZ"), "D. M.
+    YYYY"), not a real Date - found 2026-07-11 while matching a freshly
+    published plan for the first time: the old strict `isinstance(...,
+    (date, datetime))` check silently produced zero compliance matches for
+    every future/planned week, since a same-run (or openpyxl-round-tripped)
+    string never behaves like a real Date - same root cause as the
+    matchedActualDate fix in this same file. Handles a real date/datetime
+    object, the Czech "D. M. YYYY" string, or a plain ISO date string."""
+    if isinstance(v, datetime.datetime):
+        return v.date()
+    if isinstance(v, datetime.date):
+        return v
+    if isinstance(v, str) and v.strip():
+        m = _CZ_DATE_RE.match(v.strip())
+        if m:
+            day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            try:
+                return datetime.date(year, month, day)
+            except ValueError:
+                return None
+        try:
+            return datetime.date.fromisoformat(v.strip()[:10])
+        except ValueError:
+            return None
+    return None
+
 
 def is_oz_executor(executor: str) -> bool:
     """Port of office-scripts/ComplianceEngine.ts's isOzExecutor()."""
@@ -288,7 +319,7 @@ def run(workbook: MockWorkbook) -> str:
         pos_id = str(_at(row, c_pos2))
         raw_week = int(_num(_at(row, c_week)))
         date_val = _at(row, c_date2)
-        date = _to_date(date_val) if isinstance(date_val, (datetime.date, datetime.datetime)) else None
+        date = _parse_plan_date(date_val)
         if not pos_id or not raw_week or date is None:
             continue
         week, year = iso_week_number(date)

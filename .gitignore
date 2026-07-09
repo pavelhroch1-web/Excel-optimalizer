@@ -7,3 +7,7 @@ tools/sim/*.json
 __pycache__/
 *.pyc
 node_modules/
+
+# Timestamped backups xlsx_engine_io.backup_workbook() makes next to the
+# real workbook before writing to it - not source, not committed.
+workbook/*.backup_*.xlsx

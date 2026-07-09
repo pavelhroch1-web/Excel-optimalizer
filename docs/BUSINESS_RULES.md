@@ -1371,3 +1371,71 @@ year end) - its coverage/feasibility columns now compute live against the real n
 `PRIORITY`/`OVERRIDE_GAP` defaulted to 5/`NO` for every new row (matching the prior 2
 rows' values) since the source file carries no per-campaign priority signal - worth
 revisiting per-campaign once real priorities are known.
+
+## 24. Tourplan week 28→29→30 migration + critical date-matching bug fix (2026-07-11)
+
+Product owner's ultimate near-term goal: "vložit tam můj tourplán do 28. weeku a na
+week 29 jim naplánovat dojet úplně celou síť z toho co jim chybí a od weeku 30 jim
+začít plánovat nové kampaňové návštěvy... od weeku 30 by měl fungovat tento systém na
+100%". Executed in three steps:
+
+1. **Week 28 baseline**: the uploaded `Tourplan_week_2028_1.xlsx` snapshot's technician
+   assignments were compared against `POS_MASTER.assignedTechnician` - already 100%
+   consistent (6,188/6,188 matched, 0 differences), so no write was needed there.
+2. **Week 29 - transitional catch-up**: directly constructed (bypassing Planning
+   Engine's normal score/capacity-capped selection entirely, per explicit instruction
+   "je mi jedno, že by tam nebylo těch nutných 40 na technika") - every Active
+   VELKY/SMALL TERMINAL POS with no row in `VISIT_HISTORY_ACTUAL` ("POS bez návštěvy",
+   the same real-history-based definition used elsewhere), grouped by technician
+   (`managerOverrideTechnician` ?? `assignedTechnician`), sorted PPT descending,
+   round-robin across Mon-Fri. Produced 2,621 rows written directly into both
+   `MANAGER_PLAN` and `MANAGER_PLAN_PUBLISHED` (published immediately - it's a
+   migration catch-up, not a draft to review) plus a `PLAN_LIFECYCLE` entry.
+3. **Week 30+ - normal algorithm**: cleared a stale `CONTROL.CAMPAIGN_START_WEEK=31`
+   override (would have skipped week 30 entirely) so Planning Engine's resume-from-
+   last-week logic picked up naturally at week 30. Ran `planning_engine.run()` once
+   (`CAMPAIGN_LENGTH=4` → attempted weeks 30-33, week 33 ended up with zero eligible
+   candidates - not a bug, just no POS left in that window), then `publish_engine.run()`
+   three times (one week per run, by design) for weeks 30/31/32, then
+   `start_tracking_engine.run()`.
+
+**Critical bug found while verifying the above**: re-running `performance_engine.run()`
+afterward showed 0 technician/week rows despite claiming "12471 deduped compliance
+evaluations" - traced to `ComplianceEngine.ts`/`compliance_engine.py`'s
+`MANAGER_PLAN_PUBLISHED` → `COMPLIANCE_LOG` matching step requiring the DATE column to
+be a real `Date`/`datetime`. But `PlanningEngine.ts` (and the week-29 script above, to
+match) write that column via `toLocaleDateString("cs-CZ")` - a Czech-formatted STRING
+("1. 6. 2026"), not a real Date. The strict type check silently discarded every
+published-plan row, so `planned_set` stayed empty for every plan this system has ever
+published - **not new to this session, a latent bug from day one, only surfaced now
+because this was the first time a real plan was published and then re-evaluated via
+the openpyxl execution path** (Office Scripts running live in Excel may coincidentally
+behave differently; not verified either way).
+
+A naive fix (fall back to generic `new Date(string)` parsing) was proven unsafe:
+`new Date("1. 6. 2026")` evaluates to **6 January**, not 1 June - Node misreads the
+Czech D.M order as US M.D. Fixed instead with an explicit day/month/year-capturing
+regex (`parsePlanDate()` / `_parse_plan_date()`) added to both engines, verified via a
+dedicated seed (`"1. 6. 2026"` → correctly matched, `Splneno_vcas`,
+`matchedActualDate: "2026-06-01"`, identical in both the TS and Python engine).
+
+**Real workbook remediation**: the bug had already caused `compliance_engine.run()` to
+be re-run once against stale (pre-fix) code, which - since `COMPLIANCE_LOG` is
+append-only by design, never deduped against its own prior rows - duplicated the
+entire 12,509-row historical backfill a second time (25,018 rows) while still
+producing zero matches for weeks 29-33. Remediated by truncating `COMPLIANCE_LOG` back
+to the original 12,509 rows (a fresh backup was taken first) and re-running
+Compliance → Advisor → Performance → Reporting with the fix in place. Result: week 29
+(never-visited POS) now correctly shows 2,621 `Pending` rows; weeks 30-32 show 2,496
+`Splneno_vcas` rows - these are POS the normal campaign algorithm selected that had
+*already* been visited earlier in the real 2026 history (Feb-Jul), which is intended
+behavior (`determineComplianceStatus`: an actual visit at or before the planned week
+counts as on-time), not a new bug. `TECHNICIAN_PERFORMANCE_LOG`/`SUMMARY` now populated
+(99 technician/week rows, 27 technicians). `POS_MASTER`/`RAW_DATA` row counts confirmed
+unchanged throughout (11,606/11,607).
+
+**Follow-up implication**: since this bug affected every plan ever published by this
+system, any historical compliance data evaluated before this fix should be treated as
+unreliable for published-plan matching (the `Navic_evidovano`/historical-backfill rows
+from section 22 are unaffected - those never depended on `MANAGER_PLAN_PUBLISHED`
+matching in the first place).

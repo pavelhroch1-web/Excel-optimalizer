@@ -70,6 +70,16 @@
 //     Real evidence, kept, but never attributed to whichever technician
 //     POS_MASTER happens to have assigned to that POS - we don't build
 //     tourplans for OZ and their activity is not that technician's workload.
+//   - Fixed 2026-07-11: MANAGER_PLAN_PUBLISHED's DATE column is written by
+//     PlanningEngine.ts as a Czech-locale STRING (toLocaleDateString("cs-CZ"),
+//     "D. M. YYYY"), not a real Date - a strict `instanceof Date` check here
+//     silently discarded every published-plan row, so planned_set stayed
+//     empty for every plan ever published by this system (only surfaced once
+//     a real plan was published and re-evaluated for the first time). Fixed
+//     via parsePlanDate() below, an explicit day/month/year-capturing regex -
+//     a naive fallback to `new Date(string)` was verified UNSAFE
+//     (`new Date("1. 6. 2026")` silently returns 6 January, not 1 June).
+//     See docs/BUSINESS_RULES.md section 24.
 //
 // DELIBERATELY NOT IN THIS VERSION (see docs/BUSINESS_RULES.md and the
 // conversation record for why):
@@ -608,6 +618,29 @@ function main(workbook: ExcelScript.Workbook) {
   // MATCH MANAGER_PLAN_PUBLISHED -> COMPLIANCE_LOG
   // ==========================================================================
 
+  // Parses MANAGER_PLAN_PUBLISHED's DATE column - PlanningEngine.ts writes it
+  // as a locale-formatted STRING (toLocaleDateString("cs-CZ"), "D. M.
+  // YYYY"), not a real Date. Found 2026-07-11: the old strict
+  // `dateVal instanceof Date` check below silently produced zero compliance
+  // matches for a freshly published plan (a string is never `instanceof
+  // Date`) - same root cause as this file's matchedActualDate fix. Cannot
+  // just fall back to `new Date(string)` here either - verified that
+  // silently misparses "1. 6. 2026" as 6 January (US month/day order), not
+  // 1 June - a wrong-date bug, not just a null. This explicit day/month/year
+  // regex is the only safe parse for this specific format.
+  function parsePlanDate(v: unknown): Date | null {
+    if (v instanceof Date) {
+      return v;
+    }
+    if (typeof v == "string" && v.trim()) {
+      const m = v.trim().match(/^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})$/);
+      if (m) {
+        return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+      }
+    }
+    return null;
+  }
+
   const mpHeaders = (managerPlanPublished[0] as string[]).map((h) => String(h));
   const mpIdx = (name: string) => mpHeaders.indexOf(name);
   const cWeek = mpIdx("WEEK");
@@ -640,8 +673,8 @@ function main(workbook: ExcelScript.Workbook) {
     const row = managerPlanPublished[i];
     const posId = String(row[cPos2]);
     const rawWeek = Number(row[cWeek]);
-    const dateVal = row[cDate2];
-    if (!posId || !rawWeek || !(dateVal instanceof Date)) {
+    const dateVal = parsePlanDate(row[cDate2]);
+    if (!posId || !rawWeek || dateVal === null) {
       continue;
     }
     const { week, year } = isoWeekNumber(dateVal);
