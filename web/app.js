@@ -40,6 +40,7 @@ function showApp() {
   loginScreen.classList.add("hidden");
   appScreen.classList.remove("hidden");
   loadStatus();
+  loadRules();
 }
 function showLogin() {
   appScreen.classList.add("hidden");
@@ -157,6 +158,137 @@ document.getElementById("download-btn").addEventListener("click", async () => {
     URL.revokeObjectURL(url);
   } catch (err) {
     alert("Chyba: " + err.message);
+  }
+});
+
+// --- Pravidla plánování (existing TERMINAL_RULES/MARKET_RULES/CATEGORY_RULES/
+// ACTIVITY_PLAN - the exact same tables edited in Excel today, just from
+// here instead) ---
+
+let currentRules = null;
+
+const CATEGORY_OPTIONS = ["CORE", "NORMAL", "EXCLUDE"];
+
+async function loadRules() {
+  try {
+    const res = await apiFetch("/api/rules");
+    currentRules = await res.json();
+    renderToggleList("rules-terminal", "TYP TERMINALU", currentRules.terminal);
+    renderToggleList("rules-market", "MARKET", currentRules.market);
+    renderDropdownList("rules-category", "CATEGORY", "RULE", currentRules.category, CATEGORY_OPTIONS);
+    renderCampaigns(currentRules.campaigns);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function renderToggleList(containerId, keyField, rows) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = rows
+    .map(
+      (row, i) => `
+    <label class="toggle-row">
+      <input type="checkbox" data-container="${containerId}" data-index="${i}" ${row.ACTIVE === "YES" ? "checked" : ""}>
+      ${row[keyField]}
+    </label>`
+    )
+    .join("");
+}
+
+function renderDropdownList(containerId, keyField, valueField, rows, options) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = rows
+    .map(
+      (row, i) => `
+    <label class="dropdown-row">
+      ${row[keyField]}
+      <select data-container="${containerId}" data-index="${i}">
+        ${options.map((o) => `<option value="${o}" ${row[valueField] === o ? "selected" : ""}>${o}</option>`).join("")}
+      </select>
+    </label>`
+    )
+    .join("");
+}
+
+function renderCampaigns(rows) {
+  const body = document.getElementById("rules-campaigns-body");
+  body.innerHTML = rows
+    .map(
+      (row, i) => `
+    <tr>
+      <td>${row.TYPE}</td>
+      <td>${row.ACTIVITY}</td>
+      <td><input type="number" data-index="${i}" data-field="START_WEEK" value="${row.START_WEEK ?? ""}"></td>
+      <td><input type="number" data-index="${i}" data-field="END_WEEK" value="${row.END_WEEK ?? ""}"></td>
+      <td><input type="number" data-index="${i}" data-field="PRIORITY" value="${row.PRIORITY ?? ""}"></td>
+      <td>
+        <select data-index="${i}" data-field="OVERRIDE_GAP">
+          <option value="YES" ${row.OVERRIDE_GAP === "YES" ? "selected" : ""}>YES</option>
+          <option value="NO" ${row.OVERRIDE_GAP === "NO" ? "selected" : ""}>NO</option>
+        </select>
+      </td>
+    </tr>`
+    )
+    .join("");
+}
+
+function collectToggleList(containerId, rows) {
+  const updated = rows.map((r) => ({ ...r }));
+  document.querySelectorAll(`#${containerId} input[type="checkbox"]`).forEach((input) => {
+    const i = parseInt(input.dataset.index, 10);
+    updated[i].ACTIVE = input.checked ? "YES" : "NO";
+  });
+  return updated;
+}
+
+function collectDropdownList(containerId, valueField, rows) {
+  const updated = rows.map((r) => ({ ...r }));
+  document.querySelectorAll(`#${containerId} select`).forEach((select) => {
+    const i = parseInt(select.dataset.index, 10);
+    updated[i][valueField] = select.value;
+  });
+  return updated;
+}
+
+function collectCampaigns(rows) {
+  const updated = rows.map((r) => ({ ...r }));
+  document.querySelectorAll("#rules-campaigns-body input, #rules-campaigns-body select").forEach((input) => {
+    const i = parseInt(input.dataset.index, 10);
+    const field = input.dataset.field;
+    updated[i][field] = input.type === "number" ? Number(input.value) : input.value;
+  });
+  return updated;
+}
+
+document.getElementById("save-rules-btn").addEventListener("click", async () => {
+  const result = document.getElementById("rules-result");
+  result.textContent = "Ukládám…";
+  try {
+    const terminal = collectToggleList("rules-terminal", currentRules.terminal);
+    const market = collectToggleList("rules-market", currentRules.market);
+    const category = collectDropdownList("rules-category", "RULE", currentRules.category);
+    const campaigns = collectCampaigns(currentRules.campaigns);
+
+    for (const [sheet, rows] of [
+      ["TERMINAL_RULES", terminal],
+      ["MARKET_RULES", market],
+      ["CATEGORY_RULES", category],
+      ["ACTIVITY_PLAN", campaigns],
+    ]) {
+      const res = await apiFetch("/api/rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sheet, rows }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || `Uložení ${sheet} se nezdařilo.`);
+      }
+    }
+    result.textContent = "Uloženo.";
+    await loadRules();
+  } catch (err) {
+    result.textContent = "Chyba: " + err.message;
   }
 });
 

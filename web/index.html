@@ -39,6 +39,41 @@
   </section>
 
   <section class="card">
+    <h2>Pravidla plánování</h2>
+    <p class="hint">Stejná pravidla, která dnes nastavuješ v Excelu - jen odsud, bez otevírání souboru.</p>
+
+    <div class="rules-block">
+      <h3>Typ terminálu</h3>
+      <div id="rules-terminal" class="toggle-list"></div>
+    </div>
+
+    <div class="rules-block">
+      <h3>Obchodní sítě</h3>
+      <div id="rules-market" class="toggle-list"></div>
+    </div>
+
+    <div class="rules-block">
+      <h3>Kategorie</h3>
+      <div id="rules-category" class="dropdown-list"></div>
+    </div>
+
+    <div class="rules-block">
+      <h3>Kampaně</h3>
+      <div id="rules-campaigns-wrap">
+        <table id="rules-campaigns-table">
+          <thead>
+            <tr><th>Typ</th><th>Kampaň</th><th>Od týdne</th><th>Do týdne</th><th>Priorita</th><th>Override gap</th></tr>
+          </thead>
+          <tbody id="rules-campaigns-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <button id="save-rules-btn" class="primary">Uložit pravidla</button>
+    <p id="rules-result" class="result"></p>
+  </section>
+
+  <section class="card">
     <h2>Generovat tour plán</h2>
     <form id="generate-form" class="row">
       <label>Počáteční týden

@@ -12,6 +12,13 @@ používání... To je vše"): login, current-status, generate a tour plan
 (Planning Engine only), view the draft, download MANAGER_PLAN as a
 standalone .xlsx. No publish, no Reporting/Performance/Dashboards/admin -
 those are later phases, deliberately not started yet.
+
+Also exposes the existing manager rule tables (TERMINAL_RULES,
+MARKET_RULES, CATEGORY_RULES, ACTIVITY_PLAN) for editing - product owner,
+same day: "nechci, aby se znovu navrhovala business logika Planneru...
+chci pouze přenést existující manažerské volby z Excelu do jednoduchého
+UI". See backend/rules_io.py - only the same cells a manager already edits
+in Excel are ever written; no rule semantics change.
 """
 from __future__ import annotations
 
@@ -35,6 +42,7 @@ from desktop_client.engines.mock_workbook import MockWorkbook  # noqa: E402
 import auth  # noqa: E402
 from auth import issue_token, require_auth  # noqa: E402
 import github_storage  # noqa: E402
+import rules_io  # noqa: E402
 
 app = FastAPI(title="Field Force Optimizer API")
 
@@ -54,6 +62,11 @@ class LoginRequest(BaseModel):
 class GeneratePlanRequest(BaseModel):
     start_week: int
     length: int = 4
+
+
+class SaveRulesRequest(BaseModel):
+    sheet: str
+    rows: list[dict]
 
 
 def _with_local_copy():
@@ -180,5 +193,32 @@ def download_manager_plan():
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": "attachment; filename=MANAGER_PLAN.xlsx"},
         )
+    finally:
+        os.remove(path)
+
+
+@app.get("/api/rules", dependencies=[Depends(require_auth)])
+def get_rules():
+    path = _with_local_copy()
+    try:
+        return {
+            "terminal": rules_io.read_rule_sheet(path, "TERMINAL_RULES"),
+            "market": rules_io.read_rule_sheet(path, "MARKET_RULES"),
+            "category": rules_io.read_rule_sheet(path, "CATEGORY_RULES"),
+            "campaigns": rules_io.read_rule_sheet(path, "ACTIVITY_PLAN"),
+        }
+    finally:
+        os.remove(path)
+
+
+@app.post("/api/rules", dependencies=[Depends(require_auth)])
+def save_rules(body: SaveRulesRequest):
+    if body.sheet not in rules_io.RULE_SHEETS:
+        raise HTTPException(status_code=400, detail=f"Neznámá tabulka pravidel: {body.sheet}")
+    path = _with_local_copy()
+    try:
+        rules_io.write_rule_sheet(path, body.sheet, body.rows)
+        github_storage.upload_workbook(path, f"Upravit {body.sheet} [MVP cockpit]")
+        return {"ok": True}
     finally:
         os.remove(path)

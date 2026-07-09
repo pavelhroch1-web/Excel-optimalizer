@@ -76,3 +76,25 @@ th, td {
   white-space: nowrap; font-family: var(--mono);
 }
 th { color: var(--text-dim); font-weight: 600; }
+
+.hint { color: var(--text-dim); font-size: 12.5px; margin: -6px 0 16px; }
+.rules-block { margin-bottom: 18px; }
+.rules-block h3 {
+  font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim);
+  margin: 0 0 8px; font-family: var(--mono); font-weight: 600;
+}
+.toggle-list, .dropdown-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.toggle-row, .dropdown-row {
+  display: flex; align-items: center; gap: 8px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 13px;
+}
+.toggle-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+.dropdown-row select {
+  font-family: var(--grot); font-size: 12.5px; padding: 4px 6px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text);
+}
+#rules-campaigns-wrap { overflow-x: auto; }
+#rules-campaigns-table input {
+  width: 70px; padding: 4px 6px; font-size: 12.5px;
+}
+#rules-campaigns-table input[type="text"] { width: 140px; }

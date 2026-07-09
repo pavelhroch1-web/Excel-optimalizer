@@ -1590,3 +1590,16 @@ candidates in the current dataset).
 One-time hosting setup (Render.com, free tier - chosen for GitHub-native auto-deploy and
 zero required local install) is documented in `backend/README.md`, since it requires the
 product owner's own account/credentials and can't be done from within this session.
+
+**Same-day addition**: existing manager rule tables (`TERMINAL_RULES`, `MARKET_RULES`,
+`CATEGORY_RULES`, `ACTIVITY_PLAN`) surfaced in the web UI - product owner: "nechci, aby
+se znovu navrhovala business logika Planneru... chci pouze přenést existující manažerské
+volby z Excelu do jednoduchého UI". `backend/rules_io.py` reads/writes ONLY the same
+editable columns `tools/ux_style.py`'s `EDITABLE_COLUMNS` already defines as manager-
+editable in Excel (`TERMINAL_RULES.ACTIVE`, `MARKET_RULES.ACTIVE`, `CATEGORY_RULES.RULE`,
+and `ACTIVITY_PLAN`'s 6 editable columns) - matched by key column(s), rows are never
+added or removed, and no other cell (including `ACTIVITY_PLAN`'s live
+`ODHAD_NAVSTEV_ZA_KAMPAN` formula) is ever opened for writing. Verified against a copy of
+the real workbook: toggling `SMALL TERMINAL` YES/NO and `1CD`'s rule EXCLUDE→NORMAL both
+round-tripped correctly, and the untouched formula column was confirmed byte-identical
+after the write.
