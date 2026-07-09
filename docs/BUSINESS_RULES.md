@@ -1046,3 +1046,65 @@ production dataset. Full test suites green: 133 TypeScript, 120 Python.
 `MANUAL` rewritten with new sections explaining the three triggers, the combined-signal gate as the
 primary thing to look at, and updated escalation guidance (1 signal = watch, `combinedRiskFlag='Ano'`
 = sit down with them, repeated `Ano` / high signal count = full performance conversation).
+
+## 20. Skutečný pracovní den - display of daily visit counts + real work-span/idle time (2026-07-11)
+
+Product owner: "chybi mi tam zobrazení kolik udelal za den a podobně, neni ten salesapp pořádně
+vytezeny" (missing a display of daily output, SalesApp isn't being properly mined), then clarifying
+"také tam nevidím ten čas" (also don't see that time there) - two related but distinct gaps:
+
+1. **Daily visit counts were already computed but never shown as a table.** `visitsMon..Fri`
+   (campaign) and `otherVisitsMon..Fri` (ad-hoc) already existed on `TECHNICIAN_PERFORMANCE_LOG`
+   (used elsewhere - the daily bar chart, the "Ostatní návštěvy" KPI) but had no dedicated per-day
+   breakdown table. Pure visibility fix, no engine change: new "NÁVŠTĚVY PO DNECH (kampaň / ostatní)"
+   table on `TECHNICIAN_SCORECARD`.
+2. **Real clock time genuinely did not exist anywhere.** SalesApp's `Started at`/`Finished at`
+   columns were imported nowhere before this - only `Real duration (h)` (2026-07-09, trigger C) was
+   mined, which gives total active minutes but not *when* the day started/ended or how much idle time
+   sat between visits. This needed new engine logic, not just a new table.
+
+**New engine logic** (`ComplianceEngine.ts`/`compliance_engine.py` parse `Started at`/`Finished at`
+from `SALESAPP_IMPORT`, carry them through `VISIT_HISTORY_ACTUAL`/`OTHER_VISIT_LOG`/
+`COMPLIANCE_LOG.matchedActualStartedAt`/`matchedActualFinishedAt`; `PerformanceEngine.ts`/
+`performance_engine.py` aggregate per technician per day, across BOTH campaign and ad-hoc visits
+(a technician's idle time should reflect their whole day in the field, not just campaign stops):
+
+- `workSpanHours` = latest `Finished at` minus earliest `Started at` that day.
+- `idleHours` = `max(0, workSpanHours - sum(durationHours that day))` - the gap between "on the clock"
+  and "actually recorded busy in SalesApp".
+
+Both are `null` (blank cell, not 0) for a day with no timing data at all, or if `Finished at <= Started
+at` (bad data). New `TECHNICIAN_PERFORMANCE_LOG` columns: `workSpanHoursMon..Fri`, `idleHoursMon..Fri`
+(10 new columns, appended at the end - existing column-index readers unaffected). **Deliberately
+informational only, no new flag/threshold** - the product owner asked for "zobrazení" (a display), not
+a new trigger; unlike route efficiency or the three manažerské triggers, no WARNING/CRITICAL semaphore
+was requested or added for idle time. If this proves useful as a trigger later, it should get the same
+propose-then-confirm treatment as every other flag in this workbook, not be added silently.
+
+New `TECHNICIAN_SCORECARD` table "PRACOVNÍ DEN - REÁLNÝ ČAS (SalesApp Started/Finished at)" reads
+these via `FILTER()`+`INDEX()` (not the `SUMPRODUCT(condition*range)` pattern used for `kmMon..Fri`
+elsewhere on this sheet) - `workSpanHours`/`idleHours` contain `""` for no-data days, and
+`SUMPRODUCT`'s implicit arithmetic on a text value anywhere in the range throws `#VALUE!`; `FILTER`/
+`INDEX` never perform arithmetic on the matched cell, so blank days render safely as "-".
+
+**Bug found and fixed during verification**: `PerformanceEngine.ts`'s `ComplianceRow.matchedActualDate`
+parsing used `dateVal instanceof Date ? dateVal : null` - strict, whereas `performance_engine.py`'s
+port already used the lenient `_to_date()` (parses a plain ISO string too). Excel auto-detects a
+simple `YYYY-MM-DD` string as a real Date cell *on read-back after a save*, but a same-run Office
+Scripts execution (and the `tools/sim` mock workbook) does not - `ComplianceEngine.ts` writes
+`matchedActualDate` as a string, so within one script run, this field was `null` and silently dropped
+the technician from `visitsMon..Fri`/`posListMon..Fri`/the new work-span/idle aggregation. This was a
+latent bug predating this feature (the day-of-week visit count and POS list were exposed to the same
+risk), not introduced by it - fixed by routing `matchedActualDate` through the same `parseCellDate()`
+helper already used for `matchedActualStartedAt`/`matchedActualFinishedAt`.
+
+Verified via a dedicated synthetic seed (1 technician, 2 matched campaign visits 08:00-09:00 and
+10:00-10:30, 1 ad-hoc visit 14:00-14:15, all Monday) run through `ComplianceEngine.ts` +
+`PerformanceEngine.ts` and their Python ports: `workSpanHoursMon` = 6.25h (08:00 to 14:15, spanning
+both campaign and ad-hoc visits), `idleHoursMon` = 4.5h (6.25h span minus 1.75h summed duration) -
+byte-identical between both engines after the `matchedActualDate` fix (previously diverged: the TS
+side under-counted `visitsMon`, `avgVisitDurationHours`, `workSpanHoursMon`, `idleHoursMon` due to the
+bug above). `python3 tools/check_sync.py` passed (18 blocks); full TS unit suite green (133 tests).
+Real workbook patched: `VISIT_HISTORY_ACTUAL`/`OTHER_VISIT_LOG` +2 columns each, `COMPLIANCE_LOG` +2,
+`TECHNICIAN_PERFORMANCE_LOG` +10; `POS_MASTER`/`RAW_DATA` row counts unchanged (11,606/11,607) after
+patching, `TECHNICIAN_SCORECARD` rebuilt with the two new tables.

@@ -16,7 +16,8 @@ from .mock_workbook import MockWorkbook
 
 
 class _ComplianceRow:
-    def __init__(self, key, timestamp, posId, technician, week, year, status, matchedActualDate, matchedActualDurationHours=None):
+    def __init__(self, key, timestamp, posId, technician, week, year, status, matchedActualDate,
+                 matchedActualDurationHours=None, matchedActualStartedAt=None, matchedActualFinishedAt=None):
         self.key = key
         self.timestamp = timestamp
         self.posId = posId
@@ -26,6 +27,8 @@ class _ComplianceRow:
         self.status = status
         self.matchedActualDate = matchedActualDate
         self.matchedActualDurationHours = matchedActualDurationHours
+        self.matchedActualStartedAt = matchedActualStartedAt
+        self.matchedActualFinishedAt = matchedActualFinishedAt
 
 
 class Bucket:
@@ -46,6 +49,11 @@ class Bucket:
         self.realizedPptSum = 0.0
         self.durationHoursSum = 0.0
         self.durationKnownCount = 0
+        # Real work-day span/idle time (product owner, 2026-07-11) - see
+        # office-scripts/PerformanceEngine.ts's identical comment.
+        self.dayFirstStart: list = [None, None, None, None, None]
+        self.dayLastFinish: list = [None, None, None, None, None]
+        self.dayActiveHoursSum = [0.0, 0.0, 0.0, 0.0, 0.0]
         self.possByDay: list[list[str]] = [[], [], [], [], []]
 
 
@@ -57,6 +65,21 @@ def _to_date(v) -> datetime.date | None:
     try:
         return datetime.date.fromisoformat(str(v)[:10])
     except (ValueError, TypeError):
+        return None
+
+
+def _parse_cell_datetime(v) -> datetime.datetime | None:
+    """Port of office-scripts/PerformanceEngine.ts's parseCellDate() -
+    preserves time-of-day, unlike _to_date()."""
+    if isinstance(v, datetime.datetime):
+        return v
+    if isinstance(v, datetime.date):
+        return datetime.datetime(v.year, v.month, v.day)
+    if not v:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(str(v))
+    except ValueError:
         return None
 
 
@@ -167,6 +190,15 @@ def run(workbook: MockWorkbook) -> str:
             buckets[key] = Bucket(technician, year, week)
         return buckets[key]
 
+    def record_day_timing(bucket: Bucket, day_idx: int, started_at, finished_at, duration_hours) -> None:
+        """Port of office-scripts/PerformanceEngine.ts's recordDayTiming()."""
+        if started_at and (bucket.dayFirstStart[day_idx] is None or started_at < bucket.dayFirstStart[day_idx]):
+            bucket.dayFirstStart[day_idx] = started_at
+        if finished_at and (bucket.dayLastFinish[day_idx] is None or finished_at > bucket.dayLastFinish[day_idx]):
+            bucket.dayLastFinish[day_idx] = finished_at
+        if duration_hours is not None:
+            bucket.dayActiveHoursSum[day_idx] += duration_hours
+
     # ==========================================================================
     # MANAGER_PLAN_PUBLISHED -> plannedVisits + region tally + planned order
     # ==========================================================================
@@ -230,6 +262,8 @@ def run(workbook: MockWorkbook) -> str:
             status=str(_at(row, cl_idx("status"))),
             matchedActualDate=_to_date(date_val),
             matchedActualDurationHours=duration_raw if duration_raw == duration_raw and duration_raw > 0 else None,
+            matchedActualStartedAt=_parse_cell_datetime(_at(row, cl_idx("matchedActualStartedAt"))),
+            matchedActualFinishedAt=_parse_cell_datetime(_at(row, cl_idx("matchedActualFinishedAt"))),
         ))
     deduped_rows = latest_by_key(raw_rows)
 
@@ -265,6 +299,9 @@ def run(workbook: MockWorkbook) -> str:
             if weekday in day_index:
                 bucket.visitsByDay[day_index[weekday]] += 1
                 bucket.possByDay[day_index[weekday]].append(r.posId)
+                record_day_timing(
+                    bucket, day_index[weekday], r.matchedActualStartedAt, r.matchedActualFinishedAt, r.matchedActualDurationHours
+                )
             if r.matchedActualDurationHours is not None:
                 bucket.durationHoursSum += r.matchedActualDurationHours
                 bucket.durationKnownCount += 1
@@ -299,6 +336,13 @@ def run(workbook: MockWorkbook) -> str:
             weekday = ov_date.weekday()  # Mon=0..Sun=6
             if weekday in day_index:
                 bucket.otherVisitsByDay[day_index[weekday]] += 1
+                ov_duration_raw = _num(_at(row, ov_idx("durationHours")))
+                ov_duration = ov_duration_raw if ov_duration_raw == ov_duration_raw and ov_duration_raw > 0 else None
+                record_day_timing(
+                    bucket, day_index[weekday],
+                    _parse_cell_datetime(_at(row, ov_idx("startedAt"))), _parse_cell_datetime(_at(row, ov_idx("finishedAt"))),
+                    ov_duration,
+                )
 
     # ==========================================================================
     # Route-efficiency helpers
@@ -456,6 +500,21 @@ def run(workbook: MockWorkbook) -> str:
         ])
         combined_risk_flag = "Ano" if active_signals >= problem_signal_min_count else "Ne"
 
+        # Skutečný pracovní den (product owner, 2026-07-11) - see
+        # office-scripts/PerformanceEngine.ts's identical comment.
+        work_span_hours_by_day: list = []
+        idle_hours_by_day: list = []
+        for d in range(5):
+            start = b.dayFirstStart[d]
+            finish = b.dayLastFinish[d]
+            if not start or not finish or finish <= start:
+                work_span_hours_by_day.append(None)
+                idle_hours_by_day.append(None)
+                continue
+            span = round(((finish - start).total_seconds() / 3600) * 100) / 100
+            work_span_hours_by_day.append(span)
+            idle_hours_by_day.append(max(0, round((span - b.dayActiveHoursSum[d]) * 100) / 100))
+
         out_rows.append([
             b.technician, b.year, b.week, top_area,
             b.plannedVisits, b.realizedVisits,
@@ -476,6 +535,16 @@ def run(workbook: MockWorkbook) -> str:
             ppt_density_vs_peer_percent if ppt_density_vs_peer_percent is not None else "",
             duration_vs_peer_percent if duration_vs_peer_percent is not None else "",
             volume_flag, ppt_density_flag, duration_flag, active_signals, combined_risk_flag,
+            work_span_hours_by_day[0] if work_span_hours_by_day[0] is not None else "",
+            work_span_hours_by_day[1] if work_span_hours_by_day[1] is not None else "",
+            work_span_hours_by_day[2] if work_span_hours_by_day[2] is not None else "",
+            work_span_hours_by_day[3] if work_span_hours_by_day[3] is not None else "",
+            work_span_hours_by_day[4] if work_span_hours_by_day[4] is not None else "",
+            idle_hours_by_day[0] if idle_hours_by_day[0] is not None else "",
+            idle_hours_by_day[1] if idle_hours_by_day[1] is not None else "",
+            idle_hours_by_day[2] if idle_hours_by_day[2] is not None else "",
+            idle_hours_by_day[3] if idle_hours_by_day[3] is not None else "",
+            idle_hours_by_day[4] if idle_hours_by_day[4] is not None else "",
         ])
 
     header_row = [
@@ -494,9 +563,11 @@ def run(workbook: MockWorkbook) -> str:
         "pptPerVisit", "avgVisitDurationHours",
         "volumeVsPeerPercent", "pptDensityVsPeerPercent", "durationVsPeerPercent",
         "volumeFlag", "pptDensityFlag", "durationFlag", "activeSignalCount", "combinedRiskFlag",
+        "workSpanHoursMon", "workSpanHoursTue", "workSpanHoursWed", "workSpanHoursThu", "workSpanHoursFri",
+        "idleHoursMon", "idleHoursTue", "idleHoursWed", "idleHoursThu", "idleHoursFri",
     ]
     out_ws = workbook.get_worksheet("TECHNICIAN_PERFORMANCE_LOG")
-    out_ws.get_range("A2:AW100000").clear()
+    out_ws.get_range("A2:BG100000").clear()
     out_ws.get_range_by_indexes(0, 0, 1, len(header_row)).set_values([header_row])
     if out_rows:
         out_ws.get_range_by_indexes(1, 0, len(out_rows), len(header_row)).set_values(out_rows)

@@ -35,6 +35,22 @@ def _to_date(v) -> datetime.date | None:
         return None
 
 
+def _to_datetime(v) -> datetime.datetime | None:
+    """Preserves time-of-day, unlike _to_date() - needed for Started at/
+    Finished at (product owner, 2026-07-11) - see
+    office-scripts/ComplianceEngine.ts's identical comment."""
+    if isinstance(v, datetime.datetime):
+        return v
+    if isinstance(v, datetime.date):
+        return datetime.datetime(v.year, v.month, v.day)
+    if not v:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(str(v))
+    except ValueError:
+        return None
+
+
 def run(workbook: MockWorkbook) -> str:
     def read_table(sheet_name: str) -> list[list]:
         ws = workbook.get_worksheet(sheet_name)
@@ -83,6 +99,10 @@ def run(workbook: MockWorkbook) -> str:
     # "Real duration (h)" (product owner, 2026-07-09) - see
     # office-scripts/ComplianceEngine.ts's identical comment.
     c_duration = sa_idx("REAL DURATION (H)")
+    # "Started at" / "Finished at" (product owner, 2026-07-11) - see
+    # office-scripts/ComplianceEngine.ts's identical comment.
+    c_started_at = sa_idx("STARTED AT")
+    c_finished_at = sa_idx("FINISHED AT")
 
     def no_space(v: str) -> str:
         return "".join(v.split())
@@ -134,11 +154,14 @@ def run(workbook: MockWorkbook) -> str:
         resolved_pos_id = terminal_id_to_pos_id.get(str(_at(row, c_store_uid)))
         duration_raw = _num(_at(row, c_duration)) if c_duration >= 0 else float("nan")
         duration_hours = duration_raw if duration_raw == duration_raw and duration_raw > 0 else None
+        started_at = _to_datetime(_at(row, c_started_at)) if c_started_at >= 0 else None
+        finished_at = _to_datetime(_at(row, c_finished_at)) if c_finished_at >= 0 else None
         if c_campaign_purpose == -1 or norm(str(_at(row, c_campaign_purpose))) != "ANO":
             if resolved_pos_id:
                 other_visits.append({
                     "posId": resolved_pos_id, "date": date, "week": week, "year": year,
                     "executor": str(_at(row, c_executor)), "uid": uid, "durationHours": duration_hours,
+                    "startedAt": started_at, "finishedAt": finished_at,
                 })
             continue
         if not resolved_pos_id:
@@ -146,6 +169,7 @@ def run(workbook: MockWorkbook) -> str:
         new_visits.append({
             "posId": resolved_pos_id, "date": date, "week": week, "year": year,
             "executor": str(_at(row, c_executor)), "state": state, "uid": uid, "durationHours": duration_hours,
+            "startedAt": started_at, "finishedAt": finished_at,
         })
 
     if latest_week == 0 and len(visit_history_actual) < 2:
@@ -166,21 +190,25 @@ def run(workbook: MockWorkbook) -> str:
     if new_visits:
         rows = [
             [v["posId"], v["date"].isoformat()[:10], v["week"], v["year"], v["executor"], v["state"], v["uid"],
-             v["durationHours"] if v["durationHours"] is not None else ""]
+             v["durationHours"] if v["durationHours"] is not None else "",
+             v["startedAt"].isoformat() if v["startedAt"] else "",
+             v["finishedAt"].isoformat() if v["finishedAt"] else ""]
             for v in new_visits
         ]
         start_row = len(visit_history_actual) if len(visit_history_actual) > 0 else 1
-        history_ws.get_range_by_indexes(start_row, 0, len(rows), 8).set_values(rows)
+        history_ws.get_range_by_indexes(start_row, 0, len(rows), 10).set_values(rows)
 
     other_visit_ws = workbook.get_worksheet("OTHER_VISIT_LOG")
     if other_visits:
         rows = [
             [v["posId"], v["date"].isoformat()[:10], v["week"], v["year"], v["executor"], v["uid"],
-             v["durationHours"] if v["durationHours"] is not None else ""]
+             v["durationHours"] if v["durationHours"] is not None else "",
+             v["startedAt"].isoformat() if v["startedAt"] else "",
+             v["finishedAt"].isoformat() if v["finishedAt"] else ""]
             for v in other_visits
         ]
         start_row = len(other_visit_log) if len(other_visit_log) > 0 else 1
-        other_visit_ws.get_range_by_indexes(start_row, 0, len(rows), 7).set_values(rows)
+        other_visit_ws.get_range_by_indexes(start_row, 0, len(rows), 9).set_values(rows)
 
     actual_by_pos: dict[str, list[dict]] = {}
     for i in range(1, len(visit_history_actual)):
@@ -190,11 +218,14 @@ def run(workbook: MockWorkbook) -> str:
         actual_by_pos.setdefault(pos, []).append({
             "week": int(_num(row[2])), "year": int(_num(row[3])), "date": str(row[1]),
             "durationHours": duration_raw if duration_raw == duration_raw and duration_raw > 0 else None,
+            "startedAt": _to_datetime(_at(row, 8)),
+            "finishedAt": _to_datetime(_at(row, 9)),
         })
     for v in new_visits:
-        actual_by_pos.setdefault(v["posId"], []).append(
-            {"week": v["week"], "year": v["year"], "date": v["date"].isoformat()[:10], "durationHours": v["durationHours"]}
-        )
+        actual_by_pos.setdefault(v["posId"], []).append({
+            "week": v["week"], "year": v["year"], "date": v["date"].isoformat()[:10],
+            "durationHours": v["durationHours"], "startedAt": v["startedAt"], "finishedAt": v["finishedAt"],
+        })
 
     # ==========================================================================
     # MATCH MANAGER_PLAN_PUBLISHED -> COMPLIANCE_LOG
@@ -239,6 +270,8 @@ def run(workbook: MockWorkbook) -> str:
             planned["posId"], planned["tech"], planned["week"], planned["year"], status,
             matched["date"] if matched else "", matched["week"] if matched else "", now,
             (matched["durationHours"] if matched and matched["durationHours"] is not None else ""),
+            (matched["startedAt"].isoformat() if matched and matched["startedAt"] else ""),
+            (matched["finishedAt"].isoformat() if matched and matched["finishedAt"] else ""),
         ])
         raw_key = f"{control_year}|{planned['rawWeek']}"
         if status == "Pending":
@@ -253,13 +286,15 @@ def run(workbook: MockWorkbook) -> str:
                 compliance_rows.append([
                     pos_id, "", a["week"], a["year"], "Navic_evidovano", a["date"], a["week"], now,
                     a["durationHours"] if a["durationHours"] is not None else "",
+                    a["startedAt"].isoformat() if a["startedAt"] else "",
+                    a["finishedAt"].isoformat() if a["finishedAt"] else "",
                 ])
 
     compliance_ws = workbook.get_worksheet("COMPLIANCE_LOG")
     existing_compliance = compliance_ws.get_used_range()
     compliance_start_row = existing_compliance.get_row_count() if existing_compliance else 1
     if compliance_rows:
-        compliance_ws.get_range_by_indexes(compliance_start_row, 0, len(compliance_rows), 9).set_values(compliance_rows)
+        compliance_ws.get_range_by_indexes(compliance_start_row, 0, len(compliance_rows), 11).set_values(compliance_rows)
 
     # ==========================================================================
     # ADVANCE PLAN LIFECYCLE (Published -> Active -> Closed)

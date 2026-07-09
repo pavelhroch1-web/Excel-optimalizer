@@ -53,6 +53,11 @@
 //     into COMPLIANCE_LOG's matchedActualDurationHours - a directly-measured
 //     "Monitoring efektivity" signal (PerformanceEngine.ts's avgVisitDurationHours),
 //     null/blank (never 0) when the column is absent or non-numeric for a row.
+//   - Since 2026-07-11 (product owner: "není ten salesapp pořádně vytěžený"):
+//     also parses "Started at"/"Finished at" when present, carrying them the
+//     same way into COMPLIANCE_LOG's matchedActualStartedAt/FinishedAt - lets
+//     PerformanceEngine.ts compute a technician's actual daily work span and
+//     idle time between visits (real clock time, not a GPS/route estimate).
 //   - Updates POS_MASTER's lastRealVisitDate/Week and weeksSinceLastVisit -
 //     this closes the real-world feedback loop that was completely missing
 //     in V10.5.5 (see docs/ARCHITECTURE.md Phase 0 finding: VISIT_HISTORY
@@ -305,6 +310,16 @@ function main(workbook: ExcelScript.Workbook) {
   // as "unknown", never as 0 (a 0-hour visit is a data gap, not a real
   // instant visit).
   const cDuration = saIdx("REAL DURATION (H)");
+  // "Started at" / "Finished at" (product owner, 2026-07-11: "není ten
+  // salesapp pořádně vytěžený" - the two duration/GPS-estimate signals
+  // already added don't answer "kolik toho reálně udělal za den": these
+  // real clock timestamps let PerformanceEngine.ts compute an actual work
+  // span (first visit start -> last visit finish) and idle time within it
+  // (span minus time actually spent in visits) - a directly-measured
+  // "mrtvý čas mezi návštěvami" signal, not a GPS/route estimate. -1 if
+  // absent from this export, same convention as cDuration above.
+  const cStartedAt = saIdx("STARTED AT");
+  const cFinishedAt = saIdx("FINISHED AT");
   // "Ucel navstevy - Technik - MCHD - Nabeh kampane" (Ano/blank) - the only
   // structured signal in SalesApp for "this specific visit serviced the
   // campaign", confirmed by product owner. Matched by stripping ALL
@@ -360,6 +375,8 @@ function main(workbook: ExcelScript.Workbook) {
     state: string;
     uid: string;
     durationHours: number | null;
+    startedAt: Date | null;
+    finishedAt: Date | null;
   }
   interface OtherVisit {
     posId: string;
@@ -369,6 +386,8 @@ function main(workbook: ExcelScript.Workbook) {
     executor: string;
     uid: string;
     durationHours: number | null;
+    startedAt: Date | null;
+    finishedAt: Date | null;
   }
   let newVisits: ActualVisit[] = [];
   let otherVisits: OtherVisit[] = [];
@@ -408,6 +427,10 @@ function main(workbook: ExcelScript.Workbook) {
     const resolvedPosId = terminalIdToPosId[String(row[cStoreUID])];
     const durationRaw = cDuration >= 0 ? Number(row[cDuration]) : NaN;
     const durationHours = !isNaN(durationRaw) && durationRaw > 0 ? durationRaw : null;
+    const startedAtRaw = cStartedAt >= 0 ? row[cStartedAt] : null;
+    const startedAt = startedAtRaw instanceof Date ? startedAtRaw : null;
+    const finishedAtRaw = cFinishedAt >= 0 ? row[cFinishedAt] : null;
+    const finishedAt = finishedAtRaw instanceof Date ? finishedAtRaw : null;
     // Only a "MCHD - Nabeh kampane" = Ano row is a realized CAMPAIGN visit -
     // confirmed by product owner. A Completed/Finalized visit for any other
     // purpose (restocking, lottery ticket pickup, etc.) is a real SalesApp
@@ -417,7 +440,7 @@ function main(workbook: ExcelScript.Workbook) {
     // 2026-07-06 (see file header) - informational only.
     if (cCampaignPurpose == -1 || norm(String(row[cCampaignPurpose])) != "ANO") {
       if (resolvedPosId) {
-        otherVisits.push({ posId: resolvedPosId, date, week, year, executor: String(row[cExecutor]), uid, durationHours });
+        otherVisits.push({ posId: resolvedPosId, date, week, year, executor: String(row[cExecutor]), uid, durationHours, startedAt, finishedAt });
       }
       continue;
     }
@@ -433,6 +456,8 @@ function main(workbook: ExcelScript.Workbook) {
       state,
       uid,
       durationHours,
+      startedAt,
+      finishedAt,
     });
   }
 
@@ -464,9 +489,10 @@ function main(workbook: ExcelScript.Workbook) {
   if (newVisits.length > 0) {
     const rows = newVisits.map((v) => [
       v.posId, v.date.toISOString().slice(0, 10), v.week, v.year, v.executor, v.state, v.uid, v.durationHours ?? "",
+      v.startedAt ? v.startedAt.toISOString() : "", v.finishedAt ? v.finishedAt.toISOString() : "",
     ]);
     const startRow = visitHistoryActual.length > 0 ? visitHistoryActual.length : 1;
-    historyWs.getRangeByIndexes(startRow, 0, rows.length, 8).setValues(rows);
+    historyWs.getRangeByIndexes(startRow, 0, rows.length, 10).setValues(rows);
   }
 
   // OTHER_VISIT_LOG: non-campaign-purpose Completed/Finalized visits, logged
@@ -476,32 +502,45 @@ function main(workbook: ExcelScript.Workbook) {
   if (otherVisits.length > 0) {
     const rows = otherVisits.map((v) => [
       v.posId, v.date.toISOString().slice(0, 10), v.week, v.year, v.executor, v.uid, v.durationHours ?? "",
+      v.startedAt ? v.startedAt.toISOString() : "", v.finishedAt ? v.finishedAt.toISOString() : "",
     ]);
     const startRow = otherVisitLog.length > 0 ? otherVisitLog.length : 1;
-    otherVisitWs.getRangeByIndexes(startRow, 0, rows.length, 7).setValues(rows);
+    otherVisitWs.getRangeByIndexes(startRow, 0, rows.length, 9).setValues(rows);
   }
 
   // Full actual-visit set (existing + new) grouped by POS, for matching below
   // and for updating POS_MASTER's last-visit fields.
-  let actualByPos: { [pos: string]: { week: number; year: number; date: string; durationHours: number | null }[] } = {};
+  let actualByPos: {
+    [pos: string]: {
+      week: number; year: number; date: string; durationHours: number | null;
+      startedAt: Date | null; finishedAt: Date | null;
+    }[];
+  } = {};
   for (let i = 1; i < visitHistoryActual.length; i++) {
     const pos = String(visitHistoryActual[i][0]);
     if (!actualByPos[pos]) {
       actualByPos[pos] = [];
     }
     const durationRaw = Number(visitHistoryActual[i][7]);
+    const startedAtVal = visitHistoryActual[i][8];
+    const finishedAtVal = visitHistoryActual[i][9];
     actualByPos[pos].push({
       week: Number(visitHistoryActual[i][2]),
       year: Number(visitHistoryActual[i][3]),
       date: String(visitHistoryActual[i][1]),
       durationHours: !isNaN(durationRaw) && durationRaw > 0 ? durationRaw : null,
+      startedAt: startedAtVal ? new Date(String(startedAtVal)) : null,
+      finishedAt: finishedAtVal ? new Date(String(finishedAtVal)) : null,
     });
   }
   for (const v of newVisits) {
     if (!actualByPos[v.posId]) {
       actualByPos[v.posId] = [];
     }
-    actualByPos[v.posId].push({ week: v.week, year: v.year, date: v.date.toISOString().slice(0, 10), durationHours: v.durationHours });
+    actualByPos[v.posId].push({
+      week: v.week, year: v.year, date: v.date.toISOString().slice(0, 10), durationHours: v.durationHours,
+      startedAt: v.startedAt, finishedAt: v.finishedAt,
+    });
   }
 
   // ==========================================================================
@@ -567,6 +606,8 @@ function main(workbook: ExcelScript.Workbook) {
       planned.posId, planned.tech, planned.week, planned.year, status,
       matched ? matched.date : "", matched ? matched.week : "", now,
       matched && matched.durationHours !== null ? matched.durationHours : "",
+      matched && matched.startedAt ? matched.startedAt.toISOString() : "",
+      matched && matched.finishedAt ? matched.finishedAt.toISOString() : "",
     ]);
     const rawKey = CONTROL_YEAR + "|" + planned.rawWeek;
     if (status == "Pending") {
@@ -582,7 +623,10 @@ function main(workbook: ExcelScript.Workbook) {
     for (const a of actualByPos[posId]) {
       const key = posId + "|" + a.week + "|" + a.year;
       if (!plannedSet[key]) {
-        complianceRows.push([posId, "", a.week, a.year, "Navic_evidovano", a.date, a.week, now, a.durationHours ?? ""]);
+        complianceRows.push([
+          posId, "", a.week, a.year, "Navic_evidovano", a.date, a.week, now, a.durationHours ?? "",
+          a.startedAt ? a.startedAt.toISOString() : "", a.finishedAt ? a.finishedAt.toISOString() : "",
+        ]);
       }
     }
   }
@@ -592,7 +636,7 @@ function main(workbook: ExcelScript.Workbook) {
   const complianceStartRow = existingCompliance ? existingCompliance.getRowCount() : 1;
   if (complianceRows.length > 0) {
     complianceWs
-      .getRangeByIndexes(complianceStartRow, 0, complianceRows.length, 9)
+      .getRangeByIndexes(complianceStartRow, 0, complianceRows.length, 11)
       .setValues(complianceRows);
   }
 

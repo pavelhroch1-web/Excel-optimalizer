@@ -545,6 +545,13 @@ function main(workbook: ExcelScript.Workbook) {
     realizedPptSum: number; // sum of posPpt over realized (Splneno_vcas/pozde) POS this week - hodnotová hustota
     durationHoursSum: number; // sum of matchedActualDurationHours over realized visits with a known duration
     durationKnownCount: number; // how many of those realized visits actually carried a duration value
+    // Real work-day span/idle time (product owner, 2026-07-11: "není ten
+    // salesapp pořádně vytěžený") - combines BOTH campaign (COMPLIANCE_LOG)
+    // and ad-hoc (OTHER_VISIT_LOG) visits per day, since idle time should
+    // reflect the whole day in the field, not just campaign-purpose stops.
+    dayFirstStart: (Date | null)[]; // [Mon..Fri] earliest startedAt that day
+    dayLastFinish: (Date | null)[]; // [Mon..Fri] latest finishedAt that day
+    dayActiveHoursSum: number[]; // [Mon..Fri] sum of durationHours that day (visits with a known duration)
   }
   let buckets: { [key: string]: Bucket } = {};
 
@@ -569,9 +576,35 @@ function main(workbook: ExcelScript.Workbook) {
         realizedPptSum: 0,
         durationHoursSum: 0,
         durationKnownCount: 0,
+        dayFirstStart: [null, null, null, null, null],
+        dayLastFinish: [null, null, null, null, null],
+        dayActiveHoursSum: [0, 0, 0, 0, 0],
       };
     }
     return buckets[key];
+  }
+
+  // Records one visit's real clock timing into a bucket-day's running
+  // first-start/last-finish/active-time trackers (product owner, 2026-07-11)
+  // - shared by both the campaign-visit (COMPLIANCE_LOG) and ad-hoc
+  // (OTHER_VISIT_LOG) loops below, since a technician's real work day
+  // includes both kinds of stop.
+  function recordDayTiming(
+    bucket: Bucket,
+    dayIdx: number,
+    startedAt: Date | null,
+    finishedAt: Date | null,
+    durationHours: number | null
+  ): void {
+    if (startedAt && (!bucket.dayFirstStart[dayIdx] || startedAt < (bucket.dayFirstStart[dayIdx] as Date))) {
+      bucket.dayFirstStart[dayIdx] = startedAt;
+    }
+    if (finishedAt && (!bucket.dayLastFinish[dayIdx] || finishedAt > (bucket.dayLastFinish[dayIdx] as Date))) {
+      bucket.dayLastFinish[dayIdx] = finishedAt;
+    }
+    if (durationHours !== null) {
+      bucket.dayActiveHoursSum[dayIdx] += durationHours;
+    }
   }
 
   // ==========================================================================
@@ -634,6 +667,22 @@ function main(workbook: ExcelScript.Workbook) {
     status: string;
     matchedActualDate: Date | null;
     matchedActualDurationHours: number | null;
+    matchedActualStartedAt: Date | null;
+    matchedActualFinishedAt: Date | null;
+  }
+  // Excel auto-detects simple date-formatted text as a real Date cell value
+  // on read-back, but a full ISO datetime string (Started at/Finished at,
+  // written via toISOString()) is not guaranteed to be recognized the same
+  // way - parse defensively from either a real Date or a string.
+  function parseCellDate(v: unknown): Date | null {
+    if (v instanceof Date) {
+      return v;
+    }
+    if (typeof v == "string" && v) {
+      const d = new Date(v);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    return null;
   }
   let rawRows: ComplianceRow[] = [];
   for (let i = 1; i < complianceLog.length; i++) {
@@ -654,8 +703,10 @@ function main(workbook: ExcelScript.Workbook) {
       week,
       year,
       status: String(row[clIdx("status")]),
-      matchedActualDate: dateVal instanceof Date ? dateVal : null,
+      matchedActualDate: parseCellDate(dateVal),
       matchedActualDurationHours: !isNaN(durationRaw) && durationRaw > 0 ? durationRaw : null,
+      matchedActualStartedAt: parseCellDate(row[clIdx("matchedActualStartedAt")]),
+      matchedActualFinishedAt: parseCellDate(row[clIdx("matchedActualFinishedAt")]),
     });
   }
   const dedupedRows = latestByKey(rawRows);
@@ -707,6 +758,7 @@ function main(workbook: ExcelScript.Workbook) {
       if (jsDay in dayIndex) {
         bucket.visitsByDay[dayIndex[jsDay]]++;
         bucket.possByDay[dayIndex[jsDay]].push(r.posId);
+        recordDayTiming(bucket, dayIndex[jsDay], r.matchedActualStartedAt, r.matchedActualFinishedAt, r.matchedActualDurationHours);
       }
       if (r.matchedActualDurationHours !== null) {
         bucket.durationHoursSum += r.matchedActualDurationHours;
@@ -751,6 +803,12 @@ function main(workbook: ExcelScript.Workbook) {
       const jsDay = ovDate.getDay();
       if (jsDay in dayIndex) {
         bucket.otherVisitsByDay[dayIndex[jsDay]]++;
+        const ovDurationRaw = Number(row[ovIdx("durationHours")]);
+        const ovDuration = !isNaN(ovDurationRaw) && ovDurationRaw > 0 ? ovDurationRaw : null;
+        recordDayTiming(
+          bucket, dayIndex[jsDay],
+          parseCellDate(row[ovIdx("startedAt")]), parseCellDate(row[ovIdx("finishedAt")]), ovDuration
+        );
       }
     }
   }
@@ -951,6 +1009,22 @@ function main(workbook: ExcelScript.Workbook) {
         : efficiencyRatioPercent >= ROUTE_EFFICIENCY_WARNING_PERCENT
         ? "POZOR"
         : "OK";
+    // Skutečný pracovní den (product owner, 2026-07-11: "chybí mi tam
+    // zobrazení kolik udělal za den, není ten salesapp pořádně vytěžený") -
+    // real clock span (první start -> poslední konec, ze SalesApp Started
+    // at/Finished at) a "mrtvý čas" uvnitř něj (span minus reálně strávený
+    // čas na návštěvách). Blank (not 0) for a day with fewer than the two
+    // timestamps needed to know a span at all.
+    const workSpanHoursByDay = b.dayFirstStart.map((start, d) => {
+      const finish = b.dayLastFinish[d];
+      if (!start || !finish || finish <= start) {
+        return null;
+      }
+      return Math.round(((finish.getTime() - start.getTime()) / 3600000) * 100) / 100;
+    });
+    const idleHoursByDay = workSpanHoursByDay.map((span, d) =>
+      span === null ? null : Math.max(0, Math.round((span - b.dayActiveHoursSum[d]) * 100) / 100)
+    );
     // Display list of that day's realized POS, in the same order the km
     // figure above was computed from (see orderedPosForDay's comment) - "id
     // - name" per stop, comma-separated, so a manager can see WHICH POS a
@@ -1018,6 +1092,8 @@ function main(workbook: ExcelScript.Workbook) {
       pptPerVisit ?? "", avgVisitDurationHours ?? "",
       volumeVsPeerPercent ?? "", pptDensityVsPeerPercent ?? "", durationVsPeerPercent ?? "",
       volumeFlag, pptDensityFlag, durationFlag, activeSignals, combinedRiskFlag,
+      workSpanHoursByDay[0] ?? "", workSpanHoursByDay[1] ?? "", workSpanHoursByDay[2] ?? "", workSpanHoursByDay[3] ?? "", workSpanHoursByDay[4] ?? "",
+      idleHoursByDay[0] ?? "", idleHoursByDay[1] ?? "", idleHoursByDay[2] ?? "", idleHoursByDay[3] ?? "", idleHoursByDay[4] ?? "",
     ]);
   }
 
@@ -1047,9 +1123,13 @@ function main(workbook: ExcelScript.Workbook) {
     "pptPerVisit", "avgVisitDurationHours",
     "volumeVsPeerPercent", "pptDensityVsPeerPercent", "durationVsPeerPercent",
     "volumeFlag", "pptDensityFlag", "durationFlag", "activeSignalCount", "combinedRiskFlag",
+    // Skutečný pracovní den (product owner, 2026-07-11) - real clock work
+    // span and idle time per day, from SalesApp Started at/Finished at.
+    "workSpanHoursMon", "workSpanHoursTue", "workSpanHoursWed", "workSpanHoursThu", "workSpanHoursFri",
+    "idleHoursMon", "idleHoursTue", "idleHoursWed", "idleHoursThu", "idleHoursFri",
   ];
   const outWs = workbook.getWorksheet("TECHNICIAN_PERFORMANCE_LOG");
-  outWs.getRange("A2:AW100000").clear(ExcelScript.ClearApplyTo.contents);
+  outWs.getRange("A2:BG100000").clear(ExcelScript.ClearApplyTo.contents);
   outWs.getRangeByIndexes(0, 0, 1, headerRow.length).setValues([headerRow]);
   if (outRows.length > 0) {
     outWs.getRangeByIndexes(1, 0, outRows.length, headerRow.length).setValues(outRows);

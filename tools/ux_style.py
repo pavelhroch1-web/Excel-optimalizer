@@ -1421,14 +1421,78 @@ def build_technician_scorecard(wb):
         row += 1
 
     # ==========================================================================
+    # NÁVŠTĚVY PO DNECH (kampaň / ostatní) - product owner, 2026-07-11:
+    # "chybi mi tam zobrazení kolik udelal za den a podobně, neni ten
+    # salesapp pořádně vytezeny". The daily counts (TP!L:P campaign,
+    # TP!AD:AH ad-hoc) were already computed by PerformanceEngine.ts and
+    # used elsewhere on this sheet (daily chart, Ostatní návštěvy KPI), but
+    # never shown broken out by day as its own table - a pure visibility
+    # gap, no new engine logic needed here.
+    # ==========================================================================
+    build_section_header(ws, "C53", "NÁVŠTĚVY PO DNECH (kampaň / ostatní)")
+    style_dashboard_table_header(ws, 54, "CDEFGHI", ["", "Po", "Út", "St", "Čt", "Pá", "Týden celkem"])
+    visit_rows = [
+        (55, "Kampaň (plán)", ["L", "M", "N", "O", "P"]),
+        (56, "Ostatní (SalesApp)", ["AD", "AE", "AF", "AG", "AH"]),
+    ]
+    for row, label, cols in visit_rows:
+        ws.cell(row, 3, label).font = Font(size=10)
+        for col_letter, tp_col in zip("DEFGH", cols):
+            cell = ws[f"{col_letter}{row}"]
+            cell.value = f'=SUMPRODUCT({tp_cond}*{TP}!${tp_col}$2:${tp_col}$5000)'
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        total_cell = ws[f"I{row}"]
+        total_cell.value = f"=SUM(D{row}:H{row})"
+        total_cell.font = Font(bold=True)
+        total_cell.alignment = Alignment(horizontal="center", vertical="center")
+    apply_table_borders(ws, 55, 56, "CDEFGHI")
+
+    # ==========================================================================
+    # PRACOVNÍ DEN - REÁLNÝ ČAS (odhad z SalesApp Started at/Finished at) -
+    # product owner, 2026-07-11, follow-up: "také tam nevidím ten čas".
+    # Skutečná pracovní doba (první start - poslední konec toho dne) a
+    # nevytížený čas (rozdíl mezi pracovní dobou a součtem trvání návštěv -
+    # viz PerformanceEngine.ts recordDayTiming()/workSpanHoursByDay -
+    # zahrnuje kampaňové i ostatní návštěvy). Informační zobrazení, zatím
+    # bez semaforu/triggeru - uživatel žádal jen "zobrazení", ne novou
+    # KPI/flag; pokud se prokáže užitečné, práh lze doplnit později stejně
+    # jako u km efektivity trasy.
+    # FILTER()+INDEX() (ne SUMPRODUCT) - workSpanHours/idleHours obsahují ""
+    # pro dny bez záznamu Started/Finished at, což by v SUMPRODUCT
+    # (aritmetika na textu) shodilo #VALUE!; FILTER/INDEX na text nesahá.
+    # ==========================================================================
+    build_section_header(ws, "C58", "PRACOVNÍ DEN - REÁLNÝ ČAS (SalesApp Started/Finished at)")
+    style_dashboard_table_header(ws, 59, "CDEFGH", ["", "Po", "Út", "St", "Čt", "Pá"])
+    time_rows = [
+        (60, "Pracovní doba (h)", ["AX", "AY", "AZ", "BA", "BB"]),
+        (61, "Nevytížený čas (h)", ["BC", "BD", "BE", "BF", "BG"]),
+    ]
+    for row, label, cols in time_rows:
+        ws.cell(row, 3, label).font = Font(size=10)
+        for col_letter, tp_col in zip("DEFGH", cols):
+            cell = ws[f"{col_letter}{row}"]
+            cell.value = (
+                f'=LET(v,IFERROR(INDEX(FILTER({TP}!${tp_col}$2:${tp_col}$5000,{tp_cond}),1),""),'
+                f'IF(v="","-",v))'
+            )
+            cell.number_format = '0.0" h";;;@'
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+    apply_table_borders(ws, 60, 61, "CDEFGH")
+    ws.conditional_formatting.add(
+        "D61:H61",
+        FormulaRule(formula=['AND(ISNUMBER(D61),D61>=3)'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_WARNING),
+                    font=Font(color=STATUS_WARNING)),
+    )
+
+    # ==========================================================================
     # TOP PROBLÉMOVÉ POS - deduped, engine-computed (see PerformanceEngine.ts).
     # ==========================================================================
-    build_section_header(ws, "C54", "TOP PROBLÉMOVÉ POS")
-    style_dashboard_table_header(ws, 55, "CDEF", ["POS", "Název", "Region", "Nesplněno (celkem)"])
-    ws["C56"] = f'=IFERROR(FILTER({TI}!$C$2:$F$1000,{TI}!$A$2:$A$1000=$D$5),{{"—","Žádné problémy 🎉","",0}})'
-    apply_table_borders(ws, 56, 60, "CDEF")
+    build_section_header(ws, "C64", "TOP PROBLÉMOVÉ POS")
+    style_dashboard_table_header(ws, 65, "CDEF", ["POS", "Název", "Region", "Nesplněno (celkem)"])
+    ws["C66"] = f'=IFERROR(FILTER({TI}!$C$2:$F$1000,{TI}!$A$2:$A$1000=$D$5),{{"—","Žádné problémy 🎉","",0}})'
+    apply_table_borders(ws, 66, 70, "CDEF")
     ws.conditional_formatting.add(
-        "F56:F60", DataBarRule(start_type="num", start_value=0, end_type="num", end_value=10, color=STATUS_CRITICAL),
+        "F66:F70", DataBarRule(start_type="num", start_value=0, end_type="num", end_value=10, color=STATUS_CRITICAL),
     )
 
     return ws

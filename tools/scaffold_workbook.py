@@ -319,7 +319,7 @@ def main(ref_path, out_path):
     # docs/BUSINESS_RULES.md 15c and ARCHITECTURE.md Compliance Engine entry)
     write_table(
         dst_wb, "VISIT_HISTORY_ACTUAL",
-        ["posId", "date", "week", "year", "executor", "state", "salesAppUid", "durationHours"],
+        ["posId", "date", "week", "year", "executor", "state", "salesAppUid", "durationHours", "startedAt", "finishedAt"],
         [],
     )
 
@@ -331,7 +331,7 @@ def main(ref_path, out_path):
     # návštěvy" count on TECHNICIAN_SCORECARD (product owner, 2026-07-06).
     write_table(
         dst_wb, "OTHER_VISIT_LOG",
-        ["posId", "date", "week", "year", "executor", "salesAppUid", "durationHours"],
+        ["posId", "date", "week", "year", "executor", "salesAppUid", "durationHours", "startedAt", "finishedAt"],
         [],
     )
 
@@ -339,7 +339,8 @@ def main(ref_path, out_path):
     write_table(
         dst_wb, "COMPLIANCE_LOG",
         ["posId", "technician", "plannedWeek", "plannedYear", "status",
-         "matchedActualDate", "matchedActualWeek", "evaluatedAt", "matchedActualDurationHours"],
+         "matchedActualDate", "matchedActualWeek", "evaluatedAt", "matchedActualDurationHours",
+         "matchedActualStartedAt", "matchedActualFinishedAt"],
         [],
     )
 
@@ -372,7 +373,9 @@ def main(ref_path, out_path):
          "totalActualKmWeek", "totalOptimalKmWeek", "efficiencyRatioPercent", "kmPerVisit", "efficiencyFlag",
          "pptPerVisit", "avgVisitDurationHours",
          "volumeVsPeerPercent", "pptDensityVsPeerPercent", "durationVsPeerPercent",
-         "volumeFlag", "pptDensityFlag", "durationFlag", "activeSignalCount", "combinedRiskFlag"],
+         "volumeFlag", "pptDensityFlag", "durationFlag", "activeSignalCount", "combinedRiskFlag",
+         "workSpanHoursMon", "workSpanHoursTue", "workSpanHoursWed", "workSpanHoursThu", "workSpanHoursFri",
+         "idleHoursMon", "idleHoursTue", "idleHoursWed", "idleHoursThu", "idleHoursFri"],
         [],
     )
 
