@@ -90,6 +90,7 @@ def main(ref_path, out_path):
     control_ws.append(["DURATION_WARNING_PERCENT", 70, "Confirmed (product owner, 2026-07-09): average realized-visit duration (Real duration (h) from SalesApp) below this % of the network peer average triggers the POZOR durationFlag - a directly-measured signal, not a GPS estimate."])
     control_ws.append(["DURATION_CRITICAL_PERCENT", 50, "Confirmed (product owner, 2026-07-09): the KRITICKE bar for durationFlag."])
     control_ws.append(["PROBLEM_SIGNAL_MIN_COUNT", 2, "Confirmed (product owner, 2026-07-09: 'GPS je odhad, takze to ani nemusi byt na vinu'): how many of {flaka riziko, volumeFlag, pptDensityFlag, durationFlag, efficiencyFlag} must be simultaneously POZOR/KRITICKE before combinedRiskFlag='Ano' - the gate for the automatic 'problemovy technik' callouts on HOME/EFFICIENCY. No single signal alone (including route efficiency) triggers it."])
+    control_ws.append(["ACTIVATE_COUNT_BY_PPT", 0, "Confirmed (product owner, 2026-07-11: 'chci mit moznost je pridat... prvnich 500 nehlede kolik techniku to bude'): ActivatePOSEngine.ts's count-based mode - when POS_ACTIVATE_LIST is empty and this is > 0, activates (managerOverrideType=FORCE_INCLUDE) this many currently CATEGORY_RULES-EXCLUDE-d Active POS, highest PPT first. 0 = disabled (count mode does nothing; only POS_ACTIVATE_LIST's explicit list is processed). Ignored whenever POS_ACTIVATE_LIST has any rows - explicit list always wins over count."])
 
     # CATEGORY_RULES: copy reference rows + add explicit confirmed default row
     cat_ws = src_wb["CATEGORY_RULES"]
@@ -118,6 +119,24 @@ def main(ref_path, out_path):
     # managerOverrideType=FORCE_EXCLUDE dropdown.
     write_table(
         dst_wb, "BLACKLIST",
+        ["POS", "NOTES"],
+        [],
+    )
+
+    # POS_ACTIVATE_LIST (product owner, 2026-07-11: "chci mit moznost je
+    # pridat jako mame treba ted vyrazene 1CD... urcit bud jake, nebo
+    # prvnich 500 nehlede kolik techniku to bude") - same minimal
+    # paste-list pattern as BLACKLIST above, but the opposite direction:
+    # POS IDs pasted here get ActivatePOSEngine.ts's managerOverrideType=
+    # FORCE_INCLUDE, overriding a CATEGORY_RULES EXCLUDE rule (e.g. "1CD",
+    # "1POSTA") for just those POS - the existing PlanningEngine.ts
+    # FORCE_INCLUDE bypass already does the rest (each POS keeps its own
+    # assignedTechnician, so this naturally spreads across however many
+    # technicians those POS already belong to - no manual per-technician
+    # assignment needed). Leave empty and set CONTROL.ACTIVATE_COUNT_BY_PPT
+    # instead to activate the top N by PPT from the excluded pool.
+    write_table(
+        dst_wb, "POS_ACTIVATE_LIST",
         ["POS", "NOTES"],
         [],
     )

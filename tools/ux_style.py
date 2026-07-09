@@ -82,6 +82,7 @@ SHEET_GROUPS = [
     ("MARKET_RULES", "BF8F00"),
     ("TERMINAL_RULES", "BF8F00"),
     ("BLACKLIST", "C00000"),
+    ("POS_ACTIVATE_LIST", "375623"),
     ("CATEGORY_RULES", "BF8F00"),
     ("CADENCE_RULES", "BF8F00"),
     ("PARETO_GROUPS", "BF8F00"),
@@ -161,6 +162,7 @@ EDITABLE_COLUMNS = {
     "TERMINAL_RULES": ["ACTIVE"],
     "MARKET_RULES": ["ACTIVE"],
     "BLACKLIST": ["POS", "NOTES"],
+    "POS_ACTIVATE_LIST": ["POS", "NOTES"],
     "CATEGORY_RULES": ["CATEGORY", "RULE"],
     "CADENCE_RULES": ["scope", "matchValue", "minGapWeeks", "maxIntervalWeeks", "intervalType",
                        "guaranteeType", "dedupBy", "campaignChangeOverride", "priority", "active",
@@ -255,6 +257,14 @@ IMPORT_HUB_GUIDANCE = {
         "Vlož sem POS ID provozoven, které chceš úplně vynechat z plánování, bez ohledu na "
         "cokoliv jiného (skóre, kadenční pravidla, filtry). Stačí ID do sloupce POS - engine "
         "je od dalšího běhu Planning Engine ignoruje úplně."
+    ),
+    "POS_ACTIVATE_LIST": (
+        "Opak BLACKLIST: sem vlož POS ID, která chceš AKTIVOVAT i přesto, že je CATEGORY_RULES "
+        "aktuálně vyřazuje (např. kategorie 1CD/1POSTA = EXCLUDE). Nemění, kterému technikovi "
+        "POS patří - jen mu dovolí vstoupit do plánování. Necháš-li tento seznam prázdný, "
+        "spusť místo toho Activate POS Engine s CONTROL.ACTIVATE_COUNT_BY_PPT > 0 - aktivuje "
+        "prvních N (podle PPT sestupně) aktuálně vyřazených POS automaticky, bez ručního výpisu. "
+        "Náhled aktuálně vyřazených POS a jejich PPT vidíš v tabulce vpravo (sloupec D+)."
     ),
     # Core working screens don't get their own title-banner rows the way
     # HOME/DASHBOARD/IMPORT_HUB do - a banner row would push every real data
@@ -702,7 +712,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
     # reads the actual sheet the stage produces/consumes, not a static
     # instruction. Row numbers are fixed here so the "DALŠÍ KROK" callout
     # above can reference them even though it's written first. ----
-    PIPE_FIRST_ROW = 27  # shifted +1 (KDO FLAKÁ) +4 (KDO JEZDÍ NEEFEKTIVNĚ) +4 (KDO JEZDÍ CIK-CAK) from 18
+    PIPE_FIRST_ROW = 32  # shifted +1 (KDO FLAKÁ) +4 (KDO JEZDÍ NEEFEKTIVNĚ) +4 (KDO JEZDÍ CIK-CAK) +5 (PLÁN AKTUÁLNOST) from 18
     stages = [
         # (num, name, description, status formula, target sheet or None, color)
         (
@@ -745,13 +755,87 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
         "5) Spusť Compliance a Advisor Engine - vyhodnotí skutečné návštěvy proti plánu",
     ]
 
+    # ==========================================================================
+    # PLÁN JE AKTUÁLNÍ JEŠTĚ X DNÍ - product owner, 2026-07-11: "potřebuji
+    # opravdu viditelně vidět, že ten tourplan bude aktuální ještě x dní a
+    # viditelně chci dát generovat nový, který tourplan". The single most
+    # prominent thing on HOME after the KPI row - a manager should see at a
+    # glance whether this week's published plan is still current, without
+    # opening PLAN_LIFECYCLE.
+    # Deliberately NOT derived from MANAGER_PLAN_PUBLISHED's DATE column -
+    # PlanningEngine.ts writes that as a locale-formatted STRING
+    # (toLocaleDateString("cs-CZ")), and this session already found one real
+    # bug from trusting a same-run string to behave like a Date (see
+    # docs/BUSINESS_RULES.md section 20's matchedActualDate fix). Instead
+    # this derives the plan's last valid day purely from PLAN_LIFECYCLE's
+    # plain numeric year/week columns via ISO week arithmetic
+    # (DATE(Y,1,4)-WEEKDAY(...) is always ISO week 1's Monday), so there is
+    # no date-string round-trip to trust.
+    # No live "click to regenerate" button is possible from an
+    # openpyxl-generated file (Office Scripts button-binding is an Excel
+    # Online UI action, not something storable in the .xlsx itself) - the
+    # callout instead names the exact two scripts to run, and
+    # NAVOD_INSTALACE.md documents how to pin them as real one-click buttons
+    # via Excel Online's Automate pane ("Přidat tlačítko").
+    # ==========================================================================
+    ws["S1"] = "planLifecycleKey"
+    ws["S2"] = (
+        '=IFERROR(MAX(IF((PLAN_LIFECYCLE!$C$2:$C$2000="Published")+(PLAN_LIFECYCLE!$C$2:$C$2000="Active"),'
+        'PLAN_LIFECYCLE!$A$2:$A$2000*100+PLAN_LIFECYCLE!$B$2:$B$2000)),"")'
+    )
+    ws["S3"] = '=IF($S$2="","",INT($S$2/100))'  # plan's year
+    ws["S4"] = '=IF($S$2="","",MOD($S$2,100))'  # plan's ISO week
+    ws["S5"] = '=IF($S$4="","",DATE($S$3,1,4)-WEEKDAY(DATE($S$3,1,4),3)+($S$4-1)*7)'  # Monday of that week
+    ws["S6"] = '=IF($S$5="","",$S$5+4)'  # Friday - last day this plan covers
+    ws["S7"] = '=IF($S$6="","",$S$6-TODAY())'  # days remaining (<=0 once expired)
+    ws.column_dimensions["S"].hidden = True
+
+    build_section_header(ws, "C10", "TOURPLAN - AKTUÁLNOST")
+    r = 11
+    days_left_ref = build_kpi_card(
+        ws, "C", "D", r, r + 1, r + 2, "Plán aktuální ještě (dní)",
+        '=IF($S$2="","–",IF($S$7>0,$S$7,0))',
+        value_color=STATUS_GOOD, fill_color=dashboard_ui.TINT_GOOD,
+    )
+    ws.merge_cells(f"E{r}:M{r+2}")
+    freshness_cell = ws.cell(r, 5)
+    freshness_cell.value = (
+        '=IF($S$2="","⏳ Zatím žádný publikovaný plán - spusť Planning Engine → Publish Engine, ať je co sledovat.",'
+        'IF($S$7>0,"✅ Plán pro týden "&$S$4&"/"&$S$3&" je aktuální ještě "&$S$7&IF($S$7=1," den",IF($S$7<5," dny"," dní"))&".",'
+        '"🔴 PLÁN PRO TÝDEN "&$S$4&"/"&$S$3&" VYPRŠEL - vygeneruj nový: spusť Planning Engine, pak Publish Engine."))'
+    )
+    freshness_cell.font = Font(bold=True, size=13, color=NAVY)
+    freshness_cell.fill = PatternFill("solid", fgColor="FFF2CC")
+    freshness_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1, wrap_text=True)
+    build_status_badge_conditional(ws, freshness_cell.coordinate, freshness_cell.coordinate, rules=[
+        ("✅", "E2EFDA", None),
+        ("🔴", STATUS_CRITICAL, WHITE),
+        ("⏳", "FFF2CC", None),
+    ])
+    build_status_badge_conditional(ws, f"{days_left_ref}:D{r+2}", days_left_ref, rules=[
+        ("–", "F2F2F2", "808080"),
+    ])
+    ws.conditional_formatting.add(
+        f"{days_left_ref}:D{r+2}",
+        FormulaRule(formula=[f'AND(ISNUMBER({days_left_ref}),{days_left_ref}<3)'],
+                    fill=PatternFill("solid", fgColor=dashboard_ui.TINT_WARNING), font=Font(bold=True, size=22, color=STATUS_WARNING)),
+    )
+    ws.conditional_formatting.add(
+        f"{days_left_ref}:D{r+2}",
+        FormulaRule(formula=[f'AND(ISNUMBER({days_left_ref}),{days_left_ref}=0)'],
+                    fill=PatternFill("solid", fgColor=dashboard_ui.TINT_CRITICAL), font=Font(bold=True, size=22, color=STATUS_CRITICAL)),
+    )
+    _nav_button(ws, f"N{r}", "Rozpis →", "TECHNICIAN_PLAN", color="375623")
+    for row_ in (r, r + 1, r + 2):
+        ws.row_dimensions[row_].height = 18
+    r += 4
+
     # ---- "KDO FLAKÁ" callout - product owner, 2026-07-06: "chci mit o
     # všem přehled" - a manager opening HOME should see at a glance whether
     # anyone is currently flagged (PerformanceEngine.ts's flakaRiziko, see
     # BUSINESS_RULES.md), without having to navigate to PERFORMANCE first.
     # Same single-callout-line pattern as "DALŠÍ KROK"/the pre-publish check
     # below, not a full table - this is a headline, not a report. ----
-    r = 10
     ws.cell(r, 3, "KDO FLAKÁ").font = SECTION_FONT
     r += 1
     ws.merge_cells(f"C{r}:J{r+1}")
@@ -1058,6 +1142,7 @@ def build_home(wb, real_control_values, pos_master_tech_col="O"):
         ("ACTIVITY_PLAN", "ACTIVITY_PLAN", "BF8F00"),
         ("TYPY TERMINÁLŮ", "TERMINAL_RULES", "BF8F00"),
         ("BLACKLIST", "BLACKLIST", "C00000"),
+        ("AKTIVOVAT POS", "POS_ACTIVATE_LIST", "375623"),
     ]
     col_idx = 3
     for label, target, color in quick_links:
@@ -1579,13 +1664,13 @@ def build_performance_sheet(wb, n_rows=60):
     ws = wb.create_sheet("PERFORMANCE")
     ws.sheet_view.showGridLines = False
     ws.sheet_view.showRowColHeaders = False
-    for col in "CDEFGHIJKLMNO":
+    for col in "CDEFGHIJKLMNOPQR":
         ws.column_dimensions[col].width = 13
     build_nav_rail(ws, "PERFORMANCE")
 
     build_dashboard_banner(
         ws, "PERFORMANCE", "Srovnání všech techniků - řaď a filtruj přímo v tabulce (Excel AutoFilter)",
-        col_start="C", col_end="O",
+        col_start="C", col_end="R",
     )
     ws.freeze_panes = "C9"
 
@@ -1615,10 +1700,27 @@ def build_performance_sheet(wb, n_rows=60):
     headers = [
         "Technik", "Region", "Naplánováno", "Realizováno", "Splněno včas", "Splněno pozdě",
         "Nesplněno", "Navíc", "Compliance %", "Dlouhodobý průměr", "Trend", "Flaká riziko",
-        "Km/den (nejhorší)",
+        "Km/den (nejhorší)", "POS v kampani", "Hotovo", "Chybí",
     ]
-    for col, label in zip("CDEFGHIJKLMNO", headers):
+    for col, label in zip("CDEFGHIJKLMNOPQR", headers):
         ws[f"{col}{header_row}"] = label
+
+    # POS v kampani / Hotovo / Chybí (product owner, 2026-07-11: "dashboard
+    # kde uvidím každého technika a kolik POS z kampaně už má hotovo a kolik
+    # mu chybí") - not from TECHNICIAN_PERFORMANCE_SUMMARY (no engine field
+    # for this), computed directly from POS_MASTER + VISIT_HISTORY_ACTUAL,
+    # same definition as TECHNICIAN_SCORECARD's "POS BEZ NÁVŠTĚVY" table:
+    # "Hotovo" = active assigned POS with at least one row ever in
+    # VISIT_HISTORY_ACTUAL (a real campaign-purpose SalesApp visit).
+    # The "is this POS ever visited" check (MATCH against 200,000 rows) is
+    # computed ONCE as a hidden spilled helper column (T) instead of inside
+    # each of the up to n_rows per-technician SUMPRODUCTs - re-running that
+    # MATCH per technician row would multiply an already 11,605-row scan by
+    # n_rows, needlessly expensive for a Table that recalculates on every
+    # sort/filter.
+    ws["T1"] = "posEverVisitedFlag"
+    ws["T2"] = "=ISNUMBER(MATCH(POS_MASTER!$A$2:$A$20000,VISIT_HISTORY_ACTUAL!$A$2:$A$200000,0))"
+    ws.column_dimensions["T"].hidden = True
 
     src_cols = "ABEFGHIJKLMOP"  # TECHNICIAN_PERFORMANCE_SUMMARY column per table column, in order
     first_data_row = header_row + 1
@@ -1627,9 +1729,16 @@ def build_performance_sheet(wb, n_rows=60):
         sr = i + 2  # TECHNICIAN_PERFORMANCE_SUMMARY row (header is row 1 there)
         for col, src_col in zip("CDEFGHIJKLMNO", src_cols):
             ws[f"{col}{r}"] = f'=IF({TS}!$A${sr}="","",{TS}!{src_col}{sr})'
+        pm_tech_match_row = (
+            f'(IF(POS_MASTER!$AJ$2:$AJ$20000<>"",POS_MASTER!$AJ$2:$AJ$20000,POS_MASTER!$O$2:$O$20000)=C{r})'
+        )
+        pm_active_row = 'POS_MASTER!$Q$2:$Q$20000="Active"'
+        ws[f"P{r}"] = f'=IF({TS}!$A${sr}="","",SUMPRODUCT({pm_tech_match_row}*({pm_active_row})))'
+        ws[f"Q{r}"] = f'=IF({TS}!$A${sr}="","",SUMPRODUCT({pm_tech_match_row}*({pm_active_row})*$T$2:$T$20001))'
+        ws[f"R{r}"] = f'=IF({TS}!$A${sr}="","",P{r}-Q{r})'
 
     last_row = first_data_row + n_rows - 1
-    table_ref = f"C{header_row}:O{last_row}"
+    table_ref = f"C{header_row}:R{last_row}"
     table = Table(displayName="PerformanceTable", ref=table_ref)
     table.tableStyleInfo = TableStyleInfo(
         name="TableStyleMedium2", showFirstColumn=False, showLastColumn=False,
@@ -1676,21 +1785,38 @@ def build_performance_sheet(wb, n_rows=60):
     # day. Found missing during a final full test pass (2026-07-06): route
     # efficiency had no network-wide view at all before this - only
     # per-technician on TECHNICIAN_SCORECARD.
-    ws["Q1"] = '=IFERROR(VLOOKUP("ROUTE_KM_WARNING_KM",CONTROL!$A:$B,2,FALSE),80)'
-    ws["Q2"] = '=IFERROR(VLOOKUP("ROUTE_KM_CRITICAL_KM",CONTROL!$A:$B,2,FALSE),150)'
-    ws.column_dimensions["Q"].hidden = True
+    # Moved to column U (product owner, 2026-07-11): Q is now a visible
+    # table column ("Hotovo") - these two threshold cells used to sit hidden
+    # in Q1/Q2, which would otherwise now surface as stray numbers above the
+    # visible "Hotovo" column.
+    ws["U1"] = '=IFERROR(VLOOKUP("ROUTE_KM_WARNING_KM",CONTROL!$A:$B,2,FALSE),80)'
+    ws["U2"] = '=IFERROR(VLOOKUP("ROUTE_KM_CRITICAL_KM",CONTROL!$A:$B,2,FALSE),150)'
+    ws.column_dimensions["U"].hidden = True
     o_rng = f"O{first_data_row}:O{last_row}"
     ws.conditional_formatting.add(
-        o_rng, FormulaRule(formula=[f"O{first_data_row}<=$Q$1"], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_GOOD),
+        o_rng, FormulaRule(formula=[f"O{first_data_row}<=$U$1"], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_GOOD),
                             font=Font(color=STATUS_GOOD), stopIfTrue=True),
     )
     ws.conditional_formatting.add(
-        o_rng, FormulaRule(formula=[f"O{first_data_row}<=$Q$2"], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_WARNING),
+        o_rng, FormulaRule(formula=[f"O{first_data_row}<=$U$2"], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_WARNING),
                             font=Font(color=STATUS_WARNING), stopIfTrue=True),
     )
     ws.conditional_formatting.add(
-        o_rng, FormulaRule(formula=[f"O{first_data_row}>$Q$2"], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_CRITICAL),
+        o_rng, FormulaRule(formula=[f"O{first_data_row}>$U$2"], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_CRITICAL),
                             font=Font(bold=True, color=STATUS_CRITICAL), stopIfTrue=True),
+    )
+
+    # "Chybí" (POS never visited in the campaign) - a data bar so the worst
+    # gaps are visible at a glance while scanning the whole team, same
+    # component TECHNICIAN_SCORECARD's TOP PROBLÉMOVÉ POS already uses for
+    # the analogous "how many is this" signal. 0 stays neutral (nothing to
+    # flag) - only non-zero rows get a bar.
+    r_rng = f"R{first_data_row}:R{last_row}"
+    ws.conditional_formatting.add(
+        r_rng, DataBarRule(start_type="num", start_value=0, end_type="max", color=STATUS_WARNING),
+    )
+    ws.conditional_formatting.add(
+        r_rng, FormulaRule(formula=[f"R{first_data_row}=0"], font=Font(color=STATUS_GOOD)),
     )
 
     return ws
@@ -2943,6 +3069,71 @@ def enhance_pos_master(wb, max_rows=20000):
         )
 
 
+def build_pos_activate_preview(wb):
+    """Live preview block on POS_ACTIVATE_LIST, columns D onward (A:B stay
+    pure paste-input, matching BLACKLIST's convention) - product owner,
+    2026-07-11: "chci mit moznost... vybrat treba prvnich 500 nebo vsechny"
+    needs to actually SEE what "prvních 500" would include before running
+    the script, not just trust a number.
+
+    The excluded/eligible check here is a formula approximation of
+    core.ts's categoryRule() (exact match > STARTS_1 for categories
+    starting with "1" > "*" wildcard > "NORMAL" fallback) - close enough for
+    a preview; ActivatePOSEngine.ts/activate_pos_engine.py are the actual
+    authority on what gets activated, this table never writes anything."""
+    if "POS_ACTIVATE_LIST" not in wb.sheetnames:
+        return
+    ws = wb["POS_ACTIVATE_LIST"]
+    ws.column_dimensions["D"].width = 14
+    ws.column_dimensions["E"].width = 30
+    ws.column_dimensions["F"].width = 10
+
+    ws["D1"] = "NÁHLED - AKTUÁLNĚ VYŘAZENÉ POS (podle CATEGORY_RULES)"
+    ws["D1"].font = Font(bold=True, size=12, color=NAVY)
+
+    # excludedFlag - a single LET spilling one array over all POS_MASTER
+    # rows (elementwise VLOOKUP/IF, no BYROW/LAMBDA - keeping this to the
+    # same dynamic-array function set already proven supported elsewhere in
+    # this workbook: FILTER/SORT/LET/CHOOSE/IFS/AGGREGATE/SUMPRODUCT).
+    ws["G1"] = "excludedFlag"
+    ws["G2"] = (
+        '=LET(cat,POS_MASTER!$D$2:$D$20000,'
+        'status,POS_MASTER!$Q$2:$Q$20000,'
+        'override,POS_MASTER!$AH$2:$AH$20000,'
+        'exactMatch,IFERROR(VLOOKUP(cat,CATEGORY_RULES!$A:$B,2,FALSE),""),'
+        'starsRule,IFERROR(VLOOKUP("STARTS_1",CATEGORY_RULES!$A:$B,2,FALSE),""),'
+        'wildcardRule,IFERROR(VLOOKUP("*",CATEGORY_RULES!$A:$B,2,FALSE),"NORMAL"),'
+        'resolvedRule,IF(exactMatch<>"",exactMatch,IF(LEFT(cat,1)="1",IF(starsRule<>"",starsRule,wildcardRule),wildcardRule)),'
+        'IF((status="Active")*(override<>"FORCE_EXCLUDE")*(override<>"FORCE_INCLUDE")*(resolvedRule="EXCLUDE"),1,0))'
+    )
+    ws.column_dimensions["G"].hidden = True
+
+    ws["H1"] = "=SUM($G$2:$G$20000)"
+    ws.column_dimensions["H"].hidden = True
+
+    ws["D2"] = 'Počet aktuálně vyřazených POS (lze aktivovat):'
+    ws["D2"].font = Font(bold=True, size=10)
+    ws["E2"] = "=$H$1"
+    ws["E2"].font = Font(bold=True, size=14, color=STATUS_WARNING)
+    ws["D3"] = 'CONTROL.ACTIVATE_COUNT_BY_PPT (aktuální nastavení):'
+    ws["D3"].font = Font(size=10)
+    ws["E3"] = '=IFERROR(VLOOKUP("ACTIVATE_COUNT_BY_PPT",CONTROL!$A:$B,2,FALSE),0)'
+    ws["E3"].font = Font(bold=True, size=12, color=NAVY)
+
+    ws["D5"] = "POS"
+    ws["E5"] = "Název"
+    ws["F5"] = "PPT"
+    for c in "DEF":
+        ws[f"{c}5"].font = HEADER_FONT
+        ws[f"{c}5"].fill = HEADER_FILL
+    ws["D6"] = (
+        '=IFERROR(SORT(FILTER(CHOOSE({1,2,3},POS_MASTER!$A$2:$A$20000,POS_MASTER!$G$2:$G$20000,'
+        'POS_MASTER!$P$2:$P$20000),$G$2:$G$20000=1),3,-1),'
+        '"— Žádné, nic aktuálně vyřazeného 🎉")'
+    )
+    ws["D6"].font = Font(size=10)
+
+
 def apply_all(wb, control_rows):
     """Single entry point called by scaffold_workbook.py after all sheets
     and data are populated."""
@@ -3033,6 +3224,8 @@ def apply_all(wb, control_rows):
             # other working screen had AutoFilter, these two didn't.
             last_col = get_column_letter(ws.max_column or 16)
             ws.auto_filter.ref = f"A1:{last_col}{max(ws.max_row, 2)}"
+
+    build_pos_activate_preview(wb)
 
     for sheet_name in list(wb.sheetnames):
         protect_config_sheet(wb[sheet_name], sheet_name)

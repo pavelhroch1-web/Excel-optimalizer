@@ -1139,3 +1139,93 @@ has happened yet on the real workbook), all 11,605 Active POS currently show as
 "never visited" - expected given no real import has run yet, same "known limitation"
 pattern already documented for `EFFICIENCY`/`TECHNICIAN_PERFORMANCE_LOG` above; the
 number becomes meaningful after the first real SalesApp import.
+
+## 21. Tourplan freshness, campaign completion dashboard, bulk POS activation (2026-07-11)
+
+Four more requests from the same session, in order: "potřebuji opravdu viditelně vidět,
+že ten tourplan bude aktuální ještě x dní a viditelně chci dát generovat nový, který
+tourplan"; "hloubková kontrola, že všechno funguje"; a team-wide "kolik POS z kampaně už
+má hotovo a kolik mu chybí" dashboard; and a bulk-add tool with an explicit correction
+mid-conversation that it must never change POS ownership.
+
+**Deep audit (before any new work)**: full 8-engine pipeline (Import through Reporting)
+re-run on the real 11,605-POS dataset, TS vs Python confirmed equivalent
+(`compare_engines.py`), `check_sync.py` (18 blocks at the time), both unit test suites
+green (133 TS / 120 Python), no literal error strings found in any workbook cell. Also
+used this pass to confirm the exact CATEGORY_RULES state driving the 4th feature below:
+`1CD` and `1POSTA` both resolve to `EXCLUDE` (everything else starting with "1" defaults
+to `CORE` via the `STARTS_1` wildcard row) - ~3,316 Active POS currently excluded this way.
+
+**"PLÁN JE AKTUÁLNÍ JEŠTĚ X DNÍ"** - the single most prominent thing on HOME now (right
+after the KPI row). Derives the published plan's last valid day from `PLAN_LIFECYCLE`'s
+plain numeric year/week columns via ISO week arithmetic
+(`DATE(Y,1,4)-WEEKDAY(DATE(Y,1,4),3)+(W-1)*7` is always that ISO week's Monday), rather
+than from `MANAGER_PLAN_PUBLISHED`'s DATE column - `PlanningEngine.ts` writes that column
+as a locale-formatted STRING (`toLocaleDateString("cs-CZ")`), and this session had
+already found one real bug (see section 20's `matchedActualDate` fix) from trusting a
+same-run string to behave like a real Date. A color-escalating day-count KPI tile (green
+≥3 days, orange 1-2, red ≤0/"VYPRŠEL") plus a plain-language sentence naming the exact
+next two scripts to run (`PlanningEngine.ts` → `PublishEngine.ts`). No literal
+"click to regenerate" button is possible from an openpyxl-generated `.xlsx` - Office
+Scripts button-binding ("Přidat tlačítko") is an Excel Online UI action performed on the
+live workbook, not something storable in the file itself - so `NAVOD_INSTALACE.md`
+documents that as a one-time manual step instead.
+
+**Campaign completion, team-wide (`PERFORMANCE` sheet)** - three new columns ("POS v
+kampani", "Hotovo", "Chybí") extending the existing native-Table technician comparison,
+using the exact same "ever appeared in `VISIT_HISTORY_ACTUAL`" definition as section 20's
+per-technician `TECHNICIAN_SCORECARD` table, just aggregated per technician instead of
+filtered to one. The "is this POS ever visited" `MATCH` against a 200,000-row range is
+computed ONCE as a hidden spilled helper column (`T`) rather than inside each of up to 60
+per-technician `SUMPRODUCT`s - re-running that `MATCH` per row would multiply an already
+11,605-row scan by the technician count, unnecessarily expensive for a Table that
+recalculates on every sort/filter. The pre-existing `ROUTE_KM_WARNING_KM`/`_CRITICAL_KM`
+threshold cells were relocated from hidden column Q to hidden column U, since Q became a
+visible table column ("Hotovo") - they'd otherwise surface as stray bare numbers above it.
+
+**Bulk POS activation** - product owner, asked directly whether this should reassign POS
+ownership: "já nikdy do jejich 'přiřazení'... měnit nechci, ja chci mít možnost je přidat
+jako máme třeba teď vyřazené 1CD, ale chci mít možnost určit buďto jaké, nebo prvních 500
+nehledě kolik techniků to bude" - explicitly NOT a reassignment tool, and explicitly
+allowed to spread across however many technicians the selected POS already belong to.
+New `ActivatePOSEngine.ts` (+ `activate_pos_engine.py` port, registered in
+`desktop_client/engines/run_pipeline.py` as `"activate_pos"`, NOT part of the default
+Import→Planning→Publish pipeline - opt-in only) sets `POS_MASTER.managerOverrideType` to
+`FORCE_INCLUDE` on selected POS - the exact mechanism `PlanningEngine.ts` already had for
+"manually include a POS a category rule would otherwise filter out" - never touches
+`assignedTechnician`. Two mutually exclusive selection modes, matching the product
+owner's exact wording ("podle mého seznamu nebo ppt"):
+- **Explicit list**: POS IDs pasted into a new `POS_ACTIVATE_LIST` sheet (same minimal
+  paste-list convention as `BLACKLIST`, opposite direction - "activate" instead of
+  "always exclude"). Wins whenever it has any rows.
+- **Count by PPT**: new `CONTROL.ACTIVATE_COUNT_BY_PPT` setting (default 0 = disabled).
+  Only used when `POS_ACTIVATE_LIST` is empty. Builds the pool of Active POS whose
+  `CATEGORY_RULES` rule resolves to `EXCLUDE` and that aren't already
+  `FORCE_INCLUDE`/`FORCE_EXCLUDE`, sorts by `ppt` descending, activates the top N.
+
+An explicit `FORCE_EXCLUDE` override always wins over either mode (never silently
+overridden - reported back in the run summary). Idempotent by construction: a POS already
+`FORCE_INCLUDE` is left untouched (no duplicate note appended), and the count mode's pool
+always excludes anything already activated, so re-running with the same N naturally picks
+up the next-highest-PPT still-excluded POS rather than repeating the same ones - verified
+directly (re-ran a count-mode seed's own output back through the engine: picked up
+exactly the next-ranked POS, none of the already-activated ones touched again).
+
+`POS_ACTIVATE_LIST` also carries a live preview block (columns D onward, keeping A:B pure
+paste-input) - a formula approximation of `categoryRule()`'s exact-match > `STARTS_1` >
+`*`-wildcard priority, built as one `LET()` spilling an array over all of `POS_MASTER`
+(no `BYROW`/`LAMBDA` - kept to the same dynamic-array function set already proven
+supported elsewhere in this workbook: `FILTER`/`SORT`/`LET`/`CHOOSE`/`IFS`/`AGGREGATE`/
+`SUMPRODUCT`), so the manager can see the actual candidate pool and their PPT before
+running the script, not just trust a number. The preview is informational only - the
+engine, not this formula, is the authority on what actually gets activated.
+
+Verified with two dedicated synthetic seeds (6 POS: 3 eligible-excluded at different PPT,
+1 non-excluded, 1 `FORCE_EXCLUDE`, 1 Closed) covering both selection modes - byte-identical
+`POS_MASTER.managerOverrideType`/`plannerNotes` output between `ActivatePOSEngine.ts` and
+`activate_pos_engine.py`. `check_sync.py` passed (20 blocks, 9 deployable scripts - first
+engine added to that list since `StartTrackingEngine.ts`). Full test suites green (133 TS,
+120 Python). Real workbook patched: new `POS_ACTIVATE_LIST` sheet, new
+`CONTROL.ACTIVATE_COUNT_BY_PPT` row, `PERFORMANCE` +3 columns, `HOME`'s pipeline-stage row
+numbers shifted (+5 rows for the new freshness callout) - `POS_MASTER`/`RAW_DATA` row
+counts unchanged (11,606/11,607) after every patch, as always.

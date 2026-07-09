@@ -16,6 +16,7 @@ import json
 import sys
 
 from . import (
+    activate_pos_engine,
     advisor_engine,
     compliance_engine,
     import_engine,
@@ -54,6 +55,7 @@ ENGINES = {
     "advisor": advisor_engine.run,
     "performance": performance_engine.run,
     "reporting": reporting_engine.run,
+    "activate_pos": activate_pos_engine.run,
 }
 
 
