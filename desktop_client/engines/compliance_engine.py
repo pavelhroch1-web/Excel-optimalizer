@@ -36,6 +36,38 @@ def _to_date(v) -> datetime.date | None:
         return None
 
 
+_SALESAPP_CZ_DATE_RE = re.compile(r"^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})$")
+
+
+def _parse_salesapp_date(v) -> datetime.date | None:
+    """Parses SALESAPP_IMPORT's DATE column specifically - see
+    office-scripts/ComplianceEngine.ts's parseSalesAppDate() for the full
+    rationale (found 2026-07-11 during a Planning Engine audit: real data
+    always arrives as a genuine datetime, but only accepting that plus an
+    explicit "D. M. YYYY" string or an unambiguous ISO string keeps this
+    call site as safe as the already-fixed MANAGER_PLAN_PUBLISHED one, with
+    no guess-based fallback)."""
+    if isinstance(v, datetime.datetime):
+        return v.date()
+    if isinstance(v, datetime.date):
+        return v
+    if isinstance(v, str) and v.strip():
+        s = v.strip()
+        m = _SALESAPP_CZ_DATE_RE.match(s)
+        if m:
+            day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            try:
+                return datetime.date(year, month, day)
+            except ValueError:
+                return None
+        if re.match(r"^\d{4}-\d{2}-\d{2}", s):
+            try:
+                return datetime.date.fromisoformat(s[:10])
+            except ValueError:
+                return None
+    return None
+
+
 def _to_datetime(v) -> datetime.datetime | None:
     """Preserves time-of-day, unlike _to_date() - needed for Started at/
     Finished at (product owner, 2026-07-11) - see
@@ -195,7 +227,7 @@ def run(workbook: MockWorkbook) -> str:
         if state not in ("COMPLETED", "FINALIZED"):
             continue
         date_val = _at(row, c_date)
-        date = _to_date(date_val)
+        date = _parse_salesapp_date(date_val)
         if date is None:
             continue
         week, year = iso_week_number(date)

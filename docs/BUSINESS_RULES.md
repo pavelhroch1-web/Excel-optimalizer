@@ -1500,3 +1500,52 @@ Reporting/Performance/analytics expansion is paused - the next work, once the we
 direction is confirmed, should focus on Planning Engine quality itself (visit history,
 last-visit-per-POS, campaign weighting, GPS clustering, capacity, rule precedence), not
 new features.
+
+## 26. Planning Engine business-logic audit (2026-07-11)
+
+Product owner's revised priority: web-app work paused, focus entirely on Planning Engine
+quality against 9 named criteria (visit history since year start, last visit per POS,
+weeks since last visit, current campaigns, PPT, business rules, GPS clustering, technician
+capacities, mandatory visits/priority) - "potřebuji, aby systém nejdříve uměl spolehlivě
+vytvořit kvalitní tour plán. To je hlavní produkt." A full audit (TS + Python, both
+verified line-for-line equivalent, no divergence) found the core scoring/selection logic
+solid, with three headline gaps - but the product owner then scoped follow-up work
+strictly: **audit business logic only, fix real bugs only, no refactoring/optimization
+unless required to fix the planner, no new features.** Under that scope:
+
+- **`managerOverridePriority` is parsed but never consumed by Planning Engine** (only
+  `managerOverrideType`/`managerOverrideTechnician` are read) - NOT fixed. Making it do
+  something requires new scoring logic, which is a feature, not a bug.
+- **Mandatory (CORE/CADENCE-hard) visits correctly can never be silently dropped**
+  (`selectWeekPOS()` pushes every `pickMandatory()` result unconditionally, capacity is
+  never checked against it) - but a resulting capacity overrun isn't surfaced to the
+  manager (no Advisor Engine alert type for it) - NOT fixed. That's Advisor Engine, a
+  separate paused module, and a new alert type is new capability.
+- **"Aktuální kampaně" don't drive targeted POS selection** - campaign scope only affects
+  hold-back timing and an output label, not which POS get chosen for a given LOS/LOT
+  activity (the engine's own comment at `PlanningEngine.ts` calls this "deferred from
+  V10.5.5, needs a separate gap"). NOT fixed - implementing real campaign-scoped
+  targeting is new logic.
+- **`CAPACITY_OVERRIDE`'s `tech|year|week` lookup key uses the same "raw week, flat
+  CONTROL.YEAR" convention as `MANAGER_PLAN`/`PLAN_LIFECYCLE`/`PublishEngine.ts`**
+  (documented at `ComplianceEngine.ts:291-299`) - investigated as a possible
+  year-boundary bug, concluded NOT a bug: it's consistent with the rest of the system.
+  Left untouched.
+
+**One real bug WAS fixed**: `ComplianceEngine.ts`'s SALESAPP_IMPORT DATE-column parse
+(`office-scripts/ComplianceEngine.ts`, the "PARSE SALESAPP_IMPORT" loop) had the exact
+same unsafe `new Date(String(v))` fallback already proven dangerous twice this session
+(section 24) - dormant in practice (a real-workbook check confirmed SALESAPP_IMPORT's
+Date column always arrives as genuine `datetime` cells), but directly feeds
+`weeksSinceLastVisit`/`lastRealVisitDate`, i.e. the "historie návštěv" criterion the
+planner scores on, so it was fixed defensively. New `parseSalesAppDate()`
+(TS)/`_parse_salesapp_date()` (Python) accept a real Date, an explicit "D. M. YYYY"
+string, or an unambiguous ISO ("YYYY-MM-DD...") string only - anything else is dropped,
+never guessed at. Deliberately a NEW, narrowly-scoped function reusing neither
+`parsePlanDate()` (MANAGER_PLAN_PUBLISHED-specific, no ISO fallback) nor `_to_date()`
+(used at 2 other Python call sites left untouched, to avoid unintended behavior change
+elsewhere). Verified via a dedicated seed (`salesapp_date_seed.json`): a real Date, a
+Czech string ("1. 6. 2026" → correctly 1 June, not misparsed as 6 January), and an ISO
+string all parsed identically in both engines; a garbage string was correctly dropped.
+Re-run against a copy of the real workbook confirmed zero behavior change on real data
+("0 new realized visits imported", identical to the pre-fix run).

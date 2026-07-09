@@ -268,6 +268,37 @@ function main(workbook: ExcelScript.Workbook) {
     return range ? range.getValues() : [];
   }
 
+  // Found 2026-07-11 during a Planning Engine audit: this call site used to
+  // fall back to `new Date(String(dateVal))` for any non-Date cell - the
+  // same unsafe pattern already proven to silently misparse a Czech "D. M.
+  // YYYY" string as US month/day order (see parsePlanDate below). Real
+  // production SALESAPP_IMPORT rows always arrive as genuine Date cells (a
+  // real-workbook check confirmed this), so this was dormant, not an active
+  // bug - but it directly feeds weeksSinceLastVisit/lastRealVisitDate (the
+  // "historie návštěv" the planner scores on), so it's fixed defensively:
+  // only a real Date, an explicit "D. M. YYYY" string, or an unambiguous
+  // ISO ("YYYY-MM-DD...") string are accepted; anything else is dropped
+  // rather than guessed at.
+  function parseSalesAppDate(v: unknown): Date | null {
+    if (v instanceof Date) {
+      return v;
+    }
+    if (typeof v == "string" && v.trim()) {
+      const s = v.trim();
+      const cz = s.match(/^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})$/);
+      if (cz) {
+        return new Date(Number(cz[3]), Number(cz[2]) - 1, Number(cz[1]));
+      }
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+        const iso = new Date(s);
+        if (!isNaN(iso.getTime())) {
+          return iso;
+        }
+      }
+    }
+    return null;
+  }
+
   const salesApp = readTable("SALESAPP_IMPORT");
   // Compliance always compares against the immutable Published snapshot,
   // never against the freely-regenerated MANAGER_PLAN Draft - see
@@ -451,8 +482,8 @@ function main(workbook: ExcelScript.Workbook) {
       continue; // Suspended/InProgress - not a realized visit (stated assumption, see file header)
     }
     const dateVal = row[cDate];
-    const date = dateVal instanceof Date ? dateVal : new Date(String(dateVal));
-    if (isNaN(date.getTime())) {
+    const date = parseSalesAppDate(dateVal);
+    if (date === null) {
       continue;
     }
     const { week, year } = isoWeekNumber(date);
