@@ -42,6 +42,7 @@ from desktop_client.engines.mock_workbook import MockWorkbook  # noqa: E402
 import auth  # noqa: E402
 from auth import issue_token, require_auth  # noqa: E402
 import github_storage  # noqa: E402
+import plan_io  # noqa: E402
 import rules_io  # noqa: E402
 
 app = FastAPI(title="Field Force Optimizer API")
@@ -67,6 +68,26 @@ class GeneratePlanRequest(BaseModel):
 class SaveRulesRequest(BaseModel):
     sheet: str
     rows: list[dict]
+
+
+class RemovePosRequest(BaseModel):
+    week: int
+    pos_id: str
+    technician: str
+
+
+class ChangeTechnicianRequest(BaseModel):
+    week: int
+    pos_id: str
+    old_technician: str
+    new_technician: str
+
+
+class AddPosRequest(BaseModel):
+    week: int
+    day: str
+    technician: str
+    pos_id: str
 
 
 def _with_local_copy():
@@ -159,15 +180,57 @@ def generate_plan(body: GeneratePlanRequest):
 def plan_draft():
     path = _with_local_copy()
     try:
-        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        ws = wb["MANAGER_PLAN"]
-        header = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
-        rows = [
-            dict(zip(header, row))
-            for row in ws.iter_rows(min_row=2, values_only=True)
-            if row[0] not in (None, "")
-        ]
-        return {"rows": rows}
+        return {"rows": plan_io.read_enriched_draft(path)}
+    finally:
+        os.remove(path)
+
+
+@app.post("/api/plan/remove-pos", dependencies=[Depends(require_auth)])
+def plan_remove_pos(body: RemovePosRequest):
+    path = _with_local_copy()
+    try:
+        try:
+            removed = plan_io.remove_pos(path, body.week, body.pos_id, body.technician)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if removed == 0:
+            raise HTTPException(status_code=404, detail="POS v návrhu nenalezen.")
+        github_storage.upload_workbook(path, f"Odebrat POS {body.pos_id} z návrhu [MVP cockpit]")
+        return {"removed": removed}
+    finally:
+        os.remove(path)
+
+
+@app.post("/api/plan/change-technician", dependencies=[Depends(require_auth)])
+def plan_change_technician(body: ChangeTechnicianRequest):
+    path = _with_local_copy()
+    try:
+        try:
+            changed = plan_io.change_technician(
+                path, body.week, body.pos_id, body.old_technician, body.new_technician
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if changed == 0:
+            raise HTTPException(status_code=404, detail="POS v návrhu nenalezen.")
+        github_storage.upload_workbook(
+            path, f"Přesunout POS {body.pos_id} na technika {body.new_technician} [MVP cockpit]"
+        )
+        return {"changed": changed}
+    finally:
+        os.remove(path)
+
+
+@app.post("/api/plan/add-pos", dependencies=[Depends(require_auth)])
+def plan_add_pos(body: AddPosRequest):
+    path = _with_local_copy()
+    try:
+        try:
+            new_row = plan_io.add_pos(path, body.week, body.day, body.technician, body.pos_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        github_storage.upload_workbook(path, f"Přidat POS {body.pos_id} do návrhu [MVP cockpit]")
+        return {"row": new_row}
     finally:
         os.remove(path)
 

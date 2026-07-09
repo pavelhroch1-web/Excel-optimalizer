@@ -93,9 +93,42 @@
       <button id="refresh-draft" class="ghost">Zobrazit / obnovit výsledek</button>
       <button id="download-btn" class="primary">Stáhnout MANAGER_PLAN (.xlsx)</button>
     </div>
+
+    <div class="rules-block">
+      <h3>Přidat POS ručně</h3>
+      <form id="add-pos-form" class="row">
+        <label>POS ID
+          <input type="text" id="add-pos-id" placeholder="např. 73001577" required>
+        </label>
+        <label>Týden
+          <input type="number" id="add-pos-week" required>
+        </label>
+        <label>Den
+          <select id="add-pos-day">
+            <option value="MON">Po</option>
+            <option value="TUE">Út</option>
+            <option value="WED">St</option>
+            <option value="THU">Čt</option>
+            <option value="FRI">Pá</option>
+          </select>
+        </label>
+        <label>Technik
+          <input type="text" id="add-pos-technician" placeholder="přesné jméno technika" required>
+        </label>
+        <button type="submit">Přidat POS</button>
+      </form>
+      <p id="add-pos-result" class="result"></p>
+    </div>
+
     <div id="draft-table-wrap">
       <table id="draft-table">
-        <thead><tr id="draft-head"></tr></thead>
+        <thead>
+          <tr>
+            <th>Týden</th><th>Den</th><th>POS</th><th>Název</th><th>Technik</th>
+            <th>PPT</th><th>Poslední návštěva</th><th>Týdnů od návštěvy</th>
+            <th>Terminál</th><th>Síť</th><th>Důvod výběru</th><th></th>
+          </tr>
+        </thead>
         <tbody id="draft-body"></tbody>
       </table>
     </div>

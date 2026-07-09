@@ -120,28 +120,125 @@ document.getElementById("generate-form").addEventListener("submit", async (e) =>
   }
 });
 
+function escapeHtml(v) {
+  return String(v ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
 async function loadDraft() {
-  const head = document.getElementById("draft-head");
   const body = document.getElementById("draft-body");
-  head.innerHTML = "";
-  body.innerHTML = "<tr><td>Načítám…</td></tr>";
+  body.innerHTML = "<tr><td colspan='12'>Načítám…</td></tr>";
   try {
     const res = await apiFetch("/api/plan/draft");
     const data = await res.json();
     const rows = data.rows || [];
     if (rows.length === 0) {
-      body.innerHTML = "<tr><td>Zatím žádný návrh - vygeneruj tour plán výše.</td></tr>";
+      body.innerHTML = "<tr><td colspan='12'>Zatím žádný návrh - vygeneruj tour plán výše.</td></tr>";
       return;
     }
-    const columns = Object.keys(rows[0]);
-    head.innerHTML = columns.map((c) => `<th>${c}</th>`).join("");
     body.innerHTML = rows
-      .map((row) => "<tr>" + columns.map((c) => `<td>${row[c] ?? ""}</td>`).join("") + "</tr>")
+      .map((row, i) => {
+        const weeks = row.weeksSinceLastVisit;
+        const weeksText = weeks === null || weeks === undefined || weeks === "" ? "nikdy" : Math.round(weeks * 10) / 10;
+        return `<tr data-index="${i}">
+          <td>${escapeHtml(row.WEEK)}</td>
+          <td>${escapeHtml(row.DAY)}</td>
+          <td>${escapeHtml(row.POS)}</td>
+          <td>${escapeHtml(row.NAZEV_PROVOZOVNY)}</td>
+          <td>${escapeHtml(row.TECHNICIAN)}</td>
+          <td>${escapeHtml(row.PPT)}</td>
+          <td>${escapeHtml(row.lastRealVisitDate)}</td>
+          <td>${escapeHtml(weeksText)}</td>
+          <td>${escapeHtml(row.terminalType)}</td>
+          <td>${escapeHtml(row.market)}</td>
+          <td>${escapeHtml(row.REASON_FRIENDLY)}</td>
+          <td class="row-actions">
+            <button class="ghost small" data-action="move">Přesunout</button>
+            <button class="ghost small danger" data-action="remove">Odebrat</button>
+          </td>
+        </tr>`;
+      })
       .join("");
+    currentDraftRows = rows;
   } catch (err) {
-    body.innerHTML = `<tr><td>Chyba: ${err.message}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="12">Chyba: ${err.message}</td></tr>`;
   }
 }
+
+let currentDraftRows = [];
+
+document.getElementById("draft-body").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-action]");
+  if (!btn) return;
+  const tr = btn.closest("tr");
+  const row = currentDraftRows[parseInt(tr.dataset.index, 10)];
+  if (!row) return;
+
+  if (btn.dataset.action === "remove") {
+    if (!confirm(`Odebrat POS ${row.POS} (${row.NAZEV_PROVOZOVNY}) technikovi ${row.TECHNICIAN}?`)) return;
+    try {
+      const res = await apiFetch("/api/plan/remove-pos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ week: row.WEEK, pos_id: row.POS, technician: row.TECHNICIAN }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || "Odebrání se nezdařilo.");
+      }
+      await loadDraft();
+    } catch (err) {
+      alert("Chyba: " + err.message);
+    }
+  }
+
+  if (btn.dataset.action === "move") {
+    const newTech = prompt(`Přesunout POS ${row.POS} na technika (přesné jméno):`, row.TECHNICIAN);
+    if (!newTech || newTech === row.TECHNICIAN) return;
+    try {
+      const res = await apiFetch("/api/plan/change-technician", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          week: row.WEEK, pos_id: row.POS, old_technician: row.TECHNICIAN, new_technician: newTech,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || "Přesunutí se nezdařilo.");
+      }
+      await loadDraft();
+    } catch (err) {
+      alert("Chyba: " + err.message);
+    }
+  }
+});
+
+document.getElementById("add-pos-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const result = document.getElementById("add-pos-result");
+  const posId = document.getElementById("add-pos-id").value.trim();
+  const week = parseInt(document.getElementById("add-pos-week").value, 10);
+  const day = document.getElementById("add-pos-day").value;
+  const technician = document.getElementById("add-pos-technician").value.trim();
+  result.textContent = "Přidávám…";
+  try {
+    const res = await apiFetch("/api/plan/add-pos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ week, day, technician, pos_id: posId }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || "Přidání se nezdařilo.");
+    }
+    result.textContent = "Přidáno.";
+    await loadDraft();
+  } catch (err) {
+    result.textContent = "Chyba: " + err.message;
+  }
+});
 
 document.getElementById("refresh-draft").addEventListener("click", loadDraft);
 

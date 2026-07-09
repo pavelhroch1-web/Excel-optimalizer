@@ -98,3 +98,9 @@ th { color: var(--text-dim); font-weight: 600; }
   width: 70px; padding: 4px 6px; font-size: 12.5px;
 }
 #rules-campaigns-table input[type="text"] { width: 140px; }
+
+.row-actions { display: flex; gap: 6px; white-space: nowrap; }
+button.small { padding: 4px 8px; font-size: 12px; }
+button.danger { color: #B3453A; border-color: #B3453A55; }
+#add-pos-id, #add-pos-technician { width: 160px; }
+#add-pos-week { width: 70px; }
