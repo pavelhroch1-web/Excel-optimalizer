@@ -1353,3 +1353,21 @@ CORN/GECO/9PODNIK/"1"-prefix), and the general `NEGLECTED_AFTER_WEEKS=26` only g
 Closing this gap - e.g. a new `CADENCE_RULES` row scoped to classification P with
 `maxIntervalWeeks≈17` - would meaningfully change capacity allocation across 3,067 POS,
 so it needs explicit confirmation before implementing, not a silent addition.
+
+**Follow-up, same session**: the coverage/feasibility columns above were shipped before
+actually translating the uploaded `Activity_plan_2026_01.xlsx` into `ACTIVITY_PLAN` rows
+- caught by the product owner ("ten activity plán jsi tam vůbec nepromítl"). That file is
+a 145-column weekly visibility-planning grid (`TÝDEN`/`ODE DNE` header rows map column
+index to ISO week 1-53 for 2026), with two rows ("VISIBILITA LOSY"/"VISIBILITA LOTERIE")
+naming each named campaign at the column where it starts - no explicit end column, so a
+campaign's end is inferred as the week immediately before the next-named campaign starts
+(last campaign of the year capped at week 53). Parsed into 7 LOS + 11 LOT rows, replacing
+`ACTIVITY_PLAN`'s previous 2 rows (which turned out to be an earlier, less complete
+version of the same real data - "Zlato a diamanty (Gems)" week 31-35 and "SPORTKA LÉTO"
+week 30-33 are recognizably the same campaigns as the prior "Gems"/"Sportka" rows, just
+refined). The concrete Christmas example from the product owner ("na Vánoce s losy objet
+celou síť kromě LI") is the parsed **"Advent + Vánoce"** LOS row, weeks 48-53 (23.11. to
+year end) - its coverage/feasibility columns now compute live against the real network.
+`PRIORITY`/`OVERRIDE_GAP` defaulted to 5/`NO` for every new row (matching the prior 2
+rows' values) since the source file carries no per-campaign priority signal - worth
+revisiting per-campaign once real priorities are known.
