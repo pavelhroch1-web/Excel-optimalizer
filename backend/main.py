@@ -113,6 +113,28 @@ def _set_control(state: dict, key: str, value) -> None:
     control.append([key, value, ""])
 
 
+@app.get("/api/health")
+def health():
+    """Unauthenticated deployment self-check: performs the real GitHub
+    workbook download on the server and confirms the file parses. Exposes no
+    business data - only connectivity status - so it can be checked without a
+    login to verify the deployment end-to-end (esp. the >1MB Contents-API
+    download path)."""
+    path = None
+    try:
+        path = _with_local_copy()
+        size = os.path.getsize(path)
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        pos_rows = wb["POS_MASTER"].max_row - 1
+        wb.close()
+        return {"ok": True, "workbookBytes": size, "posMasterRows": pos_rows}
+    except Exception as e:  # noqa: BLE001 - surface the failure reason for ops
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    finally:
+        if path and os.path.exists(path):
+            os.remove(path)
+
+
 @app.post("/api/login")
 def login(body: LoginRequest):
     if body.password != auth.APP_PASSWORD:
