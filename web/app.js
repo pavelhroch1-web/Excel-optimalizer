@@ -14,6 +14,14 @@ const getToken = () => localStorage.getItem("ffo_token");
 const setToken = (t) => localStorage.setItem("ffo_token", t);
 const clearToken = () => localStorage.removeItem("ffo_token");
 
+// Null-safe listener registration: if an element is missing (e.g. a browser
+// serving a stale cached index.html against a newer app.js), skip it instead
+// of throwing and blanking the whole page.
+function on(id, event, handler) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener(event, handler);
+}
+
 async function apiFetch(path, options = {}) {
   const res = await fetch(API_BASE + path, {
     ...options,
@@ -88,7 +96,7 @@ loginForm.addEventListener("submit", async (e) => {
   }
 });
 
-document.getElementById("logout").addEventListener("click", () => {
+on("logout", "click", () => {
   clearToken();
   showLogin();
 });
@@ -106,7 +114,7 @@ async function loadStatus() {
 
 // ---- 1) upload ------------------------------------------------------------
 
-document.getElementById("upload-form").addEventListener("submit", async (e) => {
+on("upload-form", "submit", async (e) => {
   e.preventDefault();
   const posFile = document.getElementById("pos-export").files[0];
   const saFiles = document.getElementById("salesapp-files").files;
@@ -134,7 +142,7 @@ document.getElementById("upload-form").addEventListener("submit", async (e) => {
 
 // ---- 2) generate ----------------------------------------------------------
 
-document.getElementById("generate-form").addEventListener("submit", async (e) => {
+on("generate-form", "submit", async (e) => {
   e.preventDefault();
   const start_week = parseInt(document.getElementById("start-week").value, 10);
   const length = parseInt(document.getElementById("length").value, 10);
@@ -158,7 +166,7 @@ document.getElementById("generate-form").addEventListener("submit", async (e) =>
 
 let candCache = [];
 
-document.getElementById("candidates-form").addEventListener("submit", async (e) => {
+on("candidates-form", "submit", async (e) => {
   e.preventDefault();
   const week = parseInt(document.getElementById("cand-week").value, 10);
   const tech = document.getElementById("cand-technician").value.trim();
@@ -212,7 +220,7 @@ function renderCandidates() {
 
 // ---- 4) draft view + edits ------------------------------------------------
 
-document.getElementById("refresh-draft").addEventListener("click", loadDraft);
+on("refresh-draft", "click", loadDraft);
 
 async function loadDraft() {
   const body = document.getElementById("draft-body");
@@ -254,7 +262,7 @@ async function removePos(week, pos, tech) {
   }
 }
 
-document.getElementById("add-pos-form").addEventListener("submit", async (e) => {
+on("add-pos-form", "submit", async (e) => {
   e.preventDefault();
   const body = {
     pos_id: document.getElementById("add-pos-id").value.trim(),
@@ -271,12 +279,12 @@ document.getElementById("add-pos-form").addEventListener("submit", async (e) => 
   }
 });
 
-document.getElementById("download-draft-btn").addEventListener("click", () =>
+on("download-draft-btn", "click", () =>
   downloadFile("/api/draft/download", "MANAGER_PLAN_draft.xlsx"));
 
 // ---- 5) publish -----------------------------------------------------------
 
-document.getElementById("publish-form").addEventListener("submit", async (e) => {
+on("publish-form", "submit", async (e) => {
   e.preventDefault();
   if (!confirm("Publikovat tour plán? Vytvoří se nová immutable verze, kterou už nepůjde změnit.")) return;
   const message = document.getElementById("publish-message").value.trim();
@@ -299,7 +307,7 @@ document.getElementById("publish-form").addEventListener("submit", async (e) => 
 
 // ---- 6) history + 7) download published -----------------------------------
 
-document.getElementById("refresh-versions").addEventListener("click", loadVersions);
+on("refresh-versions", "click", loadVersions);
 
 async function loadVersions() {
   const body = document.getElementById("versions-body");
@@ -426,9 +434,9 @@ function collectCampaigns(rows) {
   return updated;
 }
 
-document.getElementById("reload-rules-btn").addEventListener("click", loadRules);
+on("reload-rules-btn", "click", loadRules);
 
-document.getElementById("save-rules-btn").addEventListener("click", async () => {
+on("save-rules-btn", "click", async () => {
   setResult("rules-result", "Ukládám…", "");
   try {
     const payload = [
