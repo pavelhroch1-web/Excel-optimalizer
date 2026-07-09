@@ -1603,3 +1603,21 @@ added or removed, and no other cell (including `ACTIVITY_PLAN`'s live
 the real workbook: toggling `SMALL TERMINAL` YES/NO and `1CD`'s rule EXCLUDE→NORMAL both
 round-tripped correctly, and the untouched formula column was confirmed byte-identical
 after the write.
+
+**Critical bug found and fixed once deployed (2026-07-11)**: `backend/github_storage.py`'s
+`download_workbook()` used GitHub's Contents API's default JSON response, which only
+inlines base64 `content` for files <= 1MB - this workbook is ~14MB, so `resp.json()
+["content"]` would raise `KeyError` on every single request that needed the real file
+(status, generate-plan, rules, download) the moment it hit the real GitHub API, even
+though every local test this session passed (all local tests mock `download_workbook`
+entirely, so this never surfaced until the product owner tried the live deployment).
+Fixed by requesting the same endpoint with the `raw` media type
+(`Accept: application/vnd.github.raw+json`), which GitHub serves for files between 1MB
+and 100MB as raw bytes directly instead of JSON - no separate Git Blobs API call needed.
+`upload_workbook()` was unaffected (its PUT request only needs `sha` from the JSON
+response, which GitHub always includes regardless of file size).
+
+Also fixed the same day: `/api/rules` was opening the workbook via openpyxl 4 separate
+times (once per rule sheet) instead of once - real inefficiency, not the size-limit bug,
+but fixed alongside it since it was found during the same investigation. Reduced to a
+single `openpyxl.load_workbook()` call reused across all 4 sheet reads.

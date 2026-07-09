@@ -201,11 +201,12 @@ def download_manager_plan():
 def get_rules():
     path = _with_local_copy()
     try:
+        sheets = rules_io.read_all_rule_sheets(path)
         return {
-            "terminal": rules_io.read_rule_sheet(path, "TERMINAL_RULES"),
-            "market": rules_io.read_rule_sheet(path, "MARKET_RULES"),
-            "category": rules_io.read_rule_sheet(path, "CATEGORY_RULES"),
-            "campaigns": rules_io.read_rule_sheet(path, "ACTIVITY_PLAN"),
+            "terminal": sheets["TERMINAL_RULES"],
+            "market": sheets["MARKET_RULES"],
+            "category": sheets["CATEGORY_RULES"],
+            "campaigns": sheets["ACTIVITY_PLAN"],
         }
     finally:
         os.remove(path)

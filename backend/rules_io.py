@@ -28,9 +28,8 @@ def _header_index(ws) -> dict[str, int]:
     return {c.value: i + 1 for i, c in enumerate(ws[1]) if c.value not in (None, "")}
 
 
-def read_rule_sheet(path: str, sheet_name: str) -> list[dict]:
+def _read_rule_sheet_from_wb(wb, sheet_name: str) -> list[dict]:
     key_cols, editable_cols = RULE_SHEETS[sheet_name]
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     ws = wb[sheet_name]
     idx = _header_index(ws)
     cols = list(dict.fromkeys(key_cols + editable_cols))  # de-dup, keep order
@@ -47,8 +46,26 @@ def read_rule_sheet(path: str, sheet_name: str) -> list[dict]:
                 blank = False
         if not blank:
             rows.append(row_dict)
-    wb.close()
     return rows
+
+
+def read_rule_sheet(path: str, sheet_name: str) -> list[dict]:
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        return _read_rule_sheet_from_wb(wb, sheet_name)
+    finally:
+        wb.close()
+
+
+def read_all_rule_sheets(path: str) -> dict[str, list[dict]]:
+    """Reads all RULE_SHEETS in a single workbook open - avoids re-parsing
+    the same (potentially large) .xlsx once per sheet, which matters on a
+    memory/CPU-constrained free-tier host."""
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        return {name: _read_rule_sheet_from_wb(wb, name) for name in RULE_SHEETS}
+    finally:
+        wb.close()
 
 
 def write_rule_sheet(path: str, sheet_name: str, rows: list[dict]) -> None:

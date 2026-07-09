@@ -30,13 +30,22 @@ _HEADERS = {
 
 def download_workbook(dest_path: str) -> None:
     """Fetches the current workbook bytes from GitHub and writes them to
-    dest_path on the local (ephemeral) filesystem."""
+    dest_path on the local (ephemeral) filesystem.
+
+    GitHub's Contents API only inlines base64 `content` in its JSON response
+    for files <= 1MB - this workbook is ~14MB, so the default JSON response
+    silently omits `content` entirely (found 2026-07-11: every endpoint that
+    calls this was failing on the real deployment, once past login, because
+    of exactly this). For files between 1MB and 100MB, requesting the same
+    endpoint with the `raw` media type returns the file's raw bytes directly
+    instead of JSON - no separate Git Blobs API call needed."""
+    raw_headers = {**_HEADERS, "Accept": "application/vnd.github.raw+json"}
     with httpx.Client(timeout=60) as client:
-        resp = client.get(_API_BASE, headers=_HEADERS, params={"ref": GITHUB_BRANCH})
+        resp = client.get(_API_BASE, headers=raw_headers, params={"ref": GITHUB_BRANCH})
         resp.raise_for_status()
-        content_b64 = resp.json()["content"]
+        content = resp.content
     with open(dest_path, "wb") as f:
-        f.write(base64.b64decode(content_b64))
+        f.write(content)
 
 
 def upload_workbook(src_path: str, commit_message: str) -> None:
