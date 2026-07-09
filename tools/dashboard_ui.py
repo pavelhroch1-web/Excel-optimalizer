@@ -170,6 +170,7 @@ def build_dashboard_banner(ws, title, subtitle, col_start, col_end, title_row=1,
     sub.font = FONT_DASHBOARD_SUBTITLE
     sub.fill = PatternFill("solid", fgColor=NAVY)
     sub.alignment = Alignment(horizontal="left", vertical="center", indent=2)
+    sub.border = Border(bottom=Side(style="medium", color=ACCENT_BLUE))
     ws.row_dimensions[subtitle_row].height = 20
     return subtitle_row + 1
 
@@ -178,8 +179,14 @@ def build_dashboard_banner(ws, title, subtitle, col_start, col_end, title_row=1,
 # SECTION HEADER
 # ============================================================================
 def build_section_header(ws, cell_ref, text):
+    """A section title with a short colored underline accent (product
+    owner, 2026-07-11: "aby to vypadalo opravdu jako systém") - a border on
+    a single unmerged cell, not a new row, so this never shifts any of the
+    many hardcoded row numbers elsewhere in this codebase that assume a
+    section header consumes exactly one row."""
     ws[cell_ref] = text
     ws[cell_ref].font = FONT_TITLE
+    ws[cell_ref].border = Border(bottom=Side(style="medium", color=ACCENT_BLUE))
 
 
 # ============================================================================
@@ -244,12 +251,23 @@ def build_kpi_card(ws, col_start, col_end, label_row, value_row_start, value_row
     """One KPI tile: a merged label cell above a merged, bordered value
     block. Returns the value cell's coordinate (top-left of the merge) so
     the caller can wire conditional formatting or reference it in other
-    formulas on the sheet."""
+    formulas on the sheet.
+
+    Label row gets a colored top accent (value_color) plus a light grey
+    fill, so label+value read as one cohesive card instead of the label
+    floating unstyled on the sheet's background above a separate bordered
+    box (product owner, 2026-07-11: "aby to vypadalo opravdu jako
+    systém")."""
     ws.merge_cells(f"{col_start}{label_row}:{col_end}{label_row}")
     lbl = ws[f"{col_start}{label_row}"]
     lbl.value = label
     lbl.font = FONT_CARD_LABEL
+    lbl.fill = PatternFill("solid", fgColor=LIGHT_GREY)
     lbl.alignment = Alignment(horizontal="center", vertical="center")
+    accent_top = Border(top=Side(style="medium", color=value_color), left=Side(style="thin", color=BORDER_GREY),
+                         right=Side(style="thin", color=BORDER_GREY))
+    for col in (col_start, col_end):
+        ws[f"{col}{label_row}"].border = accent_top
     ws.merge_cells(f"{col_start}{value_row_start}:{col_end}{value_row_end}")
     val = ws[f"{col_start}{value_row_start}"]
     val.value = value_formula

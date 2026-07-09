@@ -3134,9 +3134,37 @@ def build_pos_activate_preview(wb):
     ws["D6"].font = Font(size=10)
 
 
+def set_modern_theme_fonts(wb):
+    """Swaps the workbook's theme typefaces from the old Office
+    2007-2010-era defaults (Cambria/Calibri) to Microsoft 365's current
+    default (Aptos Display/Aptos) - product owner, 2026-07-11: "dokážeš to
+    udělat ještě více userfriendly a více designové aby to vypadalo opravdu
+    jako systém?".
+
+    Every Font() built by this module and dashboard_ui.py deliberately
+    never sets `name=` (hundreds of call sites), so every one of them
+    inherits whichever typeface the workbook's theme declares as its
+    major/minor Latin font - a single edit here changes the entire
+    workbook's typography at once, without touching those hundreds of call
+    sites individually. Confirmed the theme actually IS the old Office
+    2007-2010 default (accent1=4F81BD etc, not the current Office palette)
+    before making this change - the color scheme is left alone (touches
+    default chart colors/hyperlink color too broadly to change safely in
+    the time available), only the two Latin typeface names are swapped."""
+    if not wb.loaded_theme:
+        return
+    theme = wb.loaded_theme.decode("utf-8")
+    # Order doesn't matter here - "Calibri" is not a substring of "Cambria"
+    # or vice versa - but each is replaced exactly once (verified against
+    # the real workbook: exactly 1 occurrence of each before this change).
+    theme = theme.replace("Cambria", "Aptos Display").replace("Calibri", "Aptos")
+    wb.loaded_theme = theme.encode("utf-8")
+
+
 def apply_all(wb, control_rows):
     """Single entry point called by scaffold_workbook.py after all sheets
     and data are populated."""
+    set_modern_theme_fonts(wb)
     control_values = {}
     for row in control_rows[1:]:
         if row and row[0]:

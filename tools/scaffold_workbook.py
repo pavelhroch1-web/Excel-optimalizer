@@ -43,6 +43,11 @@ def main(ref_path, out_path):
     src_wb = openpyxl.load_workbook(ref_path, data_only=True)
     dst_wb = openpyxl.Workbook()
     dst_wb.remove(dst_wb.active)  # drop default empty sheet
+    # A brand-new openpyxl.Workbook() has no embedded theme (loaded_theme is
+    # None) - borrow the reference workbook's, so apply_all()'s
+    # set_modern_theme_fonts() has an actual theme to modify instead of
+    # silently no-op-ing on a from-scratch build.
+    dst_wb.loaded_theme = src_wb.loaded_theme
 
     for name in REFERENCE_SHEETS_KEEP_AS_IS:
         copy_sheet(src_wb, dst_wb, name)
