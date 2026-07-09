@@ -1229,3 +1229,70 @@ engine added to that list since `StartTrackingEngine.ts`). Full test suites gree
 `CONTROL.ACTIVATE_COUNT_BY_PPT` row, `PERFORMANCE` +3 columns, `HOME`'s pipeline-stage row
 numbers shifted (+5 rows for the new freshness callout) - `POS_MASTER`/`RAW_DATA` row
 counts unchanged (11,606/11,607) after every patch, as always.
+
+## 22. OZ as a distinct entity + real SalesApp historical backfill (2026-07-11)
+
+Product owner sent two real SalesApp exports (Feb-Apr and May-Jul 2026, 38,233 visit
+rows combined) and clarified something the codebase hadn't modeled yet: SalesApp's
+`Executor` column is shared by two distinct roles - field technicians (who this whole
+workbook plans routes for) and **OZ** ("obchodní zástupce" - a separate role; exactly 3
+people on the real export). "OZ má ty 3 čísla na začátku a technik ne" - an OZ's Executor
+name is prefixed with a number starting with "3" (e.g. "301 Renata Němečková"); a
+technician's is either unprefixed or a code NOT starting with "3" (the export also has
+1xx/2xx/4xx-7xx codes - real technicians, not OZ). Confirmed: OZ visits are real and
+should be kept as evidence, but we don't build tourplans for OZ and their activity must
+never be attributed to whichever technician `POS_MASTER` happens to have assigned to
+that POS - a real gap, since `PerformanceEngine.ts`'s `otherVisits`/work-span
+aggregation attributes every `OTHER_VISIT_LOG` row to `posTechnician[posId]` regardless
+of who actually made the visit; without this fix, OZ activity (particularly heavy around
+"Malý terminál"/"Aktivita"/"Expanze" purposes) would have inflated technicians'
+ad-hoc-visit and idle-time stats with visits they never made.
+
+**`isOzExecutor()`** (`ComplianceEngine.ts`/`compliance_engine.py`): the Executor
+string's leading whitespace-delimited token is a number starting with "3"
+(`/^3\d*$/`). Checked BEFORE the campaign-purpose branch, not after - an OZ row is
+routed away regardless of whether its own `MCHD - Nabeh kampane` column happens to say
+"Ano" (in practice OZ purposes live in separate SalesApp columns entirely, but this
+doesn't rely on that). New **`OZ_VISIT_LOG`** sheet (same 9-column shape as
+`OTHER_VISIT_LOG`, its own dedup-by-UID set) - `PerformanceEngine.ts` never reads it, so
+OZ visits structurally cannot reach any technician's stats.
+
+**Historical backfill needed a second fix**: `ComplianceEngine.ts` had an early-return
+guard - `MANAGER_PLAN_PUBLISHED` empty -> bail out entirely, "run Planning Engine then
+Publish Engine first." No plan has ever been published on the real workbook, so this
+guard would have refused to import 4+ months of real, valuable visit history. Traced the
+guard: nothing downstream actually depends on `MANAGER_PLAN_PUBLISHED` being non-empty -
+`VISIT_HISTORY_ACTUAL`/`OTHER_VISIT_LOG`/`OZ_VISIT_LOG` import and `POS_MASTER`'s
+`lastRealVisitDate`/`weeksSinceLastVisit` updates are entirely independent of it; an
+empty `plannedSet` just means every visit lands in `COMPLIANCE_LOG` as
+`Navic_evidovano` (same as any POS visited outside its planned week today) instead of
+matching nothing. Removed the guard (kept the `SALESAPP_IMPORT` empty check). Verified
+with a dedicated seed (empty `MANAGER_PLAN_PUBLISHED`, one real visit) - both engines
+import correctly, `Navic_evidovano` written, `POS_MASTER` updated, no crash.
+
+**Real import result** (via `desktop_client/xlsx_engine_io.py` + a one-off script
+running `compliance_engine.run()`/`advisor_engine.run()` directly against the real
+workbook, backed up first): 12,509 realized campaign visits imported, 12,954
+other-purpose technician visits, **1,604 OZ visits correctly routed to `OZ_VISIT_LOG`**,
+6,065 `POS_MASTER` rows updated with real `lastRealVisitDate`/`weeksSinceLastVisit`, 98
+Advisor Engine alerts (97 neglect risk, 1 volume trend). Verified TS vs Python
+equivalent on this exact real 38,233-row import via `tools/sim/xlsx_to_json.py` +
+`run_e2e.ts` + `compare_engines.py` (now also comparing `OZ_VISIT_LOG`) - byte-identical
+across every compared sheet. `POS_MASTER`/`RAW_DATA` row counts unchanged (11,606/11,607)
+as always. `TECHNICIAN_PERFORMANCE_LOG`/`SUMMARY` remain empty after this import - by
+design: `PerformanceEngine.ts` only includes a week whose `PLAN_LIFECYCLE` row has a
+non-blank `trackingStartedAt`, and no plan (past or present) has been published/tracked
+yet on the real workbook, so there is nothing to compute a compliance % against for this
+historical period. That's expected, not a bug - the value of this backfill is seeding
+`lastRealVisitDate`/neglect tracking and the "POS bez návštěvy"/"Hotovo/Chybí" dashboards
+with real signal now, so Planning Engine's cadence/neglect logic and those dashboards are
+correct from the very first future plan onward.
+
+**Still open** (product owner's follow-up requests, not yet implemented - see the
+in-progress task list): translating the uploaded `Activity_plan_2026_01.xlsx` timeline
+into `ACTIVITY_PLAN` rows; a campaign-scoped coverage/capacity-feasibility advisor
+("losy campaign - do we cover the whole network minus LI in time?", "you'd need to raise
+weekly capacity to hit this deadline"); a per-campaign target-terminal-type setting
+(confirmed: "Nastavitelné v CONTROL per kampaň", not a fixed rule); TERMINAL_RULES
+toggling stays a manual action, the system only warns (confirmed: "Manuálně přepnuš
+TERMINAL_RULES sama/sám").

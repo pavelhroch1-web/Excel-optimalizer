@@ -9,6 +9,7 @@ mirrors the logic.
 from __future__ import annotations
 
 import datetime
+import re
 
 from .core_logic import (
     ActualWeek,
@@ -51,6 +52,15 @@ def _to_datetime(v) -> datetime.datetime | None:
         return None
 
 
+_OZ_EXECUTOR_RE = re.compile(r"^3\d*$")
+
+
+def is_oz_executor(executor: str) -> bool:
+    """Port of office-scripts/ComplianceEngine.ts's isOzExecutor()."""
+    first_token = executor.strip().split()[0] if executor.strip() else ""
+    return bool(_OZ_EXECUTOR_RE.match(first_token))
+
+
 def run(workbook: MockWorkbook) -> str:
     def read_table(sheet_name: str) -> list[list]:
         ws = workbook.get_worksheet(sheet_name)
@@ -78,8 +88,15 @@ def run(workbook: MockWorkbook) -> str:
 
     if len(sales_app) < 2:
         return "Compliance Engine: SALESAPP_IMPORT is empty, nothing to do."
-    if len(manager_plan_published) < 2:
-        return "Compliance Engine: MANAGER_PLAN_PUBLISHED is empty - run Planning Engine then Publish Engine first."
+    # NOTE (product owner, 2026-07-11): MANAGER_PLAN_PUBLISHED empty no longer
+    # blocks import entirely - a historical SalesApp backfill (real visit
+    # evidence from before this workbook ever published a plan) should still
+    # populate VISIT_HISTORY_ACTUAL/OTHER_VISIT_LOG/OZ_VISIT_LOG and update
+    # POS_MASTER's lastRealVisitDate/weeksSinceLastVisit, even with nothing to
+    # compare it against yet. Every visit simply lands in COMPLIANCE_LOG as
+    # "Navic_evidovano" (planned_set stays empty), same as any POS visited
+    # outside its planned week today - no new code path, just no longer an
+    # early exit.
 
     # ==========================================================================
     # PARSE SALESAPP_IMPORT -> new realized visits (dedup by UID)
@@ -129,16 +146,19 @@ def run(workbook: MockWorkbook) -> str:
     other_visit_log = read_table("OTHER_VISIT_LOG")
     known_uids: set[str] = {str(row[6]) for row in visit_history_actual[1:]}
     known_other_uids: set[str] = {str(row[5]) for row in other_visit_log[1:]}
+    oz_visit_log = read_table("OZ_VISIT_LOG")
+    known_oz_uids: set[str] = {str(row[5]) for row in oz_visit_log[1:]}
 
     new_visits: list[dict] = []
     other_visits: list[dict] = []
+    oz_visits: list[dict] = []
     latest_week = 0
     latest_year = 0
 
     for i in range(1, len(sales_app)):
         row = sales_app[i]
         uid = str(_at(row, c_uid))
-        if not uid or uid in known_uids or uid in known_other_uids:
+        if not uid or uid in known_uids or uid in known_other_uids or uid in known_oz_uids:
             continue
         state = norm(str(_at(row, c_state)))
         if state not in ("COMPLETED", "FINALIZED"):
@@ -156,11 +176,20 @@ def run(workbook: MockWorkbook) -> str:
         duration_hours = duration_raw if duration_raw == duration_raw and duration_raw > 0 else None
         started_at = _to_datetime(_at(row, c_started_at)) if c_started_at >= 0 else None
         finished_at = _to_datetime(_at(row, c_finished_at)) if c_finished_at >= 0 else None
+        executor = str(_at(row, c_executor))
+        if is_oz_executor(executor):
+            if resolved_pos_id:
+                oz_visits.append({
+                    "posId": resolved_pos_id, "date": date, "week": week, "year": year,
+                    "executor": executor, "uid": uid, "durationHours": duration_hours,
+                    "startedAt": started_at, "finishedAt": finished_at,
+                })
+            continue
         if c_campaign_purpose == -1 or norm(str(_at(row, c_campaign_purpose))) != "ANO":
             if resolved_pos_id:
                 other_visits.append({
                     "posId": resolved_pos_id, "date": date, "week": week, "year": year,
-                    "executor": str(_at(row, c_executor)), "uid": uid, "durationHours": duration_hours,
+                    "executor": executor, "uid": uid, "durationHours": duration_hours,
                     "startedAt": started_at, "finishedAt": finished_at,
                 })
             continue
@@ -168,7 +197,7 @@ def run(workbook: MockWorkbook) -> str:
             continue
         new_visits.append({
             "posId": resolved_pos_id, "date": date, "week": week, "year": year,
-            "executor": str(_at(row, c_executor)), "state": state, "uid": uid, "durationHours": duration_hours,
+            "executor": executor, "state": state, "uid": uid, "durationHours": duration_hours,
             "startedAt": started_at, "finishedAt": finished_at,
         })
 
@@ -209,6 +238,18 @@ def run(workbook: MockWorkbook) -> str:
         ]
         start_row = len(other_visit_log) if len(other_visit_log) > 0 else 1
         other_visit_ws.get_range_by_indexes(start_row, 0, len(rows), 9).set_values(rows)
+
+    oz_visit_ws = workbook.get_worksheet("OZ_VISIT_LOG")
+    if oz_visits:
+        rows = [
+            [v["posId"], v["date"].isoformat()[:10], v["week"], v["year"], v["executor"], v["uid"],
+             v["durationHours"] if v["durationHours"] is not None else "",
+             v["startedAt"].isoformat() if v["startedAt"] else "",
+             v["finishedAt"].isoformat() if v["finishedAt"] else ""]
+            for v in oz_visits
+        ]
+        start_row = len(oz_visit_log) if len(oz_visit_log) > 0 else 1
+        oz_visit_ws.get_range_by_indexes(start_row, 0, len(rows), 9).set_values(rows)
 
     actual_by_pos: dict[str, list[dict]] = {}
     for i in range(1, len(visit_history_actual)):
@@ -353,6 +394,7 @@ def run(workbook: MockWorkbook) -> str:
         f"Compliance Engine: {len(new_visits)} new realized visits imported, "
         f"{len(compliance_rows)} compliance rows written ({extra_count} extra), "
         f"{len(other_visits)} other-purpose visits logged to OTHER_VISIT_LOG, "
+        f"{len(oz_visits)} OZ visits logged to OZ_VISIT_LOG (excluded from technician stats), "
         f"{updated} POS_MASTER rows updated with real last-visit data. Reference 'now' = week "
         f"{latest_week}/{latest_year}."
     )

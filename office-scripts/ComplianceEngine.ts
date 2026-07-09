@@ -62,6 +62,14 @@
 //     this closes the real-world feedback loop that was completely missing
 //     in V10.5.5 (see docs/ARCHITECTURE.md Phase 0 finding: VISIT_HISTORY
 //     used to record the script's own planned output, not reality).
+//   - Since 2026-07-11 (product owner: OZ ("obchodní zástupce") visits share
+//     the SalesApp Executor column with technicians - "OZ má ty 3 čísla na
+//     začátku a technik ne"): any row whose Executor's leading token is a
+//     number starting with "3" is routed to a new OZ_VISIT_LOG instead of
+//     VISIT_HISTORY_ACTUAL/OTHER_VISIT_LOG, regardless of campaign-purpose.
+//     Real evidence, kept, but never attributed to whichever technician
+//     POS_MASTER happens to have assigned to that POS - we don't build
+//     tourplans for OZ and their activity is not that technician's workload.
 //
 // DELIBERATELY NOT IN THIS VERSION (see docs/BUSINESS_RULES.md and the
 // conversation record for why):
@@ -285,10 +293,15 @@ function main(workbook: ExcelScript.Workbook) {
     console.log("Compliance Engine: SALESAPP_IMPORT is empty, nothing to do.");
     return;
   }
-  if (managerPlanPublished.length < 2) {
-    console.log("Compliance Engine: MANAGER_PLAN_PUBLISHED is empty - run Planning Engine then Publish Engine first.");
-    return;
-  }
+  // NOTE (product owner, 2026-07-11): MANAGER_PLAN_PUBLISHED empty no longer
+  // blocks import entirely - a historical SalesApp backfill (real visit
+  // evidence from before this workbook ever published a plan) should still
+  // populate VISIT_HISTORY_ACTUAL/OTHER_VISIT_LOG/OZ_VISIT_LOG and update
+  // POS_MASTER's lastRealVisitDate/weeksSinceLastVisit, even with nothing to
+  // compare it against yet. Every visit simply lands in COMPLIANCE_LOG as
+  // "Navic_evidovano" (plannedSet stays empty), same as any POS visited
+  // outside its planned week today - no new code path, just no longer an
+  // early exit.
 
   // ==========================================================================
   // PARSE SALESAPP_IMPORT -> new realized visits (dedup by UID)
@@ -365,6 +378,28 @@ function main(workbook: ExcelScript.Workbook) {
   for (let i = 1; i < otherVisitLog.length; i++) {
     knownOtherUids.add(String(otherVisitLog[i][5]));
   }
+  const ozVisitLog = readTable("OZ_VISIT_LOG");
+  const knownOzUids = new Set<string>();
+  for (let i = 1; i < ozVisitLog.length; i++) {
+    knownOzUids.add(String(ozVisitLog[i][5]));
+  }
+
+  // OZ (product owner, 2026-07-11): SalesApp's Executor is shared by two
+  // distinct roles - field technicians (who this whole workbook plans
+  // routes for) and OZ ("obchodní zástupce" - a separate role, 3 people on
+  // the real export: "301 Renata Němečková" etc). OZ visits are real and
+  // should be kept as evidence, but must never be attributed to whichever
+  // technician POS_MASTER happens to have assigned to that POS - an OZ
+  // visit has nothing to do with that technician's own compliance/workload.
+  // Distinguishing signal (confirmed by product owner): OZ's Executor name
+  // is prefixed with a number starting with "3" ("301 Jméno Příjmení"); a
+  // technician's Executor is either an unprefixed name or a code NOT
+  // starting with "3" (the export also has 1xx/2xx/4xx-7xx codes, which are
+  // real technicians, not OZ).
+  function isOzExecutor(executor: string): boolean {
+    const firstToken = executor.trim().split(/\s+/)[0];
+    return /^3\d*$/.test(firstToken);
+  }
 
   interface ActualVisit {
     posId: string;
@@ -391,14 +426,15 @@ function main(workbook: ExcelScript.Workbook) {
   }
   let newVisits: ActualVisit[] = [];
   let otherVisits: OtherVisit[] = [];
+  let ozVisits: OtherVisit[] = [];
   let latestWeek = 0;
   let latestYear = 0;
 
   for (let i = 1; i < salesApp.length; i++) {
     const row = salesApp[i];
     const uid = String(row[cUID]);
-    if (!uid || knownUids.has(uid) || knownOtherUids.has(uid)) {
-      continue; // already imported (either log), or blank row
+    if (!uid || knownUids.has(uid) || knownOtherUids.has(uid) || knownOzUids.has(uid)) {
+      continue; // already imported (any of the 3 logs), or blank row
     }
     const state = norm(String(row[cState]));
     if (state != "COMPLETED" && state != "FINALIZED") {
@@ -431,6 +467,16 @@ function main(workbook: ExcelScript.Workbook) {
     const startedAt = startedAtRaw instanceof Date ? startedAtRaw : null;
     const finishedAtRaw = cFinishedAt >= 0 ? row[cFinishedAt] : null;
     const finishedAt = finishedAtRaw instanceof Date ? finishedAtRaw : null;
+    const executor = String(row[cExecutor]);
+    if (isOzExecutor(executor)) {
+      // OZ visit - real evidence, but never a technician's compliance/other-
+      // visit stat (see isOzExecutor's comment above). Routed to its own log
+      // regardless of campaign-purpose, before that check even runs.
+      if (resolvedPosId) {
+        ozVisits.push({ posId: resolvedPosId, date, week, year, executor, uid, durationHours, startedAt, finishedAt });
+      }
+      continue;
+    }
     // Only a "MCHD - Nabeh kampane" = Ano row is a realized CAMPAIGN visit -
     // confirmed by product owner. A Completed/Finalized visit for any other
     // purpose (restocking, lottery ticket pickup, etc.) is a real SalesApp
@@ -440,7 +486,7 @@ function main(workbook: ExcelScript.Workbook) {
     // 2026-07-06 (see file header) - informational only.
     if (cCampaignPurpose == -1 || norm(String(row[cCampaignPurpose])) != "ANO") {
       if (resolvedPosId) {
-        otherVisits.push({ posId: resolvedPosId, date, week, year, executor: String(row[cExecutor]), uid, durationHours, startedAt, finishedAt });
+        otherVisits.push({ posId: resolvedPosId, date, week, year, executor, uid, durationHours, startedAt, finishedAt });
       }
       continue;
     }
@@ -452,7 +498,7 @@ function main(workbook: ExcelScript.Workbook) {
       date,
       week,
       year,
-      executor: String(row[cExecutor]),
+      executor,
       state,
       uid,
       durationHours,
@@ -506,6 +552,21 @@ function main(workbook: ExcelScript.Workbook) {
     ]);
     const startRow = otherVisitLog.length > 0 ? otherVisitLog.length : 1;
     otherVisitWs.getRangeByIndexes(startRow, 0, rows.length, 9).setValues(rows);
+  }
+
+  // OZ_VISIT_LOG: OZ visits, logged as evidence but never counted toward any
+  // technician's compliance/other-visit/work-span stats (see isOzExecutor's
+  // comment above) - same shape as OTHER_VISIT_LOG, its own sheet so
+  // PerformanceEngine.ts (which only ever reads VISIT_HISTORY_ACTUAL/
+  // OTHER_VISIT_LOG) never sees these rows at all.
+  const ozVisitWs = workbook.getWorksheet("OZ_VISIT_LOG");
+  if (ozVisits.length > 0) {
+    const rows = ozVisits.map((v) => [
+      v.posId, v.date.toISOString().slice(0, 10), v.week, v.year, v.executor, v.uid, v.durationHours ?? "",
+      v.startedAt ? v.startedAt.toISOString() : "", v.finishedAt ? v.finishedAt.toISOString() : "",
+    ]);
+    const startRow = ozVisitLog.length > 0 ? ozVisitLog.length : 1;
+    ozVisitWs.getRangeByIndexes(startRow, 0, rows.length, 9).setValues(rows);
   }
 
   // Full actual-visit set (existing + new) grouped by POS, for matching below
@@ -710,6 +771,7 @@ function main(workbook: ExcelScript.Workbook) {
       complianceRows.length + " compliance rows written (" +
       complianceRows.filter((r) => r[4] == "Navic_evidovano").length + " extra), " +
       otherVisits.length + " other-purpose visits logged to OTHER_VISIT_LOG, " +
+      ozVisits.length + " OZ visits logged to OZ_VISIT_LOG (excluded from technician stats), " +
       updated + " POS_MASTER rows updated with real last-visit data. Reference 'now' = week " +
       latestWeek + "/" + latestYear + "."
   );

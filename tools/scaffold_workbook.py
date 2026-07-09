@@ -359,6 +359,21 @@ def main(ref_path, out_path):
         [],
     )
 
+    # OZ_VISIT_LOG (append-only, dedup by uid - see ComplianceEngine.ts):
+    # SalesApp visits made by an OZ ("obchodní zástupce" - a separate role
+    # from field technicians, product owner 2026-07-11), identified by the
+    # Executor column's leading numeric token starting with "3" (e.g. "301
+    # Renata Němečková"). Real evidence, same shape as OTHER_VISIT_LOG, but
+    # kept in its own sheet so PerformanceEngine.ts never attributes OZ
+    # activity to whichever technician POS_MASTER happens to have assigned
+    # to that POS - we don't build tourplans for OZ and their visits are not
+    # that technician's workload.
+    write_table(
+        dst_wb, "OZ_VISIT_LOG",
+        ["posId", "date", "week", "year", "executor", "salesAppUid", "durationHours", "startedAt", "finishedAt"],
+        [],
+    )
+
     # COMPLIANCE_LOG (append-only, one row per planned-visit evaluation)
     write_table(
         dst_wb, "COMPLIANCE_LOG",

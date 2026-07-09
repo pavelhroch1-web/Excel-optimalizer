@@ -127,6 +127,10 @@ HIDDEN_SHEETS = {
     # VISIT_HISTORY_ACTUAL when OTHER_VISIT_LOG was introduced, but never
     # added here - it sat visible in the tab bar as raw unstyled engine data.
     "OTHER_VISIT_LOG",
+    # OZ_VISIT_LOG (product owner, 2026-07-11): same treatment as
+    # OTHER_VISIT_LOG above - raw engine data, not something a manager reads
+    # directly (OZ activity isn't planned/tracked on any dashboard screen).
+    "OZ_VISIT_LOG",
     # POS_MAP_DATA: ReportingEngine.ts's raw X/Y-per-technician grid feeding
     # the MAP sheet's chart - a manager reads MAP, never this directly.
     "POS_MAP_DATA",
@@ -139,7 +143,7 @@ ENGINE_WRITABLE = {
     "POS_MASTER", "MANAGER_PLAN", "MANAGER_PLAN_PUBLISHED", "PLAN_LIFECYCLE",
     "COMPLIANCE_LOG", "ADVISOR_LOG", "VISIT_HISTORY_ACTUAL", "DASHBOARD",
     "TECHNICIAN_PERFORMANCE_LOG", "TECHNICIAN_PERFORMANCE_SUMMARY", "TECHNICIAN_TOP_ISSUES",
-    "OTHER_VISIT_LOG", "POS_MAP_DATA",
+    "OTHER_VISIT_LOG", "OZ_VISIT_LOG", "POS_MAP_DATA",
 }
 
 # A third category, distinct from both of the above: dashboard screens that
