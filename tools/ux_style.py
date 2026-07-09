@@ -2633,6 +2633,80 @@ def redesign_activity_plan(wb, tech_column_letter):
     ws.auto_filter.ref = f"A1:G{n_rows}"
     apply_banded_rows(ws, 2, n_rows, 7)
 
+    # ==========================================================================
+    # COVERAGE / CAPACITY FEASIBILITY - product owner, 2026-07-11: "chci aby
+    # tam dokázala fungovat i nějaká predikce, když tam nasekám takto ten
+    # activity plán... chci aby mi to na začátku řeklo hele tady by bylo
+    # dobré jet i malé terminály" + "systém by mi řekl: hele ale to jim
+    # musíš zvýšit týdenní kapacitu". Two new columns, placed well clear of
+    # the timeline block above (own column block, not threaded between the
+    # existing G/I/J/timeline columns - zero risk to any of their formulas).
+    # Per-campaign target POS count (VELKY TERMINAL always in scope; SMALL
+    # TERMINAL/LI only if CONTROL.{LOS,LOT}_TARGET_INCLUDES_{SMALL,LI}=YES
+    # for that row's TYPE) compared against the existing G column estimate -
+    # if short, states exactly how much weekly capacity per technician would
+    # be needed to make the deadline, and flags if TERMINAL_RULES doesn't
+    # currently even allow visiting the campaign's target terminal types.
+    # Informational only - does not change TERMINAL_RULES or any plan itself
+    # (confirmed: "Manuálně přepnuš TERMINAL_RULES sama/sám").
+    # ==========================================================================
+    cov_col = timeline_first_col + (week_end - week_start) + 3  # 2-column gap after the timeline
+    target_col_letter = get_column_letter(cov_col)
+    verdict_col_letter = get_column_letter(cov_col + 1)
+    ws.cell(1, cov_col, "CÍLOVÝ POČET POS (podle kampaně)").font = SECTION_FONT
+    ws.cell(1, cov_col + 1, "STIHNEŠ TO? / DOPORUČENÍ").font = SECTION_FONT
+    ws.column_dimensions[target_col_letter].width = 16
+    ws.column_dimensions[verdict_col_letter].width = 55
+    for r in range(2, n_rows + 1):
+        target_formula = (
+            f'=IF($A{r}="","",LET('
+            f'incSmall,IF($A{r}="LOS",IFERROR(VLOOKUP("LOS_TARGET_INCLUDES_SMALL",CONTROL!$A:$B,2,FALSE),"YES"),'
+            f'IFERROR(VLOOKUP("LOT_TARGET_INCLUDES_SMALL",CONTROL!$A:$B,2,FALSE),"NO")),'
+            f'incLI,IF($A{r}="LOS",IFERROR(VLOOKUP("LOS_TARGET_INCLUDES_LI",CONTROL!$A:$B,2,FALSE),"NO"),'
+            f'IFERROR(VLOOKUP("LOT_TARGET_INCLUDES_LI",CONTROL!$A:$B,2,FALSE),"NO")),'
+            f'SUMPRODUCT((POS_MASTER!$Q$2:$Q$20000="Active")*('
+            f'(POS_MASTER!$E$2:$E$20000="VELKY TERMINAL")+'
+            f'((POS_MASTER!$E$2:$E$20000="SMALL TERMINAL")*(incSmall="YES"))+'
+            f'((POS_MASTER!$E$2:$E$20000="LI")*(incLI="YES"))))))'
+        )
+        ws.cell(r, cov_col).value = target_formula
+        target_ref = f"{target_col_letter}{r}"
+        verdict_formula = (
+            f'=IF($A{r}="","",IF({target_ref}="","",LET('
+            f'incSmall,IF($A{r}="LOS",IFERROR(VLOOKUP("LOS_TARGET_INCLUDES_SMALL",CONTROL!$A:$B,2,FALSE),"YES"),'
+            f'IFERROR(VLOOKUP("LOT_TARGET_INCLUDES_SMALL",CONTROL!$A:$B,2,FALSE),"NO")),'
+            f'smallActive,IFERROR(VLOOKUP("SMALL TERMINAL",TERMINAL_RULES!$A:$B,2,FALSE),"NO"),'
+            f'weeks,$D{r}-$C{r}+1,'
+            f'neededPerWeek,IF(AND(weeks>0,$J$2>0),{target_ref}/(weeks*$J$2),""),'
+            f'warnSmall,AND(incSmall="YES",smallActive<>"YES"),'
+            f'IF($G{r}>={target_ref},'
+            f'"✅ Stihneš"&IF(warnSmall," (ale aktivuj SMALL TERMINAL v TERMINAL_RULES)",""),'
+            f'"⚠ Nestihneš - chybí "&TEXT({target_ref}-$G{r},"#,##0")&" návštěv. Potřebuješ ~"&'
+            f'TEXT(neededPerWeek,"#,##0.0")&" POS/technika/týden (teď máš "&TEXT($J$5,"#,##0.0")&")"&'
+            f'IF(warnSmall,"; aktivuj i SMALL TERMINAL v TERMINAL_RULES","")'
+            f'))))'
+        )
+        ws.cell(r, cov_col + 1).value = verdict_formula
+        ws.cell(r, cov_col).alignment = Alignment(horizontal="center", vertical="center")
+        ws.cell(r, cov_col + 1).alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    ws.conditional_formatting.add(
+        f"{verdict_col_letter}2:{verdict_col_letter}{n_rows}",
+        FormulaRule(formula=[f'ISNUMBER(SEARCH("Nestihneš",{verdict_col_letter}2))'],
+                    fill=PatternFill("solid", fgColor=STATUS_SERIOUS), font=Font(bold=True, color=WHITE)),
+    )
+    ws.conditional_formatting.add(
+        f"{verdict_col_letter}2:{verdict_col_letter}{n_rows}",
+        FormulaRule(formula=[f'ISNUMBER(SEARCH("Stihneš",{verdict_col_letter}2))'],
+                    fill=PatternFill("solid", fgColor="E2EFDA")),
+    )
+
+    # Forward-looking capacity reference (informational, not wired into the
+    # verdict formula above - product owner, 2026-07-11: "do budoucna
+    # planuji s kapacitou techniku na 50POS/WEEK", shown alongside the
+    # current TARGET_VISITS_DAY-derived capacity in J5 for comparison).
+    ws.cell(6, 9, "→ Budoucí cílová kapacita/technik/týden (CONTROL.WEEKLY_CAPACITY_PER_TECH_TARGET)").font = NOTE_FONT
+    ws.cell(6, 10, '=IFERROR(VLOOKUP("WEEKLY_CAPACITY_PER_TECH_TARGET",CONTROL!A:B,2,FALSE),50)')
+
     ws.freeze_panes = "C2"
 
 

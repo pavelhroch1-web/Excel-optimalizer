@@ -96,6 +96,24 @@ def main(ref_path, out_path):
     control_ws.append(["DURATION_CRITICAL_PERCENT", 50, "Confirmed (product owner, 2026-07-09): the KRITICKE bar for durationFlag."])
     control_ws.append(["PROBLEM_SIGNAL_MIN_COUNT", 2, "Confirmed (product owner, 2026-07-09: 'GPS je odhad, takze to ani nemusi byt na vinu'): how many of {flaka riziko, volumeFlag, pptDensityFlag, durationFlag, efficiencyFlag} must be simultaneously POZOR/KRITICKE before combinedRiskFlag='Ano' - the gate for the automatic 'problemovy technik' callouts on HOME/EFFICIENCY. No single signal alone (including route efficiency) triggers it."])
     control_ws.append(["ACTIVATE_COUNT_BY_PPT", 0, "Confirmed (product owner, 2026-07-11: 'chci mit moznost je pridat... prvnich 500 nehlede kolik techniku to bude'): ActivatePOSEngine.ts's count-based mode - when POS_ACTIVATE_LIST is empty and this is > 0, activates (managerOverrideType=FORCE_INCLUDE) this many currently CATEGORY_RULES-EXCLUDE-d Active POS, highest PPT first. 0 = disabled (count mode does nothing; only POS_ACTIVATE_LIST's explicit list is processed). Ignored whenever POS_ACTIVATE_LIST has any rows - explicit list always wins over count."])
+    # ACTIVITY_PLAN campaign coverage/feasibility (product owner, 2026-07-11:
+    # "kdyz tam nasekam takto ten aktivity plan... chci aby mi to na zacatku
+    # reklo hele tady by bylo dobre jet i male terminaly" + "obecne plati ze
+    # jsou lehce dulezitejsi losy" + confirmed "Nastavitelne v CONTROL per
+    # kampan"): per-campaign-TYPE target terminal-type scope, read by
+    # tools/ux_style.py's redesign_activity_plan() to compute each
+    # campaign's target POS count and warn if current capacity/TERMINAL_RULES
+    # won't cover it in time. VELKY TERMINAL is always in scope for both
+    # types (the only currently-Active terminal type network-wide) - these
+    # settings only control whether SMALL TERMINAL/LI are ALSO counted as
+    # this campaign's target. LOS defaults wider than LOT (SMALL TERMINAL
+    # included), matching "losy jsou lehce dulezitejsi" and the stated
+    # Christmas example ("s losy objet celou sit krome LI").
+    control_ws.append(["LOS_TARGET_INCLUDES_SMALL", "YES", "Confirmed (product owner, 2026-07-11): LOS campaign coverage target includes SMALL TERMINAL POS (e.g. 'na Vanoce s losy objet celou sit krome LI')."])
+    control_ws.append(["LOS_TARGET_INCLUDES_LI", "NO", "Confirmed (product owner, 2026-07-11): LOS campaign coverage target excludes LI ('ty moc nejezdime')."])
+    control_ws.append(["LOT_TARGET_INCLUDES_SMALL", "NO", "Proposed default (not yet confirmed): LOT (loterie) campaign coverage target - narrower than LOS by default, matching 'losy jsou lehce dulezitejsi'. Change to YES if a specific LOT campaign should also cover small terminals."])
+    control_ws.append(["LOT_TARGET_INCLUDES_LI", "NO", "Proposed default (not yet confirmed): LOT campaign coverage target excludes LI, same reasoning as LOS_TARGET_INCLUDES_LI."])
+    control_ws.append(["WEEKLY_CAPACITY_PER_TECH_TARGET", 50, "Confirmed (product owner, 2026-07-11): 'do budoucna planuji s kapacitou techniku na 50POS/WEEK' - a forward-looking capacity target shown alongside ACTIVITY_PLAN's current CONTROL.TARGET_VISITS_DAY-derived capacity for comparison, not yet used to override any live planning math."])
 
     # CATEGORY_RULES: copy reference rows + add explicit confirmed default row
     cat_ws = src_wb["CATEGORY_RULES"]

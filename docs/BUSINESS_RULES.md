@@ -1296,3 +1296,60 @@ weekly capacity to hit this deadline"); a per-campaign target-terminal-type sett
 (confirmed: "Nastavitelné v CONTROL per kampaň", not a fixed rule); TERMINAL_RULES
 toggling stays a manual action, the system only warns (confirmed: "Manuálně přepnuš
 TERMINAL_RULES sama/sám").
+
+## 23. ACTIVITY_PLAN campaign coverage/capacity feasibility (2026-07-11)
+
+Follow-up to section 22 - product owner: "chci aby tam dokázala fungovat i nějaká
+predikce, když tam nasekám takto ten activity plán... chci aby mi to na začátku řeklo
+hele tady by bylo dobré jet i malé terminály", "obecně platí, že jsou lehce důležitější
+losy", concrete example "na Vánoce s losy objet celou síť kromě LI", and "systém by mi
+řekl: hele ale to jim musíš zvýšit týdenní kapacitu".
+
+Two new live-formula columns on `ACTIVITY_PLAN` (own column block, well clear of the
+existing timeline/estimate columns - zero risk to any of their formulas), per campaign
+row:
+- **CÍLOVÝ POČET POS** - the target POS count for that row's campaign, built from Active
+  `POS_MASTER` counts by terminal type. `VELKY TERMINAL` is always in scope (the only
+  currently-Active type network-wide); `SMALL TERMINAL`/`LI` are only counted if new
+  `CONTROL.{LOS,LOT}_TARGET_INCLUDES_{SMALL,LI}` (5 new settings, confirmed defaults:
+  `LOS_TARGET_INCLUDES_SMALL=YES`, `LOS_TARGET_INCLUDES_LI=NO`, matching the Christmas
+  example; `LOT_TARGET_INCLUDES_SMALL=NO`, `LOT_TARGET_INCLUDES_LI=NO` - proposed,
+  narrower by default, matching "losy jsou lehce důležitější"). Not a fixed rule - "each
+  campaign type" is the CONTROL-configurable unit, per the product owner's explicit
+  correction when a fixed-terminal-set proposal was floated first.
+- **STIHNEŠ TO? / DOPORUČENÍ** - compares that target against the existing
+  `ODHAD_NAVSTEV_ZA_KAMPAN` (G column, already live-computed from
+  weeks×distinct-technicians×`CONTROL.TARGET_VISITS_DAY`-derived weekly capacity). If
+  short, states the shortfall AND the weekly-capacity-per-technician that WOULD close
+  it (directly answering "musíš zvýšit týdenní kapacitu" with a number, not just a
+  yes/no). Also flags when the campaign's target includes `SMALL TERMINAL` but
+  `TERMINAL_RULES` currently has it off - the concrete "tady by bylo dobré jet i malé
+  terminály" signal, surfaced automatically instead of requiring the manager to notice.
+  Purely informational - never writes to `TERMINAL_RULES` itself (confirmed: manual
+  toggle stays manual, "Manuálně přepnuš TERMINAL_RULES sama/sám").
+
+New `CONTROL.WEEKLY_CAPACITY_PER_TECH_TARGET` (default 50, "do budoucna plánuji s
+kapacitou techniků na 50POS/WEEK") shown as a second reference value (I6/J6) alongside
+the current `TARGET_VISITS_DAY`-derived capacity (J5) for comparison - informational
+only, not yet wired into the verdict formula (that still uses today's real capacity,
+not the future target, since the feasibility check should reflect what's actually
+achievable now).
+
+**Known limitation, stated plainly**: the feasibility check is deliberately a rough
+capacity sanity check ("if technicians spent ALL their capacity only on this campaign"),
+not a full scheduling simulation - it doesn't account for technicians' other concurrent
+obligations (other simultaneous campaigns, CORN/GECO/9PODNIK hard cadence guarantees,
+regular non-campaign neglect coverage). A "✅ Stihneš" here means the raw numbers work
+out, not that Planning Engine's actual weekly selection will hit every target POS -
+building a true multi-campaign capacity allocator was out of scope for this pass.
+
+**Also surfaced, not yet acted on** (needs product-owner confirmation before any
+capacity-affecting change): checked whether the existing infrastructure already
+guarantees the "dlouhodobý cíl je podívat se alespoň 3x ročně i na ty nejslabší POS"
+goal for classification P (3,067 Active POS) - it does not. `CADENCE_RULES` has no rule
+scoped by `classification` at all (only `categoryPrefix`/`category`/`market`, matching
+CORN/GECO/9PODNIK/"1"-prefix), and the general `NEGLECTED_AFTER_WEEKS=26` only guarantees
+~2x/year visibility as an Advisor Engine WARNING (not a Planning Engine HARD guarantee).
+Closing this gap - e.g. a new `CADENCE_RULES` row scoped to classification P with
+`maxIntervalWeeks≈17` - would meaningfully change capacity allocation across 3,067 POS,
+so it needs explicit confirmation before implementing, not a silent addition.
