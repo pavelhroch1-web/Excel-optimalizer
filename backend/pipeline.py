@@ -41,6 +41,7 @@ from desktop_client.engines.core_logic import norm  # noqa: E402
 from desktop_client.engines.mock_workbook import MockWorkbook  # noqa: E402
 
 import config_store  # noqa: E402
+import snapshot_store  # noqa: E402
 
 # Header rows for the ledger / output sheets that start EMPTY on a fresh
 # stateless run (captured from the scaffold). The engines fill them in.
@@ -150,19 +151,51 @@ def build_state(
     config_state: dict[str, list[list]],
     raw_data_rows: list[list],
     salesapp_rows: list[list],
+    snapshot: dict[str, list[list]] | None = None,
     pos_overrides: dict[str, dict] | None = None,
 ) -> dict[str, list[list]]:
-    """Assembles the full engine state: config sheets (from the store) +
-    weekly data sheets (from uploads) + empty ledgers for the engines to
-    fill. Returns a plain {sheetName: rows} dict a MockWorkbook seeds from."""
+    """Assembles the full engine state a MockWorkbook seeds from:
+
+      config sheets (from the config store)
+    + weekly data sheets (from this run's uploads: RAW_DATA, SALESAPP_IMPORT)
+    + ALL accumulated state sheets (from the last published snapshot)
+
+    The snapshot is the complete carry-over (snapshot_store.SNAPSHOT_SHEETS):
+    POS_MASTER *and* the visit logs, compliance log, published plan and
+    lifecycle - not just POS_MASTER. Seeding every one of them is what makes
+    "upload only the new export" work: Compliance dedups the fresh visits
+    against the snapshot's VISIT_HISTORY_ACTUAL (by UID) and recomputes
+    weeksSinceLastVisit from the accumulated history, so nothing has to be
+    re-derived from years of exports.
+
+      - snapshot given -> resume from it (the normal, git-like path).
+      - snapshot None -> cold from-scratch state (empty state sheets, header
+        only; POS_MASTER carries any per-POS overrides). Only for the very
+        first bootstrap, before any snapshot exists.
+
+    Any state sheet absent from the snapshot falls back to its empty header
+    (EMPTY_LEDGER_HEADERS), so a partial snapshot still assembles cleanly.
+    """
     state: dict[str, list[list]] = {name: [list(r) for r in rows] for name, rows in config_state.items()}
     state["RAW_DATA"] = [list(r) for r in raw_data_rows]
     state["SALESAPP_IMPORT"] = [list(r) for r in salesapp_rows]
+
+    snapshot = snapshot or {}
     for name, header in EMPTY_LEDGER_HEADERS.items():
-        if name == "POS_MASTER":
+        if name in snapshot and snapshot[name]:
+            state[name] = [list(r) for r in snapshot[name]]
+        elif name == "POS_MASTER":
             state[name] = _seed_pos_master(header, pos_overrides or {})
         else:
             state[name] = [list(header)]
+
+    # Derived report sheets (ADVISOR_LOG, TECHNICIAN_PERFORMANCE_*, DASHBOARD,
+    # POS_MAP_DATA): carry them through if the snapshot has them, so a
+    # snapshot round-trips as a complete restore point. Import/Compliance/
+    # Planning never read them, so they do not affect the Draft.
+    for name, rows in snapshot.items():
+        if name not in state:
+            state[name] = [list(r) for r in rows]
     return state
 
 
@@ -214,6 +247,7 @@ def generate_draft(
     start_week: int,
     length: int,
     seed_workbook: str | None = None,
+    resume_from_snapshot: bool = True,
 ) -> dict:
     """Full stateless run from raw uploads to a Draft plan.
 
@@ -221,16 +255,22 @@ def generate_draft(
     - salesapp_exports: a list of SalesApp exports' rows (merged, deduped by
       the engine via UID)
     - start_week / length: the Planning window
-    - seed_workbook: where config is sourced from (defaults to the scaffold)
+    - seed_workbook: where config + the POS_MASTER baseline come from
+    - resume_from_snapshot: seed POS_MASTER from the last published snapshot
+      (the normal, Excel-faithful path). False = cold from-scratch bootstrap.
 
     Returns {state, messages, summary}. `state` is the whole Draft; nothing
-    is persisted here.
+    is persisted here (publish is a separate step).
     """
     config_state = config_store.load_config_state(seed_workbook)
-    pos_overrides = config_store.load_pos_overrides(seed_workbook)
     salesapp_rows = merge_salesapp(salesapp_exports)
 
-    state = build_state(config_state, raw_data_rows, salesapp_rows, pos_overrides)
+    if resume_from_snapshot:
+        snapshot = snapshot_store.load_snapshot(seed_workbook)
+        state = build_state(config_state, raw_data_rows, salesapp_rows, snapshot=snapshot)
+    else:
+        overrides = config_store.load_pos_overrides(seed_workbook)
+        state = build_state(config_state, raw_data_rows, salesapp_rows, pos_overrides=overrides)
     messages = run_pipeline(state, start_week, length)
 
     return {
