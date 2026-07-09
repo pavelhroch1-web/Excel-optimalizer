@@ -1462,7 +1462,7 @@ def build_technician_scorecard(wb):
     # (aritmetika na textu) shodilo #VALUE!; FILTER/INDEX na text nesahá.
     # ==========================================================================
     build_section_header(ws, "C58", "PRACOVNÍ DEN - REÁLNÝ ČAS (SalesApp Started/Finished at)")
-    style_dashboard_table_header(ws, 59, "CDEFGH", ["", "Po", "Út", "St", "Čt", "Pá"])
+    style_dashboard_table_header(ws, 59, "CDEFGHI", ["", "Po", "Út", "St", "Čt", "Pá", "Týden celkem"])
     time_rows = [
         (60, "Pracovní doba (h)", ["AX", "AY", "AZ", "BA", "BB"]),
         (61, "Nevytížený čas (h)", ["BC", "BD", "BE", "BF", "BG"]),
@@ -1477,7 +1477,18 @@ def build_technician_scorecard(wb):
             )
             cell.number_format = '0.0" h";;;@'
             cell.alignment = Alignment(horizontal="center", vertical="center")
-    apply_table_borders(ws, 60, 61, "CDEFGH")
+        # Week-total as its own KPI tile (product owner, 2026-07-11: "dej to
+        # do kpi") - same visual treatment as the route-km week total (H44)
+        # so both weekly-hours numbers a manager scans for read the same way
+        # at a glance. SUM() (not SUMPRODUCT) tolerates the "-" text placeholder
+        # in D:H for no-data days - it's simply skipped, no #VALUE! risk.
+        total_cell = ws[f"I{row}"]
+        total_cell.value = f"=SUM(D{row}:H{row})"
+        total_cell.number_format = '0.0" h"'
+        total_cell.font = font_card_value(size=14, color=NAVY)
+        total_cell.fill = PatternFill("solid", fgColor=WHITE)
+        total_cell.alignment = Alignment(horizontal="center", vertical="center")
+    apply_table_borders(ws, 60, 61, "CDEFGHI")
     ws.conditional_formatting.add(
         "D61:H61",
         FormulaRule(formula=['AND(ISNUMBER(D61),D61>=3)'], fill=PatternFill("solid", fgColor=dashboard_ui.TINT_WARNING),
