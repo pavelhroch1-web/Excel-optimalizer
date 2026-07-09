@@ -48,7 +48,25 @@ button.primary, button[type="submit"] { background: var(--accent); color: #fff; 
 button.ghost { background: transparent; border-color: var(--border); color: var(--text-dim); }
 
 .error { color: #B3453A; font-size: 13px; min-height: 18px; }
-.result { color: var(--text-dim); font-size: 13px; }
+.result { color: var(--text-dim); font-size: 13px; min-height: 18px; }
+.result.ok { color: var(--good, #2e7d32); }
+.result.err { color: #B3453A; }
+
+/* file inputs (upload step) */
+.filelabel { display: block; margin: 10px 0; font-size: 13px; color: var(--text-dim); }
+.filelabel input[type="file"] { display: block; margin-top: 6px; color: var(--text); }
+
+/* publish (destructive-ish, immutable) */
+.publish-card { border-color: #B3453A55; }
+button.primary.danger { background: #B3453A; border-color: #B3453A; color: #fff; }
+
+/* candidate/draft row states */
+#cand-table tr.sel td, #draft-table tr td { }
+#cand-table tr.sel { background: color-mix(in srgb, var(--good, #2e7d32) 12%, transparent); }
+#cand-table tr.hold { background: color-mix(in srgb, var(--warn, #b8860b) 12%, transparent); }
+
+#versions-wrap { overflow-x: auto; margin-top: 12px; }
+#versions-table th { text-align: left; }
 
 header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
 header h1 { font-size: 20px; margin: 0; }

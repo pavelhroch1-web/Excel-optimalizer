@@ -36,6 +36,7 @@ from desktop_client.engines import (  # noqa: E402
     compliance_engine,
     import_engine,
     planning_engine,
+    publish_engine,
 )
 from desktop_client.engines.core_logic import norm  # noqa: E402
 from desktop_client.engines.mock_workbook import MockWorkbook  # noqa: E402
@@ -209,36 +210,93 @@ def _set_control(state: dict, key: str, value) -> None:
     control.append([key, value, ""])
 
 
-def run_pipeline(state: dict[str, list[list]], start_week: int, length: int) -> dict:
-    """Runs Import -> Compliance -> Planning against the assembled state,
-    in place, and returns the per-engine messages. The Planning window is
-    set exactly the way the Excel does it (CONTROL!CAMPAIGN_START_WEEK /
-    CAMPAIGN_LENGTH)."""
-    _set_control(state, "CAMPAIGN_START_WEEK", start_week)
-    _set_control(state, "CAMPAIGN_LENGTH", length)
-
+def run_import_compliance(state: dict[str, list[list]]) -> dict:
+    """Runs Import -> Compliance against the assembled state, in place. This
+    is the Upload step: it folds this run's fresh exports into the resumed
+    snapshot state (POS_MASTER + visit history), WITHOUT planning yet, so the
+    manager can inspect candidates before generating a plan."""
     wb = MockWorkbook(state)
     import_msg = import_engine.run(wb)
-    # Import rewrote POS_MASTER in the MockWorkbook; pull it back into `state`
-    # so the next engine (which seeds its own MockWorkbook view from the same
-    # sheet objects) sees it. MockWorkbook shares the row lists by reference,
-    # so Compliance/Planning already see Import's output - re-dump to be safe
-    # and to return the final state to the caller.
+    # MockWorkbook shares row lists by reference, but re-dump to be safe and
+    # to hand the caller the final state.
     state.update(wb.dump())
 
     wb = MockWorkbook(state)
     compliance_msg = compliance_engine.run(wb)
     state.update(wb.dump())
 
+    return {"import": import_msg, "compliance": compliance_msg}
+
+
+def run_planning(state: dict[str, list[list]], start_week: int, length: int) -> dict:
+    """Runs the Planning Engine over already-imported state (the Generate
+    step). The window is set exactly the way the Excel does it
+    (CONTROL!CAMPAIGN_START_WEEK / CAMPAIGN_LENGTH)."""
+    _set_control(state, "CAMPAIGN_START_WEEK", start_week)
+    _set_control(state, "CAMPAIGN_LENGTH", length)
     wb = MockWorkbook(state)
     planning_msg = planning_engine.run(wb)
     state.update(wb.dump())
+    return {"planning": planning_msg}
 
-    return {
-        "import": import_msg,
-        "compliance": compliance_msg,
-        "planning": planning_msg,
-    }
+
+def run_pipeline(state: dict[str, list[list]], start_week: int, length: int) -> dict:
+    """Runs the full Import -> Compliance -> Planning against the assembled
+    state, in place, and returns the per-engine messages."""
+    messages = run_import_compliance(state)
+    messages.update(run_planning(state, start_week, length))
+    return messages
+
+
+def run_publish(state: dict[str, list[list]]) -> dict:
+    """The Publish step: runs the unchanged Publish Engine, which freezes the
+    lowest still-Draft week - moving its MANAGER_PLAN rows into
+    MANAGER_PLAN_PUBLISHED and marking it Published in PLAN_LIFECYCLE. The
+    resulting `state` is the new immutable snapshot. Returns the engine
+    message plus the week that was published (parsed from PLAN_LIFECYCLE)."""
+    published_before = _published_weeks(state)
+    wb = MockWorkbook(state)
+    message = publish_engine.run(wb)
+    state.update(wb.dump())
+    published_after = _published_weeks(state)
+    newly = sorted(published_after - published_before)
+    return {"message": message, "publishedWeeks": newly}
+
+
+def _published_weeks(state: dict) -> set:
+    pl = state.get("PLAN_LIFECYCLE", [])
+    if len(pl) < 2:
+        return set()
+    header = [str(h) for h in pl[0]]
+    try:
+        wi, si = header.index("week"), header.index("status")
+    except ValueError:
+        return set()
+    out = set()
+    for row in pl[1:]:
+        if len(row) > max(wi, si) and str(row[si]) in ("Published", "Active", "Closed"):
+            try:
+                out.add(int(float(row[wi])))
+            except (TypeError, ValueError):
+                pass
+    return out
+
+
+def build_upload_draft(
+    raw_data_rows: list[list],
+    salesapp_exports: list[list[list]],
+    seed_workbook: str | None = None,
+) -> dict:
+    """The Upload step: resume from the latest published snapshot, fold in
+    this run's fresh exports, and run Import -> Compliance (NOT planning).
+    Returns {state, messages}. `state` is the ready-to-plan Draft workbook
+    state; the caller persists it as the current draft."""
+    config_state = config_store.load_config_state(seed_workbook)
+    snapshot = snapshot_store.load_snapshot(seed_workbook)
+    salesapp_rows = merge_salesapp(salesapp_exports)
+    state = build_state(config_state, raw_data_rows, salesapp_rows, snapshot=snapshot)
+    messages = run_import_compliance(state)
+    return {"state": state, "messages": messages}
 
 
 def generate_draft(

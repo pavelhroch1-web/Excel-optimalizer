@@ -1,6 +1,6 @@
-// Field Force Optimizer - Fáze 0 cockpit. Talks to the backend API only via
-// fetch(); holds no business logic of its own - every action is a thin
-// wrapper around one backend endpoint, which itself just runs the existing
+// Field Force Optimizer - production live-planner cockpit. Talks to the
+// backend API only via fetch(); holds no business logic - every action is a
+// thin wrapper around one backend endpoint, which runs the unchanged
 // desktop_client/engines/ Python engines.
 
 const API_BASE = window.FFO_API_BASE || "http://localhost:8000";
@@ -10,15 +10,9 @@ const appScreen = document.getElementById("app-screen");
 const loginForm = document.getElementById("login-form");
 const loginError = document.getElementById("login-error");
 
-function getToken() {
-  return localStorage.getItem("ffo_token");
-}
-function setToken(t) {
-  localStorage.setItem("ffo_token", t);
-}
-function clearToken() {
-  localStorage.removeItem("ffo_token");
-}
+const getToken = () => localStorage.getItem("ffo_token");
+const setToken = (t) => localStorage.setItem("ffo_token", t);
+const clearToken = () => localStorage.removeItem("ffo_token");
 
 async function apiFetch(path, options = {}) {
   const res = await fetch(API_BASE + path, {
@@ -36,16 +30,39 @@ async function apiFetch(path, options = {}) {
   return res;
 }
 
+async function apiJson(path, options = {}) {
+  const res = await apiFetch(path, options);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || ("Chyba " + res.status));
+  return data;
+}
+
+function postJson(path, body) {
+  return apiJson(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 function showApp() {
   loginScreen.classList.add("hidden");
   appScreen.classList.remove("hidden");
   loadStatus();
-  loadRules();
+  loadVersions();
 }
 function showLogin() {
   appScreen.classList.add("hidden");
   loginScreen.classList.remove("hidden");
 }
+
+function setResult(id, msg, kind) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = "result" + (kind ? " " + kind : "");
+}
+
+// ---- login ----------------------------------------------------------------
 
 loginForm.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -58,14 +75,15 @@ loginForm.addEventListener("submit", async (e) => {
       body: JSON.stringify({ password }),
     });
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || "Přihlášení se nezdařilo.");
+      const d = await res.json().catch(() => ({}));
+      loginError.textContent = d.detail || "Přihlášení selhalo.";
+      return;
     }
-    const { token } = await res.json();
-    setToken(token);
+    const data = await res.json();
+    setToken(data.token);
     showApp();
   } catch (err) {
-    loginError.textContent = err.message;
+    loginError.textContent = "Nelze se spojit se serverem. (Server se možná probouzí, zkus to za 30 s.)";
   }
 });
 
@@ -74,401 +92,256 @@ document.getElementById("logout").addEventListener("click", () => {
   showLogin();
 });
 
+// ---- status ---------------------------------------------------------------
+
 async function loadStatus() {
   try {
-    const res = await apiFetch("/api/status");
-    const data = await res.json();
-    document.getElementById("last-published").textContent =
-      data.lastPublishedWeek != null ? "týden " + data.lastPublishedWeek : "žádný";
-    document.getElementById("draft-state").textContent = data.hasDraft
-      ? "týdny " + data.draftWeeks.join(", ")
-      : "žádný";
-    if (data.lastPublishedWeek) {
-      document.getElementById("start-week").value = data.lastPublishedWeek + 1;
-    }
-  } catch (err) {
-    console.error(err);
-  }
+    const s = await apiJson("/api/status");
+    document.getElementById("last-published").textContent = s.lastPublishedWeek ?? "—";
+    document.getElementById("version-count").textContent = s.publishedVersions ?? 0;
+    document.getElementById("draft-state").textContent = s.hasDraft ? "čeká" : "žádný";
+  } catch (_) {}
 }
 
-document.getElementById("candidates-form").addEventListener("submit", async (e) => {
+// ---- 1) upload ------------------------------------------------------------
+
+document.getElementById("upload-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const week = parseInt(document.getElementById("cand-week").value, 10);
-  const tech = document.getElementById("cand-technician").value.trim();
-  const result = document.getElementById("cand-result");
-  const body = document.getElementById("cand-body");
-  result.textContent = "Počítám skóre přes Planning Engine…";
-  body.innerHTML = "";
-  try {
-    const q = "/api/candidates?week=" + week + (tech ? "&technician=" + encodeURIComponent(tech) : "");
-    const res = await apiFetch(q);
-    if (!res.ok) {
-      const b = await res.json().catch(() => ({}));
-      throw new Error(b.detail || "Načtení kandidátů se nezdařilo.");
-    }
-    const d = await res.json();
-    currentCandidates = d.candidates;
-    currentCandMeta = { week: d.week, total: d.total, selected: d.selected, technicians: d.technicians };
-    renderCandidates();
-  } catch (err) {
-    result.textContent = "Chyba: " + err.message;
-  }
-});
+  const posFile = document.getElementById("pos-export").files[0];
+  const saFiles = document.getElementById("salesapp-files").files;
+  if (!posFile) return;
+  const fd = new FormData();
+  fd.append("pos_export", posFile);
+  for (const f of saFiles) fd.append("salesapp", f);
 
-let currentCandidates = [];
-let currentCandMeta = {};
-
-function renderCandidates() {
-  const result = document.getElementById("cand-result");
-  const body = document.getElementById("cand-body");
-  const num = (v) => (v === null || v === undefined || v === "" ? "" : Math.round(v * 100) / 100);
-  const fStatus = document.getElementById("cand-filter-status").value;
-  const fWeeks = document.getElementById("cand-filter-weeks").value;
-  const fText = document.getElementById("cand-filter-text").value.trim().toLowerCase();
-  let rows = currentCandidates;
-  if (fStatus) rows = rows.filter((c) => (fStatus === "Odloženo" ? c.status.startsWith("Odloženo") : c.status === fStatus));
-  if (fWeeks !== "") {
-    const min = parseFloat(fWeeks);
-    rows = rows.filter((c) => c.weeksSinceLastVisit !== null && c.weeksSinceLastVisit !== undefined && c.weeksSinceLastVisit >= min);
-  }
-  if (fText) rows = rows.filter((c) => String(c.pos).toLowerCase().includes(fText) || String(c.nazev || "").toLowerCase().includes(fText));
-  result.textContent = `Týden ${currentCandMeta.week}: zobrazeno ${rows.length} z ${currentCandMeta.total} kandidátů (${currentCandMeta.selected} vybráno). Technici: ${(currentCandMeta.technicians || []).join(", ") || "—"}`;
-  body.innerHTML = rows
-      .map((c) => {
-        const statusClass = c.status === "Vybráno" ? "st-sel" : c.status.startsWith("Odloženo") ? "st-hold" : "st-no";
-        const weeks = c.weeksSinceLastVisit === null || c.weeksSinceLastVisit === undefined ? "nikdy" : Math.round(c.weeksSinceLastVisit * 10) / 10;
-        return `<tr>
-          <td class="${statusClass}">${escapeHtml(c.status)}</td>
-          <td>${escapeHtml(c.pos)}</td>
-          <td>${escapeHtml(c.nazev)}</td>
-          <td>${escapeHtml(c.tech)}</td>
-          <td>${escapeHtml(c.kategorie)}</td>
-          <td>${escapeHtml(c.market)}</td>
-          <td>${escapeHtml(c.classification)}</td>
-          <td>${c.core ? "✓" : ""}</td>
-          <td>${escapeHtml(num(c.ppt))}</td>
-          <td>${escapeHtml(c.lastRealVisitDate)}</td>
-          <td>${escapeHtml(weeks)}</td>
-          <td><b>${escapeHtml(num(c.score))}</b></td>
-          <td>${escapeHtml(num(c.pptComponent))}</td>
-          <td>${escapeHtml(num(c.coreBonus))}</td>
-          <td>${escapeHtml(num(c.aBonus))}</td>
-          <td>${c.gapPenalty ? escapeHtml(num(c.gapPenalty)) : ""}</td>
-          <td>${c.neglectedBonus ? escapeHtml(num(c.neglectedBonus)) : ""}</td>
-          <td>${c.urgencyBoost ? escapeHtml(num(c.urgencyBoost)) : ""}</td>
-          <td>${c.gpsBonus ? escapeHtml(num(c.gpsBonus)) : ""}</td>
-          <td>${escapeHtml(c.explanation || c.reasonTags)}</td>
-        </tr>`;
-      })
-      .join("");
-}
-
-["cand-filter-status", "cand-filter-weeks", "cand-filter-text"].forEach((id) => {
-  document.getElementById(id).addEventListener("input", () => {
-    if (currentCandidates.length) renderCandidates();
-  });
-});
-
-document.getElementById("generate-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const startWeek = parseInt(document.getElementById("start-week").value, 10);
-  const length = parseInt(document.getElementById("length").value, 10);
-  const btn = document.getElementById("generate-btn");
-  const result = document.getElementById("generate-result");
+  const btn = document.getElementById("upload-btn");
   btn.disabled = true;
-  result.textContent = "Generuji tour plán…";
+  setResult("upload-result", "Nahrávám a počítám Import + Compliance… (může trvat i minutu)", "");
   try {
-    const res = await apiFetch("/api/generate-plan", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ start_week: startWeek, length }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || "Generování se nezdařilo.");
-    }
-    const data = await res.json();
-    result.textContent = data.message;
-    await loadStatus();
-    await loadDraft();
+    const data = await apiJson("/api/draft/upload", { method: "POST", body: fd });
+    const m = data.messages || {};
+    setResult("upload-result",
+      "Draft vytvořen. " + (m.import || "") + " " + (m.compliance || ""), "ok");
+    loadStatus();
   } catch (err) {
-    result.textContent = "Chyba: " + err.message;
+    setResult("upload-result", "Chyba: " + err.message, "err");
   } finally {
     btn.disabled = false;
   }
 });
 
-function escapeHtml(v) {
-  return String(v ?? "").replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  }[c]));
-}
+// ---- 2) generate ----------------------------------------------------------
 
-async function loadDraft() {
-  const body = document.getElementById("draft-body");
-  body.innerHTML = "<tr><td colspan='12'>Načítám…</td></tr>";
-  try {
-    const res = await apiFetch("/api/plan/draft");
-    const data = await res.json();
-    const rows = data.rows || [];
-    if (rows.length === 0) {
-      body.innerHTML = "<tr><td colspan='12'>Zatím žádný návrh - vygeneruj tour plán výše.</td></tr>";
-      return;
-    }
-    body.innerHTML = rows
-      .map((row, i) => {
-        const weeks = row.weeksSinceLastVisit;
-        const weeksText = weeks === null || weeks === undefined || weeks === "" ? "nikdy" : Math.round(weeks * 10) / 10;
-        return `<tr data-index="${i}">
-          <td>${escapeHtml(row.WEEK)}</td>
-          <td>${escapeHtml(row.DAY)}</td>
-          <td>${escapeHtml(row.POS)}</td>
-          <td>${escapeHtml(row.NAZEV_PROVOZOVNY)}</td>
-          <td>${escapeHtml(row.TECHNICIAN)}</td>
-          <td>${escapeHtml(row.PPT)}</td>
-          <td>${escapeHtml(row.lastRealVisitDate)}</td>
-          <td>${escapeHtml(weeksText)}</td>
-          <td>${escapeHtml(row.terminalType)}</td>
-          <td>${escapeHtml(row.market)}</td>
-          <td>${escapeHtml(row.REASON_FRIENDLY)}</td>
-          <td class="row-actions">
-            <button class="ghost small" data-action="move">Přesunout</button>
-            <button class="ghost small danger" data-action="remove">Odebrat</button>
-          </td>
-        </tr>`;
-      })
-      .join("");
-    currentDraftRows = rows;
-  } catch (err) {
-    body.innerHTML = `<tr><td colspan="12">Chyba: ${err.message}</td></tr>`;
-  }
-}
-
-let currentDraftRows = [];
-
-document.getElementById("draft-body").addEventListener("click", async (e) => {
-  const btn = e.target.closest("button[data-action]");
-  if (!btn) return;
-  const tr = btn.closest("tr");
-  const row = currentDraftRows[parseInt(tr.dataset.index, 10)];
-  if (!row) return;
-
-  if (btn.dataset.action === "remove") {
-    if (!confirm(`Odebrat POS ${row.POS} (${row.NAZEV_PROVOZOVNY}) technikovi ${row.TECHNICIAN}?`)) return;
-    try {
-      const res = await apiFetch("/api/plan/remove-pos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ week: row.WEEK, pos_id: row.POS, technician: row.TECHNICIAN }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail || "Odebrání se nezdařilo.");
-      }
-      await loadDraft();
-    } catch (err) {
-      alert("Chyba: " + err.message);
-    }
-  }
-
-  if (btn.dataset.action === "move") {
-    const newTech = prompt(`Přesunout POS ${row.POS} na technika (přesné jméno):`, row.TECHNICIAN);
-    if (!newTech || newTech === row.TECHNICIAN) return;
-    try {
-      const res = await apiFetch("/api/plan/change-technician", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          week: row.WEEK, pos_id: row.POS, old_technician: row.TECHNICIAN, new_technician: newTech,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail || "Přesunutí se nezdařilo.");
-      }
-      await loadDraft();
-    } catch (err) {
-      alert("Chyba: " + err.message);
-    }
-  }
-});
-
-document.getElementById("add-pos-form").addEventListener("submit", async (e) => {
+document.getElementById("generate-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const result = document.getElementById("add-pos-result");
-  const posId = document.getElementById("add-pos-id").value.trim();
-  const week = parseInt(document.getElementById("add-pos-week").value, 10);
-  const day = document.getElementById("add-pos-day").value;
-  const technician = document.getElementById("add-pos-technician").value.trim();
-  result.textContent = "Přidávám…";
+  const start_week = parseInt(document.getElementById("start-week").value, 10);
+  const length = parseInt(document.getElementById("length").value, 10);
+  const btn = document.getElementById("generate-btn");
+  btn.disabled = true;
+  setResult("generate-result", "Generuji tour plán…", "");
   try {
-    const res = await apiFetch("/api/plan/add-pos", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ week, day, technician, pos_id: posId }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || "Přidání se nezdařilo.");
-    }
-    result.textContent = "Přidáno.";
-    await loadDraft();
+    const data = await postJson("/api/draft/generate", { start_week, length });
+    const m = data.messages || {};
+    setResult("generate-result", m.planning || "Hotovo.", "ok");
+    document.getElementById("cand-week").value = start_week;
+    loadDraft();
   } catch (err) {
-    result.textContent = "Chyba: " + err.message;
+    setResult("generate-result", "Chyba: " + err.message, "err");
+  } finally {
+    btn.disabled = false;
   }
 });
+
+// ---- 3) candidates --------------------------------------------------------
+
+let candCache = [];
+
+document.getElementById("candidates-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const week = parseInt(document.getElementById("cand-week").value, 10);
+  const tech = document.getElementById("cand-technician").value.trim();
+  setResult("cand-result", "Počítám kandidáty (stejný engine jako Generovat)…", "");
+  try {
+    const q = "/api/draft/candidates?week=" + week + (tech ? "&technician=" + encodeURIComponent(tech) : "");
+    const data = await apiJson(q);
+    candCache = data.candidates || [];
+    setResult("cand-result",
+      `Týden ${data.week}: ${data.total} kandidátů, ${data.selected} vybraných.`, "ok");
+    renderCandidates();
+  } catch (err) {
+    setResult("cand-result", "Chyba: " + err.message, "err");
+  }
+});
+
+["cand-filter-status", "cand-filter-weeks", "cand-filter-text"].forEach((id) =>
+  document.getElementById(id).addEventListener("input", renderCandidates));
+
+function renderCandidates() {
+  const status = document.getElementById("cand-filter-status").value;
+  const minWeeks = parseInt(document.getElementById("cand-filter-weeks").value, 10);
+  const text = document.getElementById("cand-filter-text").value.trim().toLowerCase();
+  const body = document.getElementById("cand-body");
+  body.innerHTML = "";
+  const fmt = (n) => (n === null || n === undefined || n === "" ? "" : Number(n).toLocaleString("cs-CZ"));
+
+  candCache
+    .filter((c) => !status || c.status === status)
+    .filter((c) => isNaN(minWeeks) || (c.weeksSinceLastVisit ?? -1) >= minWeeks)
+    .filter((c) => !text ||
+      String(c.pos).toLowerCase().includes(text) ||
+      String(c.nazev || "").toLowerCase().includes(text))
+    .forEach((c) => {
+      const tr = document.createElement("tr");
+      tr.className = c.status === "Vybráno" ? "sel" : (c.status.startsWith("Odloženo") ? "hold" : "");
+      const cells = [
+        c.status, c.pos, c.nazev, c.tech, c.kategorie, c.market, c.classification,
+        c.core ? "ANO" : "", fmt(c.ppt), c.lastRealVisitDate || "", c.weeksSinceLastVisit ?? "",
+        fmt(c.score), fmt(c.pptComponent), fmt(c.coreBonus), fmt(c.aBonus), fmt(c.gapPenalty),
+        fmt(c.neglectedBonus), fmt(c.urgencyBoost), fmt(c.gpsBonus), c.explanation || "",
+      ];
+      cells.forEach((v) => {
+        const td = document.createElement("td");
+        td.textContent = v;
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+}
+
+// ---- 4) draft view + edits ------------------------------------------------
 
 document.getElementById("refresh-draft").addEventListener("click", loadDraft);
 
-document.getElementById("download-btn").addEventListener("click", async () => {
+async function loadDraft() {
+  const body = document.getElementById("draft-body");
+  body.innerHTML = "";
   try {
-    const res = await apiFetch("/api/download/manager-plan");
-    if (!res.ok) throw new Error("Stažení se nezdařilo.");
+    const data = await apiJson("/api/draft");
+    (data.rows || []).forEach((r) => {
+      const tr = document.createElement("tr");
+      const cells = [
+        r.WEEK, r.DAY, r.POS, r.NAZEV_PROVOZOVNY, r.TECHNICIAN,
+        r.PPT, r.lastRealVisitDate || "", r.weeksSinceLastVisit ?? "",
+        r.terminalType || "", r.market || "", r.REASON_FRIENDLY || r.REASON || "",
+      ];
+      cells.forEach((v) => {
+        const td = document.createElement("td");
+        td.textContent = v ?? "";
+        tr.appendChild(td);
+      });
+      const tdBtn = document.createElement("td");
+      const btn = document.createElement("button");
+      btn.textContent = "Odebrat";
+      btn.className = "ghost small";
+      btn.addEventListener("click", () => removePos(r.WEEK, r.POS, r.TECHNICIAN));
+      tdBtn.appendChild(btn);
+      tr.appendChild(tdBtn);
+      body.appendChild(tr);
+    });
+  } catch (err) {
+    setResult("add-pos-result", "Chyba načtení návrhu: " + err.message, "err");
+  }
+}
+
+async function removePos(week, pos, tech) {
+  try {
+    await postJson("/api/draft/remove-pos", { week, pos_id: String(pos), technician: tech });
+    loadDraft();
+  } catch (err) {
+    setResult("add-pos-result", "Chyba: " + err.message, "err");
+  }
+}
+
+document.getElementById("add-pos-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = {
+    pos_id: document.getElementById("add-pos-id").value.trim(),
+    week: parseInt(document.getElementById("add-pos-week").value, 10),
+    day: document.getElementById("add-pos-day").value,
+    technician: document.getElementById("add-pos-technician").value.trim(),
+  };
+  try {
+    await postJson("/api/draft/add-pos", body);
+    setResult("add-pos-result", "POS přidán.", "ok");
+    loadDraft();
+  } catch (err) {
+    setResult("add-pos-result", "Chyba: " + err.message, "err");
+  }
+});
+
+document.getElementById("download-draft-btn").addEventListener("click", () =>
+  downloadFile("/api/draft/download", "MANAGER_PLAN_draft.xlsx"));
+
+// ---- 5) publish -----------------------------------------------------------
+
+document.getElementById("publish-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!confirm("Publikovat tour plán? Vytvoří se nová immutable verze, kterou už nepůjde změnit.")) return;
+  const message = document.getElementById("publish-message").value.trim();
+  const btn = document.getElementById("publish-btn");
+  btn.disabled = true;
+  setResult("publish-result", "Publikuji…", "");
+  try {
+    const data = await postJson("/api/publish", { message });
+    const p = data.published;
+    setResult("publish-result",
+      `Publikováno jako ${p.id} (týden ${(p.publishedWeeks || []).join(", ")}). ${data.engineMessage || ""}`, "ok");
+    loadStatus();
+    loadVersions();
+  } catch (err) {
+    setResult("publish-result", "Chyba: " + err.message, "err");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ---- 6) history + 7) download published -----------------------------------
+
+document.getElementById("refresh-versions").addEventListener("click", loadVersions);
+
+async function loadVersions() {
+  const body = document.getElementById("versions-body");
+  body.innerHTML = "";
+  try {
+    const data = await apiJson("/api/versions");
+    (data.versions || []).forEach((v) => {
+      const tr = document.createElement("tr");
+      const when = v.publishedAt ? new Date(v.publishedAt).toLocaleString("cs-CZ") : "";
+      [v.id, (v.publishedWeeks || []).join(", "), when, v.message || "", v.engineVersion || ""].forEach((val) => {
+        const td = document.createElement("td");
+        td.textContent = val;
+        tr.appendChild(td);
+      });
+      const tdDl = document.createElement("td");
+      const btn = document.createElement("button");
+      btn.textContent = "Stáhnout";
+      btn.className = "ghost small";
+      btn.addEventListener("click", () =>
+        downloadFile("/api/versions/" + v.id + "/manager-plan", "MANAGER_PLAN_" + v.id + ".xlsx"));
+      tdDl.appendChild(btn);
+      tr.appendChild(tdDl);
+      body.appendChild(tr);
+    });
+  } catch (_) {}
+}
+
+async function downloadFile(path, filename) {
+  try {
+    const res = await apiFetch(path);
+    if (!res.ok) throw new Error("Chyba " + res.status);
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "MANAGER_PLAN.xlsx";
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
   } catch (err) {
-    alert("Chyba: " + err.message);
-  }
-});
-
-// --- Pravidla plánování (existing TERMINAL_RULES/MARKET_RULES/CATEGORY_RULES/
-// ACTIVITY_PLAN - the exact same tables edited in Excel today, just from
-// here instead) ---
-
-let currentRules = null;
-
-const CATEGORY_OPTIONS = ["CORE", "NORMAL", "EXCLUDE"];
-
-async function loadRules() {
-  try {
-    const res = await apiFetch("/api/rules");
-    currentRules = await res.json();
-    renderToggleList("rules-terminal", "TYP TERMINALU", currentRules.terminal);
-    renderToggleList("rules-market", "MARKET", currentRules.market);
-    renderDropdownList("rules-category", "CATEGORY", "RULE", currentRules.category, CATEGORY_OPTIONS);
-    renderCampaigns(currentRules.campaigns);
-  } catch (err) {
-    console.error(err);
+    alert("Stažení selhalo: " + err.message);
   }
 }
 
-function renderToggleList(containerId, keyField, rows) {
-  const el = document.getElementById(containerId);
-  el.innerHTML = rows
-    .map(
-      (row, i) => `
-    <label class="toggle-row">
-      <input type="checkbox" data-container="${containerId}" data-index="${i}" ${row.ACTIVE === "YES" ? "checked" : ""}>
-      ${row[keyField]}
-    </label>`
-    )
-    .join("");
-}
+// ---- boot -----------------------------------------------------------------
 
-function renderDropdownList(containerId, keyField, valueField, rows, options) {
-  const el = document.getElementById(containerId);
-  el.innerHTML = rows
-    .map(
-      (row, i) => `
-    <label class="dropdown-row">
-      ${row[keyField]}
-      <select data-container="${containerId}" data-index="${i}">
-        ${options.map((o) => `<option value="${o}" ${row[valueField] === o ? "selected" : ""}>${o}</option>`).join("")}
-      </select>
-    </label>`
-    )
-    .join("");
-}
-
-function renderCampaigns(rows) {
-  const body = document.getElementById("rules-campaigns-body");
-  body.innerHTML = rows
-    .map(
-      (row, i) => `
-    <tr>
-      <td>${row.TYPE}</td>
-      <td>${row.ACTIVITY}</td>
-      <td><input type="number" data-index="${i}" data-field="START_WEEK" value="${row.START_WEEK ?? ""}"></td>
-      <td><input type="number" data-index="${i}" data-field="END_WEEK" value="${row.END_WEEK ?? ""}"></td>
-      <td><input type="number" data-index="${i}" data-field="PRIORITY" value="${row.PRIORITY ?? ""}"></td>
-      <td>
-        <select data-index="${i}" data-field="OVERRIDE_GAP">
-          <option value="YES" ${row.OVERRIDE_GAP === "YES" ? "selected" : ""}>YES</option>
-          <option value="NO" ${row.OVERRIDE_GAP === "NO" ? "selected" : ""}>NO</option>
-        </select>
-      </td>
-    </tr>`
-    )
-    .join("");
-}
-
-function collectToggleList(containerId, rows) {
-  const updated = rows.map((r) => ({ ...r }));
-  document.querySelectorAll(`#${containerId} input[type="checkbox"]`).forEach((input) => {
-    const i = parseInt(input.dataset.index, 10);
-    updated[i].ACTIVE = input.checked ? "YES" : "NO";
-  });
-  return updated;
-}
-
-function collectDropdownList(containerId, valueField, rows) {
-  const updated = rows.map((r) => ({ ...r }));
-  document.querySelectorAll(`#${containerId} select`).forEach((select) => {
-    const i = parseInt(select.dataset.index, 10);
-    updated[i][valueField] = select.value;
-  });
-  return updated;
-}
-
-function collectCampaigns(rows) {
-  const updated = rows.map((r) => ({ ...r }));
-  document.querySelectorAll("#rules-campaigns-body input, #rules-campaigns-body select").forEach((input) => {
-    const i = parseInt(input.dataset.index, 10);
-    const field = input.dataset.field;
-    updated[i][field] = input.type === "number" ? Number(input.value) : input.value;
-  });
-  return updated;
-}
-
-document.getElementById("save-rules-btn").addEventListener("click", async () => {
-  const result = document.getElementById("rules-result");
-  result.textContent = "Ukládám…";
-  try {
-    const terminal = collectToggleList("rules-terminal", currentRules.terminal);
-    const market = collectToggleList("rules-market", currentRules.market);
-    const category = collectDropdownList("rules-category", "RULE", currentRules.category);
-    const campaigns = collectCampaigns(currentRules.campaigns);
-
-    for (const [sheet, rows] of [
-      ["TERMINAL_RULES", terminal],
-      ["MARKET_RULES", market],
-      ["CATEGORY_RULES", category],
-      ["ACTIVITY_PLAN", campaigns],
-    ]) {
-      const res = await apiFetch("/api/rules", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sheet, rows }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail || `Uložení ${sheet} se nezdařilo.`);
-      }
-    }
-    result.textContent = "Uloženo.";
-    await loadRules();
-  } catch (err) {
-    result.textContent = "Chyba: " + err.message;
-  }
-});
-
-if (getToken()) {
-  showApp();
-} else {
-  showLogin();
-}
+if (getToken()) showApp();
+else showLogin();

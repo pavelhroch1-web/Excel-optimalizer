@@ -33,49 +33,50 @@
       <div class="value" id="last-published">—</div>
     </div>
     <div class="gauge">
-      <div class="label">Návrh čeká</div>
+      <div class="label">Publikovaných verzí</div>
+      <div class="value" id="version-count">—</div>
+    </div>
+    <div class="gauge">
+      <div class="label">Draft</div>
       <div class="value" id="draft-state">—</div>
     </div>
   </section>
 
+  <!-- 1) UPLOAD -->
   <section class="card">
-    <h2>Pravidla plánování</h2>
-    <p class="hint">Stejná pravidla, která dnes nastavuješ v Excelu - jen odsud, bez otevírání souboru.</p>
-
-    <div class="rules-block">
-      <h3>Typ terminálu</h3>
-      <div id="rules-terminal" class="toggle-list"></div>
-    </div>
-
-    <div class="rules-block">
-      <h3>Obchodní sítě</h3>
-      <div id="rules-market" class="toggle-list"></div>
-    </div>
-
-    <div class="rules-block">
-      <h3>Kategorie</h3>
-      <div id="rules-category" class="dropdown-list"></div>
-    </div>
-
-    <div class="rules-block">
-      <h3>Kampaně</h3>
-      <div id="rules-campaigns-wrap">
-        <table id="rules-campaigns-table">
-          <thead>
-            <tr><th>Typ</th><th>Kampaň</th><th>Od týdne</th><th>Do týdne</th><th>Priorita</th><th>Override gap</th></tr>
-          </thead>
-          <tbody id="rules-campaigns-body"></tbody>
-        </table>
-      </div>
-    </div>
-
-    <button id="save-rules-btn" class="primary">Uložit pravidla</button>
-    <p id="rules-result" class="result"></p>
+    <h2>1 · Nahrát exporty</h2>
+    <p class="hint">Nahraj čerstvé exporty. Draft vždy naváže na poslední publikovaný snapshot – publikovaný plán se nikdy nezmění.</p>
+    <form id="upload-form">
+      <label class="filelabel">POS export (Základní údaje o prodejních místech)
+        <input type="file" id="pos-export" accept=".xlsx" required>
+      </label>
+      <label class="filelabel">SalesApp exporty (můžeš vybrat víc)
+        <input type="file" id="salesapp-files" accept=".xlsx" multiple>
+      </label>
+      <button type="submit" id="upload-btn" class="primary">Nahrát a vytvořit Draft</button>
+    </form>
+    <p id="upload-result" class="result"></p>
   </section>
 
+  <!-- 2) GENERATE -->
   <section class="card">
-    <h2>Kandidáti POS</h2>
-    <p class="hint">Přesně ta data a skóre, ze kterých Planning Engine vybírá. Skóre počítá stejný engine jako "Generovat" - tady se jen zobrazuje jeho výsledek, nic se neukládá.</p>
+    <h2>2 · Generovat tour plán</h2>
+    <form id="generate-form" class="row">
+      <label>Počáteční týden
+        <input type="number" id="start-week" min="1" max="53" required>
+      </label>
+      <label>Délka (týdnů)
+        <input type="number" id="length" min="1" max="12" value="1" required>
+      </label>
+      <button type="submit" id="generate-btn" class="primary">Generovat</button>
+    </form>
+    <p id="generate-result" class="result"></p>
+  </section>
+
+  <!-- 3) CANDIDATES -->
+  <section class="card">
+    <h2>3 · Kandidáti POS</h2>
+    <p class="hint">Přesně ta data a skóre, ze kterých Planning Engine vybírá. Skóre počítá stejný engine jako „Generovat".</p>
     <form id="candidates-form" class="row">
       <label>Týden
         <input type="number" id="cand-week" min="1" max="53" required>
@@ -118,48 +119,26 @@
     </div>
   </section>
 
+  <!-- 4) DRAFT + MANUAL EDITS -->
   <section class="card">
-    <h2>Generovat tour plán</h2>
-    <form id="generate-form" class="row">
-      <label>Počáteční týden
-        <input type="number" id="start-week" min="1" max="53" required>
-      </label>
-      <label>Délka (týdnů)
-        <input type="number" id="length" min="1" max="12" value="4" required>
-      </label>
-      <button type="submit" id="generate-btn">Generovat tour plán</button>
-    </form>
-    <p id="generate-result" class="result"></p>
-  </section>
-
-  <section class="card">
-    <h2>Výsledek (MANAGER_PLAN)</h2>
+    <h2>4 · Návrh a ruční úpravy</h2>
     <div class="row">
-      <button id="refresh-draft" class="ghost">Zobrazit / obnovit výsledek</button>
-      <button id="download-btn" class="primary">Stáhnout MANAGER_PLAN (.xlsx)</button>
+      <button id="refresh-draft" class="ghost">Zobrazit / obnovit návrh</button>
+      <button id="download-draft-btn" class="ghost">Stáhnout návrh (.xlsx)</button>
     </div>
 
     <div class="rules-block">
       <h3>Přidat POS ručně</h3>
       <form id="add-pos-form" class="row">
-        <label>POS ID
-          <input type="text" id="add-pos-id" placeholder="např. 73001577" required>
-        </label>
-        <label>Týden
-          <input type="number" id="add-pos-week" required>
-        </label>
+        <label>POS ID<input type="text" id="add-pos-id" placeholder="např. 73001577" required></label>
+        <label>Týden<input type="number" id="add-pos-week" required></label>
         <label>Den
           <select id="add-pos-day">
-            <option value="MON">Po</option>
-            <option value="TUE">Út</option>
-            <option value="WED">St</option>
-            <option value="THU">Čt</option>
-            <option value="FRI">Pá</option>
+            <option value="MON">Po</option><option value="TUE">Út</option>
+            <option value="WED">St</option><option value="THU">Čt</option><option value="FRI">Pá</option>
           </select>
         </label>
-        <label>Technik
-          <input type="text" id="add-pos-technician" placeholder="přesné jméno technika" required>
-        </label>
+        <label>Technik<input type="text" id="add-pos-technician" placeholder="přesné jméno technika" required></label>
         <button type="submit">Přidat POS</button>
       </form>
       <p id="add-pos-result" class="result"></p>
@@ -170,11 +149,38 @@
         <thead>
           <tr>
             <th>Týden</th><th>Den</th><th>POS</th><th>Název</th><th>Technik</th>
-            <th>PPT</th><th>Poslední návštěva</th><th>Týdnů od návštěvy</th>
+            <th>PPT</th><th>Poslední návštěva</th><th>Týdnů</th>
             <th>Terminál</th><th>Síť</th><th>Důvod výběru</th><th></th>
           </tr>
         </thead>
         <tbody id="draft-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 5) PUBLISH -->
+  <section class="card publish-card">
+    <h2>5 · Publikovat Tour Plán</h2>
+    <p class="hint">Publikace zmrazí nejnižší draftový týden do nové <strong>immutable verze</strong>. Od té chvíle na ni navazují všechny další běhy. Publikovaný plán už nikdy nezměníš.</p>
+    <form id="publish-form" class="row">
+      <label style="flex:1">Poznámka k verzi (nepovinné)
+        <input type="text" id="publish-message" placeholder="např. Týden 33 – kampaň GECO">
+      </label>
+      <button type="submit" id="publish-btn" class="primary danger">Publikovat Tour Plán</button>
+    </form>
+    <p id="publish-result" class="result"></p>
+  </section>
+
+  <!-- 6) HISTORY + 7) DOWNLOAD -->
+  <section class="card">
+    <h2>6 · Historie publikovaných verzí</h2>
+    <div class="row"><button id="refresh-versions" class="ghost">Obnovit historii</button></div>
+    <div id="versions-wrap">
+      <table id="versions-table">
+        <thead>
+          <tr><th>Verze</th><th>Týden(y)</th><th>Publikováno</th><th>Poznámka</th><th>Engine</th><th>Plán</th></tr>
+        </thead>
+        <tbody id="versions-body"></tbody>
       </table>
     </div>
   </section>

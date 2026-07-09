@@ -1,50 +1,53 @@
-"""Field Force Optimizer - MVP backend.
+"""Field Force Optimizer - production live-planner backend.
 
-A thin HTTP wrapper around the existing, unchanged desktop_client/engines/
-Python engines. Owns none of the business logic - every endpoint just
-downloads the real .xlsx from GitHub (github_storage.py), runs one or more
-already-verified engines against it via xlsx_engine_io.py, and (for
-write actions) commits the updated file back to GitHub.
+A thin HTTP layer over the UNCHANGED desktop_client/engines/. It owns no
+business logic; every endpoint assembles state and calls an already-verified
+engine (Import / Compliance / Planning / Publish), then persists via the
+versioned store (store.py + gh.py).
 
-Fáze 0 scope, deliberately narrow (product owner, 2026-07-11: "jediným
-cílem: kvalitní Planning Engine + jednoduché webové rozhraní pro jeho
-používání... To je vše"): login, current-status, generate a tour plan
-(Planning Engine only), view the draft, download MANAGER_PLAN as a
-standalone .xlsx. No publish, no Reporting/Performance/Dashboards/admin -
-those are later phases, deliberately not started yet.
+The git-like model (confirmed with the product owner):
+  - The latest published SNAPSHOT is the single source of truth.
+  - Uploading fresh exports only ever builds a new DRAFT (snapshot + this
+    run's exports, Import+Compliance). It never touches a published plan.
+  - Generate runs Planning on the draft; the manager can edit it manually.
+  - Publish freezes the draft's lowest draft-week into a NEW immutable
+    snapshot with an audit record; all later runs resume from it.
 
-Also exposes the existing manager rule tables (TERMINAL_RULES,
-MARKET_RULES, CATEGORY_RULES, ACTIVITY_PLAN) for editing - product owner,
-same day: "nechci, aby se znovu navrhovala business logika Planneru...
-chci pouze přenést existující manažerské volby z Excelu do jednoduchého
-UI". See backend/rules_io.py - only the same cells a manager already edits
-in Excel are ever written; no rule semantics change.
+The seven live features, one endpoint group each:
+  1 upload      POST /api/draft/upload         (multipart exports)
+  2 generate    POST /api/draft/generate       {start_week, length}
+  3 candidates  GET  /api/draft/candidates     ?week=&technician=
+  4 edit        POST /api/draft/remove-pos | add-pos | change-technician
+  5 publish     POST /api/publish              {message}
+  6 history     GET  /api/versions
+  7 download    GET  /api/versions/{id}/manager-plan  (+ /api/draft/download)
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 import sys
 import tempfile
 
 import openpyxl
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from desktop_client import xlsx_engine_io  # noqa: E402
-from desktop_client.engines import planning_engine  # noqa: E402
-from desktop_client.engines.mock_workbook import MockWorkbook  # noqa: E402
-
 import auth  # noqa: E402
 from auth import issue_token, require_auth  # noqa: E402
 import candidates as candidates_mod  # noqa: E402
-import github_storage  # noqa: E402
+import pipeline  # noqa: E402
 import plan_io  # noqa: E402
 import rules_io  # noqa: E402
+import state_xlsx  # noqa: E402
+import store  # noqa: E402
+
+ENGINE_VERSION = os.environ.get("ENGINE_VERSION", "FFO-V11")
 
 app = FastAPI(title="Field Force Optimizer API")
 
@@ -61,14 +64,13 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class GeneratePlanRequest(BaseModel):
+class GenerateRequest(BaseModel):
     start_week: int
-    length: int = 4
+    length: int = 1
 
 
-class SaveRulesRequest(BaseModel):
-    sheet: str
-    rows: list[dict]
+class PublishRequest(BaseModel):
+    message: str = ""
 
 
 class RemovePosRequest(BaseModel):
@@ -91,44 +93,94 @@ class AddPosRequest(BaseModel):
     pos_id: str
 
 
-def _with_local_copy():
-    """Downloads the current workbook to a temp file and returns its path.
-    Caller is responsible for deleting it."""
-    fd, path = tempfile.mkstemp(suffix=".xlsx")
+class SaveRulesRequest(BaseModel):
+    sheet: str
+    rows: list[dict]
+
+
+# --------------------------------------------------------------------------
+# helpers
+# --------------------------------------------------------------------------
+
+def _tmp(suffix=".xlsx") -> str:
+    fd, path = tempfile.mkstemp(suffix=suffix)
     os.close(fd)
-    github_storage.download_workbook(path)
     return path
 
 
-def _set_control(state: dict, key: str, value) -> None:
-    """Finds CONTROL!key (case-insensitive) and overwrites its value, or
-    appends a new row if not present - same convention Planning Engine
-    itself reads via norm()-matched lookups."""
-    control = state["CONTROL"]
-    key_norm = key.strip().upper()
-    for row in control[1:]:
-        if str(row[0]).strip().upper() == key_norm:
-            row[1] = value
-            return
-    control.append([key, value, ""])
+def _now_iso() -> str:
+    import datetime
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
+
+def _require_draft_path() -> str:
+    """Downloads the current draft to a temp file, or 409 if none exists."""
+    if not store.draft_exists():
+        raise HTTPException(status_code=409, detail="Zatím není žádný Draft. Nejdřív nahraj exporty.")
+    path = _tmp()
+    store.download_draft(path)
+    return path
+
+
+async def _save_upload(upload: UploadFile) -> tuple[str, dict]:
+    """Persists an UploadFile to a temp path; returns (path, provenance)."""
+    data = await upload.read()
+    path = _tmp(suffix=os.path.splitext(upload.filename or "")[1] or ".xlsx")
+    with open(path, "wb") as f:
+        f.write(data)
+    return path, {
+        "filename": upload.filename,
+        "bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+
+
+def _stream_sheet(workbook_path: str, sheet_name: str, download_name: str) -> StreamingResponse:
+    src_wb = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
+    try:
+        if sheet_name not in src_wb.sheetnames:
+            raise HTTPException(status_code=404, detail=f"List {sheet_name} chybí.")
+        src_ws = src_wb[sheet_name]
+        out_wb = openpyxl.Workbook()
+        out_ws = out_wb.active
+        out_ws.title = sheet_name[:31]
+        for row in src_ws.iter_rows(values_only=True):
+            out_ws.append(row)
+    finally:
+        src_wb.close()
+    buf = io.BytesIO()
+    out_wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={download_name}"},
+    )
+
+
+# --------------------------------------------------------------------------
+# health / auth / status
+# --------------------------------------------------------------------------
 
 @app.get("/api/health")
 def health():
-    """Unauthenticated deployment self-check: performs the real GitHub
-    workbook download on the server and confirms the file parses. Exposes no
-    business data - only connectivity status - so it can be checked without a
-    login to verify the deployment end-to-end (esp. the >1MB Contents-API
-    download path)."""
+    """Unauthenticated deployment self-check: confirms the latest snapshot
+    (source of truth) downloads and parses. No business data exposed."""
     path = None
     try:
-        path = _with_local_copy()
+        path = store.snapshot_temp()
         size = os.path.getsize(path)
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
         pos_rows = wb["POS_MASTER"].max_row - 1
         wb.close()
-        return {"ok": True, "workbookBytes": size, "posMasterRows": pos_rows}
-    except Exception as e:  # noqa: BLE001 - surface the failure reason for ops
+        return {
+            "ok": True,
+            "workbookBytes": size,
+            "posMasterRows": pos_rows,
+            "publishedVersions": len(store.read_index()),
+            "hasDraft": store.draft_exists(),
+        }
+    except Exception as e:  # noqa: BLE001 - surface reason for ops
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
     finally:
         if path and os.path.exists(path):
@@ -144,101 +196,130 @@ def login(body: LoginRequest):
 
 @app.get("/api/status", dependencies=[Depends(require_auth)])
 def status():
-    path = _with_local_copy()
+    """Current planner state: last published week, published-version count,
+    and whether a draft is waiting."""
+    index = store.read_index()
+    published_weeks = [w for rec in index for w in rec.get("publishedWeeks", [])]
+    return {
+        "lastPublishedWeek": max(published_weeks) if published_weeks else None,
+        "publishedVersions": len(index),
+        "hasDraft": store.draft_exists(),
+        "draftMeta": store.read_draft_meta() if store.draft_exists() else None,
+    }
+
+
+# --------------------------------------------------------------------------
+# 1) upload -> build Draft (resume from latest snapshot + fresh exports)
+# --------------------------------------------------------------------------
+
+@app.post("/api/draft/upload", dependencies=[Depends(require_auth)])
+async def draft_upload(
+    pos_export: UploadFile = File(...),
+    salesapp: list[UploadFile] = File(default=[]),
+):
+    """Builds a fresh Draft: resume from the latest published snapshot, fold
+    in this run's POS export (-> RAW_DATA) and SalesApp exports
+    (-> SALESAPP_IMPORT, deduped by UID), run Import + Compliance. Does NOT
+    plan yet and does NOT touch any published plan."""
+    seed = None
+    pos_path = None
+    sa_paths: list[str] = []
+    draft_path = None
     try:
-        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        mp = wb["MANAGER_PLAN"]
-        pl = wb["PLAN_LIFECYCLE"]
+        pos_path, pos_meta = await _save_upload(pos_export)
+        raw = pipeline.read_export_rows(pos_path)
 
-        mp_header = [c.value for c in next(mp.iter_rows(min_row=1, max_row=1))]
-        mp_week_idx = mp_header.index("WEEK")
-        draft_weeks = sorted({
-            int(row[mp_week_idx]) for row in mp.iter_rows(min_row=2, values_only=True)
-            if row[mp_week_idx] not in (None, "")
-        })
+        sa_exports = []
+        sa_meta = []
+        for f in salesapp:
+            p, m = await _save_upload(f)
+            sa_paths.append(p)
+            sa_exports.append(pipeline.read_export_rows(p))
+            sa_meta.append(m)
 
-        pl_header = [c.value for c in next(pl.iter_rows(min_row=1, max_row=1))]
-        pl_status_idx = pl_header.index("status")
-        pl_week_idx = pl_header.index("week")
-        published_weeks = [
-            int(row[pl_week_idx]) for row in pl.iter_rows(min_row=2, values_only=True)
-            if row and row[pl_status_idx] in ("Published", "Active", "Closed")
-        ]
-        last_published_week = max(published_weeks) if published_weeks else None
+        seed = store.snapshot_temp()  # latest snapshot (or bootstrap)
+        result = pipeline.build_upload_draft(raw, sa_exports, seed_workbook=seed)
 
-        locked = set(published_weeks)
-        pending_draft_weeks = sorted(w for w in draft_weeks if w not in locked)
-
-        return {
-            "lastPublishedWeek": last_published_week,
-            "draftWeeks": pending_draft_weeks,
-            "hasDraft": len(pending_draft_weeks) > 0,
+        draft_path = _tmp()
+        state_xlsx.save_state(result["state"], draft_path)
+        meta = {
+            "uploadedAt": _now_iso(),
+            "posExport": pos_meta,
+            "salesAppExports": sa_meta,
+            "resumedFrom": store.latest_snapshot_repo_path(),
+            "engineVersion": ENGINE_VERSION,
         }
+        store.save_draft(draft_path, "Upload: novy Draft z cerstvych exportu", meta=meta)
+
+        return {"messages": result["messages"], "summary": pipeline._summarize(result["state"], 0, 0)}
     finally:
-        os.remove(path)
+        for p in [seed, pos_path, draft_path, *sa_paths]:
+            if p and os.path.exists(p):
+                os.remove(p)
 
 
-@app.post("/api/generate-plan", dependencies=[Depends(require_auth)])
-def generate_plan(body: GeneratePlanRequest):
-    path = _with_local_copy()
+# --------------------------------------------------------------------------
+# 2) generate -> run Planning on the Draft
+# --------------------------------------------------------------------------
+
+@app.post("/api/draft/generate", dependencies=[Depends(require_auth)])
+def draft_generate(body: GenerateRequest):
+    path = _require_draft_path()
     try:
-        state = xlsx_engine_io.read_state(path)
-        _set_control(state, "CAMPAIGN_START_WEEK", body.start_week)
-        _set_control(state, "CAMPAIGN_LENGTH", body.length)
-
-        wb = MockWorkbook(state)
-        message = planning_engine.run(wb)
-        out = wb.dump()
-
-        xlsx_engine_io.write_state(path, out, {"MANAGER_PLAN"})
-        github_storage.upload_workbook(
-            path, f"Generovat tour plán: týden {body.start_week}, délka {body.length} [MVP cockpit]"
-        )
-        return {"message": message}
+        state = state_xlsx.load_state(path)
+        messages = pipeline.run_planning(state, body.start_week, body.length)
+        state_xlsx.save_state(state, path)
+        store.save_draft(path, f"Generovat tour plan: tyden {body.start_week}, delka {body.length}")
+        return {"messages": messages, "summary": pipeline._summarize(state, body.start_week, body.length)}
     finally:
         os.remove(path)
 
 
-@app.get("/api/candidates", dependencies=[Depends(require_auth)])
-def get_candidates(week: int, technician: str | None = None):
-    """Runs the real Planning Engine for `week` and returns every candidate
-    POS with its engine-computed score + breakdown + selected/not status.
-    Read-only: nothing is written back to GitHub."""
-    path = _with_local_copy()
+# --------------------------------------------------------------------------
+# 3) candidates (read-only; real Planning Engine with observability)
+# --------------------------------------------------------------------------
+
+@app.get("/api/draft/candidates", dependencies=[Depends(require_auth)])
+def draft_candidates(week: int, technician: str | None = None):
+    path = _require_draft_path()
     try:
         return candidates_mod.list_candidates(path, week, technician)
     finally:
         os.remove(path)
 
 
-@app.get("/api/plan/draft", dependencies=[Depends(require_auth)])
-def plan_draft():
-    path = _with_local_copy()
+# --------------------------------------------------------------------------
+# 4) view + manual edits (Draft weeks only; locked weeks are protected)
+# --------------------------------------------------------------------------
+
+@app.get("/api/draft", dependencies=[Depends(require_auth)])
+def draft_view():
+    path = _require_draft_path()
     try:
         return {"rows": plan_io.read_enriched_draft(path)}
     finally:
         os.remove(path)
 
 
-@app.post("/api/plan/remove-pos", dependencies=[Depends(require_auth)])
-def plan_remove_pos(body: RemovePosRequest):
-    path = _with_local_copy()
+@app.post("/api/draft/remove-pos", dependencies=[Depends(require_auth)])
+def draft_remove_pos(body: RemovePosRequest):
+    path = _require_draft_path()
     try:
         try:
             removed = plan_io.remove_pos(path, body.week, body.pos_id, body.technician)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         if removed == 0:
-            raise HTTPException(status_code=404, detail="POS v návrhu nenalezen.")
-        github_storage.upload_workbook(path, f"Odebrat POS {body.pos_id} z návrhu [MVP cockpit]")
+            raise HTTPException(status_code=404, detail="POS v navrhu nenalezen.")
+        store.save_draft(path, f"Odebrat POS {body.pos_id} z navrhu")
         return {"removed": removed}
     finally:
         os.remove(path)
 
 
-@app.post("/api/plan/change-technician", dependencies=[Depends(require_auth)])
-def plan_change_technician(body: ChangeTechnicianRequest):
-    path = _with_local_copy()
+@app.post("/api/draft/change-technician", dependencies=[Depends(require_auth)])
+def draft_change_technician(body: ChangeTechnicianRequest):
+    path = _require_draft_path()
     try:
         try:
             changed = plan_io.change_technician(
@@ -247,57 +328,123 @@ def plan_change_technician(body: ChangeTechnicianRequest):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         if changed == 0:
-            raise HTTPException(status_code=404, detail="POS v návrhu nenalezen.")
-        github_storage.upload_workbook(
-            path, f"Přesunout POS {body.pos_id} na technika {body.new_technician} [MVP cockpit]"
-        )
+            raise HTTPException(status_code=404, detail="POS v navrhu nenalezen.")
+        store.save_draft(path, f"Presunout POS {body.pos_id} na {body.new_technician}")
         return {"changed": changed}
     finally:
         os.remove(path)
 
 
-@app.post("/api/plan/add-pos", dependencies=[Depends(require_auth)])
-def plan_add_pos(body: AddPosRequest):
-    path = _with_local_copy()
+@app.post("/api/draft/add-pos", dependencies=[Depends(require_auth)])
+def draft_add_pos(body: AddPosRequest):
+    path = _require_draft_path()
     try:
         try:
             new_row = plan_io.add_pos(path, body.week, body.day, body.technician, body.pos_id)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        github_storage.upload_workbook(path, f"Přidat POS {body.pos_id} do návrhu [MVP cockpit]")
+        store.save_draft(path, f"Pridat POS {body.pos_id} do navrhu")
         return {"row": new_row}
     finally:
         os.remove(path)
 
 
-@app.get("/api/download/manager-plan", dependencies=[Depends(require_auth)])
-def download_manager_plan():
-    path = _with_local_copy()
+# --------------------------------------------------------------------------
+# 5) publish -> freeze the Draft's lowest week into an immutable snapshot
+# --------------------------------------------------------------------------
+
+@app.post("/api/publish", dependencies=[Depends(require_auth)])
+def publish(body: PublishRequest):
+    path = _require_draft_path()
+    snap_path = None
     try:
-        src_wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        src_ws = src_wb["MANAGER_PLAN"]
+        state = state_xlsx.load_state(path)
+        result = pipeline.run_publish(state)
+        if not result["publishedWeeks"]:
+            raise HTTPException(status_code=400, detail=result["message"])
 
-        out_wb = openpyxl.Workbook()
-        out_ws = out_wb.active
-        out_ws.title = "MANAGER_PLAN"
-        for row in src_ws.iter_rows(values_only=True):
-            out_ws.append(row)
+        snap_path = _tmp()
+        state_xlsx.save_state(state, snap_path)
 
-        buf = io.BytesIO()
-        out_wb.save(buf)
-        buf.seek(0)
-        return StreamingResponse(
-            buf,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=MANAGER_PLAN.xlsx"},
-        )
+        draft_meta = store.read_draft_meta()
+        meta = {
+            "publishedAt": _now_iso(),
+            "publishedWeeks": result["publishedWeeks"],
+            "message": body.message,
+            "engineVersion": ENGINE_VERSION,
+            "sourceExports": {
+                "posExport": draft_meta.get("posExport"),
+                "salesAppExports": draft_meta.get("salesAppExports"),
+            },
+            "resumedFrom": draft_meta.get("resumedFrom"),
+        }
+        record = store.publish_snapshot(snap_path, meta)
+
+        # The draft now reflects the published (locked) state, so the manager
+        # sees the freshly-locked week; the next upload resumes from the new
+        # snapshot regardless.
+        store.save_draft(path, f"Draft po publikaci {record['id']}")
+        return {"published": record, "engineMessage": result["message"]}
+    finally:
+        for p in (path, snap_path):
+            if p and os.path.exists(p):
+                os.remove(p)
+
+
+# --------------------------------------------------------------------------
+# 6) history of published versions
+# --------------------------------------------------------------------------
+
+@app.get("/api/versions", dependencies=[Depends(require_auth)])
+def versions():
+    return {"versions": list(reversed(store.read_index()))}
+
+
+# --------------------------------------------------------------------------
+# 7) download a published (or the draft) MANAGER_PLAN
+# --------------------------------------------------------------------------
+
+@app.get("/api/versions/{version_id}/manager-plan", dependencies=[Depends(require_auth)])
+def download_published_plan(version_id: str):
+    path = _tmp()
+    try:
+        try:
+            store.download_snapshot(version_id, path)
+        except Exception:
+            raise HTTPException(status_code=404, detail=f"Verze {version_id} nenalezena.")
+        return _stream_sheet(path, "MANAGER_PLAN_PUBLISHED", f"MANAGER_PLAN_{version_id}.xlsx")
+    finally:
+        if os.path.exists(path):
+            os.remove(path)
+
+
+@app.get("/api/draft/download", dependencies=[Depends(require_auth)])
+def download_draft_plan():
+    path = _require_draft_path()
+    try:
+        return _stream_sheet(path, "MANAGER_PLAN", "MANAGER_PLAN_draft.xlsx")
     finally:
         os.remove(path)
 
 
+# --------------------------------------------------------------------------
+# rules (config) - read/edit the manager rule tables on the current draft
+# (or the latest snapshot if no draft yet). Not one of the 7 core features,
+# kept working so rule tweaks are possible without opening Excel.
+# --------------------------------------------------------------------------
+
+def _rules_source_path() -> str:
+    path = _tmp()
+    if store.draft_exists():
+        store.download_draft(path)
+    else:
+        store.download_latest_snapshot(path)
+    return path
+
+
 @app.get("/api/rules", dependencies=[Depends(require_auth)])
 def get_rules():
-    path = _with_local_copy()
+    path = _rules_source_path()
     try:
         sheets = rules_io.read_all_rule_sheets(path)
         return {
@@ -313,11 +460,14 @@ def get_rules():
 @app.post("/api/rules", dependencies=[Depends(require_auth)])
 def save_rules(body: SaveRulesRequest):
     if body.sheet not in rules_io.RULE_SHEETS:
-        raise HTTPException(status_code=400, detail=f"Neznámá tabulka pravidel: {body.sheet}")
-    path = _with_local_copy()
+        raise HTTPException(status_code=400, detail=f"Neznama tabulka pravidel: {body.sheet}")
+    if not store.draft_exists():
+        raise HTTPException(status_code=409, detail="Pravidla lze upravit az po nahrani exportu (v Draftu).")
+    path = _tmp()
+    store.download_draft(path)
     try:
         rules_io.write_rule_sheet(path, body.sheet, body.rows)
-        github_storage.upload_workbook(path, f"Upravit {body.sheet} [MVP cockpit]")
+        store.save_draft(path, f"Upravit {body.sheet}")
         return {"ok": True}
     finally:
         os.remove(path)
