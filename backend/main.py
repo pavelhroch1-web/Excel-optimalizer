@@ -288,6 +288,18 @@ def draft_candidates(week: int, technician: str | None = None):
         os.remove(path)
 
 
+@app.get("/api/draft/pos/{pos_id}", dependencies=[Depends(require_auth)])
+def draft_pos_detail(pos_id: str, week: int):
+    """Full read-only diagnostic for one POS for the given week - the same
+    data and score the Planning Engine used, plus why it is / is not a
+    candidate. No new logic; runs the same engine."""
+    path = _require_draft_path()
+    try:
+        return candidates_mod.pos_detail(path, pos_id, week)
+    finally:
+        os.remove(path)
+
+
 # --------------------------------------------------------------------------
 # 4) view + manual edits (Draft weeks only; locked weeks are protected)
 # --------------------------------------------------------------------------

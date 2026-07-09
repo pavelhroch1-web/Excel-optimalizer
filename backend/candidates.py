@@ -127,3 +127,123 @@ def list_candidates(path: str, week: int, technician: str | None = None) -> dict
         "selected": sum(1 for c in captured if c["status"] == "Vybráno"),
         "candidates": captured,
     }
+
+
+def _sheet_index(state: dict, sheet: str) -> tuple[list, dict]:
+    rows = state.get(sheet, [])
+    header = [str(h) for h in rows[0]] if rows else []
+    return rows, {n: i for i, n in enumerate(header)}
+
+
+def _last_compliance(state: dict, pos_id: str) -> dict | None:
+    """Latest COMPLIANCE_LOG row for this POS - the same compliance the
+    engine's inputs carry, no recomputation."""
+    rows, idx = _sheet_index(state, "COMPLIANCE_LOG")
+    if not idx:
+        return None
+    best = None
+    for row in rows[1:]:
+        if str(row[idx["posId"]]) != str(pos_id):
+            continue
+        if best is None or str(row[idx["evaluatedAt"]]) >= str(best[idx["evaluatedAt"]]):
+            best = row
+    if best is None:
+        return None
+    return {
+        "status": best[idx["status"]],
+        "plannedWeek": best[idx["plannedWeek"]],
+        "plannedYear": best[idx["plannedYear"]],
+        "matchedActualDate": best[idx.get("matchedActualDate", -1)] if "matchedActualDate" in idx else "",
+    }
+
+
+def _active_campaigns(state: dict, week: int) -> list[dict]:
+    """ACTIVITY_PLAN campaigns whose window covers `week` - the same rows the
+    Planning Engine reshapes into its hold-back windows."""
+    rows, idx = _sheet_index(state, "ACTIVITY_PLAN")
+    if not idx or "START_WEEK" not in idx or "END_WEEK" not in idx:
+        return []
+    out = []
+    for row in rows[1:]:
+        sw, ew = row[idx["START_WEEK"]], row[idx["END_WEEK"]]
+        try:
+            if sw in ("", None) or ew in ("", None):
+                continue
+            if int(float(sw)) <= week <= int(float(ew)):
+                out.append({
+                    "type": row[idx["TYPE"]] if "TYPE" in idx else "",
+                    "activity": row[idx["ACTIVITY"]] if "ACTIVITY" in idx else "",
+                    "startWeek": int(float(sw)), "endWeek": int(float(ew)),
+                    "priority": row[idx["PRIORITY"]] if "PRIORITY" in idx else "",
+                })
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def pos_detail(path: str, pos_id: str, week: int) -> dict:
+    """Full read-only diagnostic for one POS: exactly the data and score the
+    Planning Engine used for `week`, plus why it is (or is not) a candidate.
+    Runs the SAME engine with both observability hooks; adds no new logic."""
+    pos_id = str(pos_id)
+    state = xlsx_engine_io.read_state(path)
+    _set_control(state, "CAMPAIGN_START_WEEK", week)
+    _set_control(state, "CAMPAIGN_LENGTH", 1)
+
+    wb = MockWorkbook(state)
+    captured: list[dict] = []
+    rejected: list[dict] = []
+    planning_engine.run(wb, candidates_out=captured, rejected_out=rejected)
+
+    scored = next((c for c in captured if str(c["pos"]) == pos_id), None)
+    reject = next((c for c in rejected if str(c["pos"]) == pos_id), None)
+
+    # POS_MASTER identity (also covers a POS that is neither scored nor
+    # rejected - e.g. not present at all).
+    pm_rows, pm_idx = _sheet_index(state, "POS_MASTER")
+    master = None
+    for row in pm_rows[1:]:
+        if str(row[pm_idx["posId"]]) == pos_id:
+            master = row
+            break
+    if master is None and scored is None and reject is None:
+        return {"found": False, "pos": pos_id}
+
+    def m(col):
+        return master[pm_idx[col]] if master is not None and col in pm_idx else None
+
+    if scored is not None:
+        detail = dict(scored)
+        detail["isCandidate"] = True
+        detail["explanation"] = _explain(scored)
+    elif reject is not None:
+        detail = dict(reject)
+        detail["isCandidate"] = False
+        detail["score"] = None
+        detail["explanation"] = "Není kandidát: " + reject.get("rejectReason", "")
+    else:
+        detail = {
+            "pos": pos_id, "nazev": m("nazev"), "market": m("market"),
+            "terminalType": m("terminalType"), "kategorie": m("category"),
+            "classification": m("classification"), "tech": m("assignedTechnician"),
+            "ppt": m("ppt"), "weeksSinceLastVisit": m("weeksSinceLastVisit"),
+            "status": "Neznámý", "isCandidate": False, "score": None,
+            "explanation": "POS existuje, ale nebyl v tomto běhu vyhodnocen.",
+        }
+
+    # Enrichment straight from the engine's own input sheets:
+    detail["lastRealVisitDate"] = m("lastRealVisitDate") or detail.get("lastRealVisitDate", "")
+    detail["assignedTechnician"] = m("assignedTechnician")
+    detail["managerOverrideTechnician"] = m("managerOverrideTechnician")
+    detail["managerOverrideType"] = m("managerOverrideType")
+    detail["posStatus"] = m("status")
+    detail["street"] = m("street")
+    detail["city"] = m("city")
+    detail["lastCompliance"] = _last_compliance(state, pos_id)
+    detail["activeCampaigns"] = _active_campaigns(state, week)
+
+    _, history = _pos_master_extras(path)
+    detail["visitHistory"] = history.get(pos_id, [])
+    detail["week"] = week
+    detail["found"] = True
+    return detail

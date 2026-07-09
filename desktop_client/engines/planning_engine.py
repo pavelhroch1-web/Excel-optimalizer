@@ -67,15 +67,29 @@ def _assert_breakdown(item) -> None:
         )
 
 
-def run(workbook: MockWorkbook, candidates_out: "Optional[list]" = None) -> str:
+def run(
+    workbook: MockWorkbook,
+    candidates_out: "Optional[list]" = None,
+    rejected_out: "Optional[list]" = None,
+) -> str:
     """Runs the Planning Engine exactly as before. `candidates_out` is an
     OPTIONAL observability hook (added 2026-07-11 for the web "Kandidáti POS"
     screen): when a list is passed, run() appends one dict per (technician,
     week, candidate POS) describing that POS's score, its component breakdown,
     and whether/why it was selected - a pure read-out of decisions the engine
-    already makes. When None (the normal path, and every equivalence-harness
-    call), run() behaves byte-for-byte identically - nothing about selection
-    or the MANAGER_PLAN output depends on this argument. Verified unchanged via
+    already makes.
+
+    `rejected_out` is a second OPTIONAL observability hook (added for the POS
+    Detail panel): when a list is passed, run() appends one dict per POS that
+    was filtered OUT before scoring, with the exact reason the engine itself
+    used at that branch (inactive/closed, blacklist, FORCE_EXCLUDE, disabled
+    terminal type, disabled partner, category EXCLUDE). It re-reads the same
+    POS_MASTER cells and re-evaluates the same pure filter functions the
+    engine just used - no new decision logic.
+
+    When both are None (the normal path, and every equivalence-harness call),
+    run() behaves byte-for-byte identically - nothing about selection or the
+    MANAGER_PLAN output depends on either argument. Verified unchanged via
     tools/sim/compare_engines.py."""
     def read_table(sheet_name: str) -> list[list]:
         ws = workbook.get_worksheet(sheet_name)
@@ -342,17 +356,45 @@ def run(workbook: MockWorkbook, candidates_out: "Optional[list]" = None) -> str:
 
     groups: dict[str, list[POSItem]] = {}
 
+    def _record_rejection(r, reason: str) -> None:
+        """Read-out only (rejected_out): capture WHY a POS was filtered out,
+        re-reading the same POS_MASTER cells the engine just used. Never
+        called when rejected_out is None, so it cannot affect selection."""
+        cat = _s(_at(r, midx("category")))
+        wsv = _at(r, midx("weeksSinceLastVisit"))
+        tech_ov = _at(r, midx("managerOverrideTechnician"))
+        rejected_out.append({
+            "pos": _s(_at(r, midx("posId"))),
+            "nazev": _s(_at(r, midx("nazev"))),
+            "market": _s(_at(r, midx("market"))),
+            "terminalType": _s(_at(r, midx("terminalType"))),
+            "kategorie": cat,
+            "categoryRule": category_rule(category_rules_table, norm(cat)),
+            "classification": _s(_at(r, midx("classification"))),
+            "tech": _s(tech_ov) if tech_ov else _s(_at(r, midx("assignedTechnician"))),
+            "ppt": _num(_at(r, midx("ppt"))),
+            "weeksSinceLastVisit": None if wsv in ("", None) else _js_number(wsv),
+            "status": "Nezařazeno",
+            "rejectReason": reason,
+        })
+
     for i in range(1, len(pos_master)):
         r = pos_master[i]
         if not _at(r, midx("posId")):
             continue
         if _s(_at(r, midx("status"))) != "Active":
+            if rejected_out is not None:
+                _record_rejection(r, f"Neaktivní / uzavřený POS (status={_s(_at(r, midx('status')))})")
             continue
         if _s(_at(r, midx("posId"))) in blacklisted_pos:
+            if rejected_out is not None:
+                _record_rejection(r, "Na blacklistu")
             continue
 
         override_type = norm(_s(_at(r, midx("managerOverrideType")) or ""))
         if override_type == "FORCE_EXCLUDE":
+            if rejected_out is not None:
+                _record_rejection(r, "Ručně vyřazeno manažerem (FORCE_EXCLUDE)")
             continue
         force_include = override_type == "FORCE_INCLUDE"
 
@@ -365,6 +407,15 @@ def run(workbook: MockWorkbook, candidates_out: "Optional[list]" = None) -> str:
         )
 
         if not passes_filters and not force_include:
+            if rejected_out is not None:
+                reasons = []
+                if not terminal_ok(_s(_at(r, midx("terminalType")))):
+                    reasons.append("vypnutý typ terminálu")
+                if not market_ok(_s(_at(r, midx("market")))):
+                    reasons.append("vypnutý partner")
+                if rule == "EXCLUDE":
+                    reasons.append("kategorie EXCLUDE")
+                _record_rejection(r, "; ".join(reasons) or "nevyhovuje plánovacím filtrům")
             continue
 
         override_tech = _at(r, midx("managerOverrideTechnician"))

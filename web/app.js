@@ -165,10 +165,12 @@ on("generate-form", "submit", async (e) => {
 // ---- 3) candidates --------------------------------------------------------
 
 let candCache = [];
+let candWeek = null;
 
 on("candidates-form", "submit", async (e) => {
   e.preventDefault();
   const week = parseInt(document.getElementById("cand-week").value, 10);
+  candWeek = week;
   const tech = document.getElementById("cand-technician").value.trim();
   setResult("cand-result", "Počítám kandidáty (stejný engine jako Generovat)…", "");
   try {
@@ -209,9 +211,17 @@ function renderCandidates() {
         fmt(c.score), fmt(c.pptComponent), fmt(c.coreBonus), fmt(c.aBonus), fmt(c.gapPenalty),
         fmt(c.neglectedBonus), fmt(c.urgencyBoost), fmt(c.gpsBonus), c.explanation || "",
       ];
-      cells.forEach((v) => {
+      cells.forEach((v, i) => {
         const td = document.createElement("td");
-        td.textContent = v;
+        if (i === 1) {
+          const a = document.createElement("span");
+          a.className = "pos-link";
+          a.textContent = v;
+          a.addEventListener("click", () => openPosDetail(c.pos, candWeek));
+          td.appendChild(a);
+        } else {
+          td.textContent = v;
+        }
         tr.appendChild(td);
       });
       body.appendChild(tr);
@@ -234,9 +244,17 @@ async function loadDraft() {
         r.PPT, r.lastRealVisitDate || "", r.weeksSinceLastVisit ?? "",
         r.terminalType || "", r.market || "", r.REASON_FRIENDLY || r.REASON || "",
       ];
-      cells.forEach((v) => {
+      cells.forEach((v, i) => {
         const td = document.createElement("td");
-        td.textContent = v ?? "";
+        if (i === 2) {
+          const a = document.createElement("span");
+          a.className = "pos-link";
+          a.textContent = v ?? "";
+          a.addEventListener("click", () => openPosDetail(r.POS, r.WEEK));
+          td.appendChild(a);
+        } else {
+          td.textContent = v ?? "";
+        }
         tr.appendChild(td);
       });
       const tdBtn = document.createElement("td");
@@ -454,6 +472,115 @@ on("save-rules-btn", "click", async () => {
     setResult("rules-result", "Chyba: " + err.message, "err");
   }
 });
+
+// ---- POS Detail panel (read-only diagnostic) ------------------------------
+
+const num = (n) => (n === null || n === undefined || n === "" ? "—" : Number(n).toLocaleString("cs-CZ"));
+const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+function closePosDetail() {
+  document.getElementById("pos-detail-overlay").classList.add("hidden");
+}
+on("pd-close", "click", closePosDetail);
+on("pos-detail-overlay", "click", (e) => {
+  if (e.target.id === "pos-detail-overlay") closePosDetail();
+});
+
+async function openPosDetail(posId, week) {
+  const overlay = document.getElementById("pos-detail-overlay");
+  const bodyEl = document.getElementById("pd-body");
+  document.getElementById("pd-title").textContent = "POS " + posId;
+  bodyEl.innerHTML = "<p class='pd-sub'>Načítám diagnostiku…</p>";
+  overlay.classList.remove("hidden");
+  if (!week) {
+    bodyEl.innerHTML = "<p class='result err'>Nejdřív zadej týden v sekci Kandidáti nebo otevři POS z návrhu.</p>";
+    return;
+  }
+  try {
+    const d = await apiJson("/api/draft/pos/" + encodeURIComponent(posId) + "?week=" + week);
+    if (!d.found) {
+      bodyEl.innerHTML = "<p class='result err'>POS nebyl nalezen v datech.</p>";
+      return;
+    }
+    document.getElementById("pd-title").textContent = "POS " + d.pos + " · " + (d.nazev || "");
+    bodyEl.innerHTML = renderPosDetail(d, week);
+  } catch (err) {
+    bodyEl.innerHTML = "<p class='result err'>Chyba: " + esc(err.message) + "</p>";
+  }
+}
+
+function renderPosDetail(d, week) {
+  const verdictClass = d.status === "Vybráno" ? "sel"
+    : (String(d.status).startsWith("Odloženo") ? "hold" : "no");
+  const rows = [
+    ["Partner / síť", d.market],
+    ["Typ terminálu", d.terminalType],
+    ["Kategorie", esc(d.kategorie) + (d.categoryRule ? ` <span class="pd-chip">${esc(d.categoryRule)}</span>` : "")],
+    ["Klasifikace", d.classification],
+    ["Technik", d.managerOverrideTechnician || d.assignedTechnician || d.tech || "—"],
+    ["Stav POS", d.posStatus],
+    ["Adresa", [d.street, d.city].filter(Boolean).join(", ")],
+    ["Poslední návštěva", d.lastRealVisitDate || "—"],
+    ["Týdnů od návštěvy", d.weeksSinceLastVisit ?? "—"],
+    ["PPT", num(d.ppt)],
+  ];
+  let html = "";
+  html += `<div class="pd-verdict ${verdictClass}"><strong>${esc(d.status)}</strong> · ${esc(d.explanation || "")}</div>`;
+  html += `<p class="pd-sub">Diagnostika pro týden ${week} – přesně data a rozhodnutí Planning Engine.</p>`;
+
+  html += `<dl class="pd-grid">` +
+    rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v ?? "—"}</dd>`).join("") + `</dl>`;
+
+  // compliance
+  if (d.lastCompliance) {
+    const c = d.lastCompliance;
+    html += `<div class="pd-section">Poslední compliance</div>`;
+    html += `<dl class="pd-grid"><dt>Stav</dt><dd>${esc(c.status)}</dd>` +
+      `<dt>Plánovaný týden</dt><dd>${esc(c.plannedWeek)}/${esc(c.plannedYear)}</dd>` +
+      (c.matchedActualDate ? `<dt>Reálná návštěva</dt><dd>${esc(c.matchedActualDate)}</dd>` : "") + `</dl>`;
+  }
+
+  // active campaigns
+  html += `<div class="pd-section">Aktivní kampaně (týden ${week})</div>`;
+  if ((d.activeCampaigns || []).length) {
+    html += d.activeCampaigns.map((c) =>
+      `<span class="pd-chip">${esc(c.type)} · ${esc(c.activity)} (${c.startWeek}–${c.endWeek})</span>`).join("");
+  } else {
+    html += `<p class="pd-sub">Žádná aktivní kampaň pro tento týden.</p>`;
+  }
+
+  // score breakdown (only for scored candidates)
+  if (d.isCandidate && d.score !== null && d.score !== undefined) {
+    const comp = [
+      ["CORE bonus", d.coreBonus],
+      ["Klasifikace A", d.aBonus],
+      ["PPT složka", d.pptComponent],
+      ["Penalizace min. rozestup", d.gapPenalty],
+      ["Bonus zanedbáno", d.neglectedBonus],
+      ["Základní skóre", d.baseScore],
+      ["Urgence (boost)", d.urgencyBoost],
+      ["GPS shluk (bonus)", d.gpsBonus],
+    ];
+    html += `<div class="pd-section">Rozpad skóre po pravidlech</div>`;
+    html += `<table class="pd-score-table"><tbody>` +
+      comp.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${num(v)}</td></tr>`).join("") +
+      `<tr class="total"><td>Výsledné skóre</td><td>${num(d.score)}</td></tr></tbody></table>`;
+    if (d.mandatoryRuleId) {
+      html += `<p class="pd-sub">Povinné pravidlo (cadence): <span class="pd-chip">${esc(d.mandatoryRuleId)}</span></p>`;
+    }
+  } else {
+    html += `<div class="pd-section">Skóre</div><p class="pd-sub">POS není kandidát – engine ho vyřadil před bodováním, proto nemá skóre.</p>`;
+  }
+
+  // visit history
+  if ((d.visitHistory || []).length) {
+    html += `<div class="pd-section">Poslední návštěvy (SalesApp)</div>`;
+    html += `<table class="pd-score-table"><tbody>` +
+      d.visitHistory.slice(0, 8).map((v) =>
+        `<tr><td>${esc(v.date)}</td><td>${esc(v.executor || "")}</td></tr>`).join("") + `</tbody></table>`;
+  }
+  return html;
+}
 
 // ---- boot -----------------------------------------------------------------
 
