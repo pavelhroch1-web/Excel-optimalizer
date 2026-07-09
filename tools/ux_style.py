@@ -184,6 +184,13 @@ EDITABLE_COLUMNS = {
 DROPDOWNS = {
     "TERMINAL_RULES": {"ACTIVE": (["YES", "NO"], False)},
     "MARKET_RULES": {"ACTIVE": (["YES", "NO"], False)},
+    # Confirmed (product owner, 2026-07-11: "mam tam ty terminal rules, ale
+    # nemam tam moznost zapnout treba to 1CD... chci aby to fungovalo fak
+    # dost smooth") - categoryRule()'s only 3 meaningful return values (see
+    # office-scripts/shared/core.ts): CORE (guaranteed/mandatory), EXCLUDE
+    # (never planned), anything else (incl. NORMAL) falls into ordinary
+    # scoring. Same YES/NO-style dropdown treatment as TERMINAL_RULES.ACTIVE.
+    "CATEGORY_RULES": {"RULE": (["CORE", "NORMAL", "EXCLUDE"], False)},
     "ACTIVITY_PLAN": {"TYPE": (["LOS", "LOT"], False)},
     "CADENCE_RULES": {
         "active": (["YES", "NO"], False),
@@ -256,6 +263,14 @@ IMPORT_HUB_GUIDANCE = {
         "Zapni/vypni Ano (YES)/Ne (NO), jaké typy terminálů se mají v dalším běhu Planning "
         "Engine vůbec uvažovat jako kandidáti na návštěvu. Změna se projeví hned při příštím "
         "spuštění Planning Engine, nic dalšího se nemusí nastavovat."
+    ),
+    "CATEGORY_RULES": (
+        "Vyber ze seznamu CORE (povinně naplánováno), NORMAL (běžné bodování) nebo EXCLUDE "
+        "(nikdy nenaplánováno) pro každou kategorii. Chceš-li \"zapnout\" třeba 1CD, stačí "
+        "změnit jeho řádek z EXCLUDE na NORMAL nebo CORE - projeví se hned při příštím běhu "
+        "Planning Engine, nic dalšího se nemusí nastavovat. Řádek STARTS_1 platí jako záloha "
+        "pro všechny kategorie začínající na \"1\", které tu nemají svůj vlastní řádek; řádek "
+        "\"*\" je úplně poslední záloha pro cokoliv ostatního."
     ),
     "BLACKLIST": (
         "Vlož sem POS ID provozoven, které chceš úplně vynechat z plánování, bez ohledu na "
@@ -1668,13 +1683,13 @@ def build_performance_sheet(wb, n_rows=60):
     ws = wb.create_sheet("PERFORMANCE")
     ws.sheet_view.showGridLines = False
     ws.sheet_view.showRowColHeaders = False
-    for col in "CDEFGHIJKLMNOPQR":
+    for col in "CDEFGHIJKLMNOPQRS":
         ws.column_dimensions[col].width = 13
     build_nav_rail(ws, "PERFORMANCE")
 
     build_dashboard_banner(
         ws, "PERFORMANCE", "Srovnání všech techniků - řaď a filtruj přímo v tabulce (Excel AutoFilter)",
-        col_start="C", col_end="R",
+        col_start="C", col_end="S",
     )
     ws.freeze_panes = "C9"
 
@@ -1705,8 +1720,15 @@ def build_performance_sheet(wb, n_rows=60):
         "Technik", "Region", "Naplánováno", "Realizováno", "Splněno včas", "Splněno pozdě",
         "Nesplněno", "Navíc", "Compliance %", "Dlouhodobý průměr", "Trend", "Flaká riziko",
         "Km/den (nejhorší)", "POS v kampani", "Hotovo", "Chybí",
+        # Středisko (RSA/RSC/RSE...) - product owner, 2026-07-11: "do filtrů
+        # dej podle střediska (typicky to tam máš jako oblast) RSC, RSA
+        # apod." - appended after the existing columns so it doesn't shift
+        # anything; a native Table column gets Excel's AutoFilter dropdown
+        # for free, no separate filter UI needed (see docs/BUSINESS_RULES.md
+        # section 24).
+        "Středisko",
     ]
-    for col, label in zip("CDEFGHIJKLMNOPQR", headers):
+    for col, label in zip("CDEFGHIJKLMNOPQRS", headers):
         ws[f"{col}{header_row}"] = label
 
     # POS v kampani / Hotovo / Chybí (product owner, 2026-07-11: "dashboard
@@ -1740,9 +1762,10 @@ def build_performance_sheet(wb, n_rows=60):
         ws[f"P{r}"] = f'=IF({TS}!$A${sr}="","",SUMPRODUCT({pm_tech_match_row}*({pm_active_row})))'
         ws[f"Q{r}"] = f'=IF({TS}!$A${sr}="","",SUMPRODUCT({pm_tech_match_row}*({pm_active_row})*$T$2:$T$20001))'
         ws[f"R{r}"] = f'=IF({TS}!$A${sr}="","",P{r}-Q{r})'
+        ws[f"S{r}"] = f'=IF({TS}!$A${sr}="","",{TS}!AD{sr})'
 
     last_row = first_data_row + n_rows - 1
-    table_ref = f"C{header_row}:R{last_row}"
+    table_ref = f"C{header_row}:S{last_row}"
     table = Table(displayName="PerformanceTable", ref=table_ref)
     table.tableStyleInfo = TableStyleInfo(
         name="TableStyleMedium2", showFirstColumn=False, showLastColumn=False,

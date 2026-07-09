@@ -497,6 +497,12 @@ function main(workbook: ExcelScript.Workbook) {
   const pmHeaders = posMaster.length > 0 ? (posMaster[0] as string[]).map((h) => String(h)) : [];
   const pmIdx = (name: string) => pmHeaders.indexOf(name);
   let posArea: { [posId: string]: string } = {};
+  // Středisko (RSA/RSC/RSE...) - POS_MASTER.posArea, distinct from the
+  // district-name "area" column above (product owner, 2026-07-11: "do
+  // filtrů dej podle střediska (typicky to tam máš jako oblast) RSC, RSA
+  // apod."). "area" stays district-level for the existing regional-
+  // underperformance advisor logic; this is a separate, appended field.
+  let posStredisko: { [posId: string]: string } = {};
   let posTechnician: { [posId: string]: string } = {};
   let posName: { [posId: string]: string } = {};
   let posGps: { [posId: string]: { x: number; y: number } } = {};
@@ -512,6 +518,7 @@ function main(workbook: ExcelScript.Workbook) {
       continue;
     }
     posArea[posId] = String(row[pmIdx("area")] ?? "");
+    posStredisko[posId] = String(row[pmIdx("posArea")] ?? "");
     posName[posId] = String(row[pmIdx("nazev")] ?? "");
     const override = String(row[pmIdx("managerOverrideTechnician")] ?? "");
     posTechnician[posId] = override || String(row[pmIdx("assignedTechnician")] ?? "");
@@ -532,6 +539,7 @@ function main(workbook: ExcelScript.Workbook) {
     year: number;
     week: number;
     areaCounts: { [area: string]: number };
+    strediskoCounts: { [stredisko: string]: number };
     plannedVisits: number;
     realizedVisits: number;
     splnenoVcas: number;
@@ -563,6 +571,7 @@ function main(workbook: ExcelScript.Workbook) {
         year,
         week,
         areaCounts: {},
+        strediskoCounts: {},
         plannedVisits: 0,
         realizedVisits: 0,
         splnenoVcas: 0,
@@ -613,6 +622,28 @@ function main(workbook: ExcelScript.Workbook) {
   // route-efficiency estimate (see file header).
   // ==========================================================================
 
+  // Fixed 2026-07-11: MANAGER_PLAN_PUBLISHED's DATE column is written by
+  // PlanningEngine.ts as a Czech-locale STRING (toLocaleDateString("cs-CZ"),
+  // "D. M. YYYY"), not a real Date - a strict `instanceof Date` check here
+  // silently discarded every published-plan row (plannedVisits/region both
+  // stayed 0/blank for every technician). Same root cause and fix as
+  // ComplianceEngine.ts's parsePlanDate() - see docs/BUSINESS_RULES.md
+  // section 24. A naive `new Date(string)` fallback is UNSAFE: it silently
+  // misreads the Czech D.M order as US M.D (verified: "1. 6. 2026" -> 6
+  // January, not 1 June).
+  function parsePlanDate(v: unknown): Date | null {
+    if (v instanceof Date) {
+      return v;
+    }
+    if (typeof v == "string" && v.trim()) {
+      const m = v.trim().match(/^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})$/);
+      if (m) {
+        return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+      }
+    }
+    return null;
+  }
+
   const mpHeaders = managerPlanPublished.length > 0 ? (managerPlanPublished[0] as string[]).map((h) => String(h)) : [];
   const mpIdx = (name: string) => mpHeaders.indexOf(name);
   let plannedOrderByTechDate: { [key: string]: string[] } = {};
@@ -625,8 +656,8 @@ function main(workbook: ExcelScript.Workbook) {
     const row = managerPlanPublished[i];
     const tech = String(row[mpIdx("TECHNICIAN")] ?? "");
     const posId = String(row[mpIdx("POS")] ?? "");
-    const dateVal = row[mpIdx("DATE")];
-    if (!tech || !(dateVal instanceof Date)) {
+    const dateVal = parsePlanDate(row[mpIdx("DATE")]);
+    if (!tech || dateVal === null) {
       continue;
     }
     const dateKey = dateVal.toISOString().slice(0, 10);
@@ -648,6 +679,10 @@ function main(workbook: ExcelScript.Workbook) {
     const area = posArea[posId] || "";
     if (area) {
       bucket.areaCounts[area] = (bucket.areaCounts[area] || 0) + 1;
+    }
+    const stredisko = posStredisko[posId] || "";
+    if (stredisko) {
+      bucket.strediskoCounts[stredisko] = (bucket.strediskoCounts[stredisko] || 0) + 1;
     }
   }
 
@@ -976,6 +1011,14 @@ function main(workbook: ExcelScript.Workbook) {
         topAreaCount = b.areaCounts[area];
       }
     }
+    let topStredisko = "";
+    let topStrediskoCount = 0;
+    for (const stredisko of Object.keys(b.strediskoCounts)) {
+      if (b.strediskoCounts[stredisko] > topStrediskoCount) {
+        topStredisko = stredisko;
+        topStrediskoCount = b.strediskoCounts[stredisko];
+      }
+    }
     const compliancePercent = b.plannedVisits > 0 ? Math.round((b.realizedVisits / b.plannedVisits) * 1000) / 10 : 0;
     const kmByDay = b.possByDay.map((posIds, dayIdx) => routeKmForDay(b.technician, b.year, b.week, dayIdx, posIds));
     // MONITORING EFEKTIVITY (product owner, 2026-07-09, "vedoucí Field Force
@@ -1094,6 +1137,7 @@ function main(workbook: ExcelScript.Workbook) {
       volumeFlag, pptDensityFlag, durationFlag, activeSignals, combinedRiskFlag,
       workSpanHoursByDay[0] ?? "", workSpanHoursByDay[1] ?? "", workSpanHoursByDay[2] ?? "", workSpanHoursByDay[3] ?? "", workSpanHoursByDay[4] ?? "",
       idleHoursByDay[0] ?? "", idleHoursByDay[1] ?? "", idleHoursByDay[2] ?? "", idleHoursByDay[3] ?? "", idleHoursByDay[4] ?? "",
+      topStredisko,
     ]);
   }
 
@@ -1127,9 +1171,12 @@ function main(workbook: ExcelScript.Workbook) {
     // span and idle time per day, from SalesApp Started at/Finished at.
     "workSpanHoursMon", "workSpanHoursTue", "workSpanHoursWed", "workSpanHoursThu", "workSpanHoursFri",
     "idleHoursMon", "idleHoursTue", "idleHoursWed", "idleHoursThu", "idleHoursFri",
+    // Středisko (RSA/RSC/RSE...) - appended at the end, product owner
+    // 2026-07-11, see docs/BUSINESS_RULES.md section 24.
+    "stredisko",
   ];
   const outWs = workbook.getWorksheet("TECHNICIAN_PERFORMANCE_LOG");
-  outWs.getRange("A2:BG100000").clear(ExcelScript.ClearApplyTo.contents);
+  outWs.getRange("A2:BH100000").clear(ExcelScript.ClearApplyTo.contents);
   outWs.getRangeByIndexes(0, 0, 1, headerRow.length).setValues([headerRow]);
   if (outRows.length > 0) {
     outWs.getRangeByIndexes(1, 0, outRows.length, headerRow.length).setValues(outRows);
@@ -1149,7 +1196,7 @@ function main(workbook: ExcelScript.Workbook) {
   // ==========================================================================
 
   interface TechWeekEntry {
-    year: number; week: number; region: string;
+    year: number; week: number; region: string; stredisko: string;
     plannedVisits: number; realizedVisits: number;
     splnenoVcas: number; splnenoPozde: number; nesplneno: number; navicEvidovano: number;
     compliancePercent: number;
@@ -1169,6 +1216,14 @@ function main(workbook: ExcelScript.Workbook) {
       if (b.areaCounts[area] > topAreaCount) {
         topArea = area;
         topAreaCount = b.areaCounts[area];
+      }
+    }
+    let topStredisko = "";
+    let topStrediskoCount = 0;
+    for (const stredisko of Object.keys(b.strediskoCounts)) {
+      if (b.strediskoCounts[stredisko] > topStrediskoCount) {
+        topStredisko = stredisko;
+        topStrediskoCount = b.strediskoCounts[stredisko];
       }
     }
     const compliancePercent = b.plannedVisits > 0 ? Math.round((b.realizedVisits / b.plannedVisits) * 1000) / 10 : 0;
@@ -1205,7 +1260,7 @@ function main(workbook: ExcelScript.Workbook) {
       byTechWeeks[b.technician] = [];
     }
     byTechWeeks[b.technician].push({
-      year: b.year, week: b.week, region: topArea,
+      year: b.year, week: b.week, region: topArea, stredisko: topStredisko,
       plannedVisits: b.plannedVisits, realizedVisits: b.realizedVisits,
       splnenoVcas: b.splnenoVcas, splnenoPozde: b.splnenoPozde,
       nesplneno: b.nesplneno, navicEvidovano: b.navicEvidovano,
@@ -1331,6 +1386,7 @@ function main(workbook: ExcelScript.Workbook) {
       longRunAvgPptDensityVsPeerPercent ?? "", pptDensityFlagForSummary,
       longRunAvgDurationVsPeerPercent ?? "", durationFlagForSummary,
       activeSignalsForSummary, combinedRiskFlagForSummary,
+      latest.stredisko,
     ]);
   }
   const summaryHeaderRow = [
@@ -1347,9 +1403,12 @@ function main(workbook: ExcelScript.Workbook) {
     "longRunAvgPptDensityVsPeerPercent", "pptDensityFlag",
     "longRunAvgDurationVsPeerPercent", "durationFlag",
     "activeSignalCount", "combinedRiskFlag",
+    // Středisko (RSA/RSC/RSE...) - appended at the end, product owner
+    // 2026-07-11, see docs/BUSINESS_RULES.md section 24.
+    "stredisko",
   ];
   const summaryWs = workbook.getWorksheet("TECHNICIAN_PERFORMANCE_SUMMARY");
-  summaryWs.getRange("A2:AC100000").clear(ExcelScript.ClearApplyTo.contents);
+  summaryWs.getRange("A2:AD100000").clear(ExcelScript.ClearApplyTo.contents);
   summaryWs.getRangeByIndexes(0, 0, 1, summaryHeaderRow.length).setValues([summaryHeaderRow]);
   if (summaryRows.length > 0) {
     summaryWs.getRangeByIndexes(1, 0, summaryRows.length, summaryHeaderRow.length).setValues(summaryRows);

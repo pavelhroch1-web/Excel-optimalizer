@@ -8,6 +8,7 @@ intentionally does not re-explain it, only mirrors the logic.
 from __future__ import annotations
 
 import datetime
+import re
 
 from .core_logic import GeoPoint, compute_optimal_route_km, distance_km, iso_now, iso_week_number, latest_by_key, norm
 from .dates_logic import iso_monday
@@ -37,6 +38,7 @@ class Bucket:
         self.year = year
         self.week = week
         self.areaCounts: dict[str, int] = {}
+        self.strediskoCounts: dict[str, int] = {}
         self.plannedVisits = 0
         self.realizedVisits = 0
         self.splnenoVcas = 0
@@ -66,6 +68,36 @@ def _to_date(v) -> datetime.date | None:
         return datetime.date.fromisoformat(str(v)[:10])
     except (ValueError, TypeError):
         return None
+
+
+_CZ_DATE_RE = re.compile(r"^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})$")
+
+
+def _parse_plan_date(v) -> datetime.date | None:
+    """Parses MANAGER_PLAN_PUBLISHED's DATE column specifically - written by
+    PlanningEngine.ts as a Czech-locale STRING (toLocaleDateString("cs-CZ"),
+    "D. M. YYYY"), not a real Date. _to_date()'s ISO-only fromisoformat()
+    fails silently on this format, which zeroed out plannedVisits/region for
+    every published plan (found 2026-07-11, same bug/fix as
+    ComplianceEngine.ts/compliance_engine.py's _parse_plan_date - see
+    docs/BUSINESS_RULES.md section 24)."""
+    if isinstance(v, datetime.datetime):
+        return v.date()
+    if isinstance(v, datetime.date):
+        return v
+    if isinstance(v, str) and v.strip():
+        m = _CZ_DATE_RE.match(v.strip())
+        if m:
+            day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            try:
+                return datetime.date(year, month, day)
+            except ValueError:
+                return None
+        try:
+            return datetime.date.fromisoformat(v.strip()[:10])
+        except ValueError:
+            return None
+    return None
 
 
 def _parse_cell_datetime(v) -> datetime.datetime | None:
@@ -157,6 +189,11 @@ def run(workbook: MockWorkbook) -> str:
         return pm_headers.index(name) if name in pm_headers else -1
 
     pos_area: dict[str, str] = {}
+    # Středisko (RSA/RSC/RSE...) - POS_MASTER.posArea, distinct from the
+    # district-name "area" column above (product owner, 2026-07-11: "do
+    # filtrů dej podle střediska (typicky to tam máš jako oblast) RSC, RSA
+    # apod."). See office-scripts/PerformanceEngine.ts's identical comment.
+    pos_stredisko: dict[str, str] = {}
     pos_technician: dict[str, str] = {}
     pos_name: dict[str, str] = {}
     pos_gps: dict[str, tuple[float, float]] = {}
@@ -169,6 +206,7 @@ def run(workbook: MockWorkbook) -> str:
         if not pos_id:
             continue
         pos_area[pos_id] = str(_at(row, pm_idx("area")) or "")
+        pos_stredisko[pos_id] = str(_at(row, pm_idx("posArea")) or "")
         pos_name[pos_id] = str(_at(row, pm_idx("nazev")) or "")
         override = str(_at(row, pm_idx("managerOverrideTechnician")) or "")
         pos_technician[pos_id] = override or str(_at(row, pm_idx("assignedTechnician")) or "")
@@ -215,7 +253,7 @@ def run(workbook: MockWorkbook) -> str:
         tech = str(_at(row, mp_idx("TECHNICIAN")) or "")
         pos_id = str(_at(row, mp_idx("POS")) or "")
         date_val = _at(row, mp_idx("DATE"))
-        date = _to_date(date_val)
+        date = _parse_plan_date(date_val)
         if not tech or date is None:
             continue
         date_key = date.isoformat()[:10]
@@ -233,6 +271,9 @@ def run(workbook: MockWorkbook) -> str:
         area = pos_area.get(pos_id, "")
         if area:
             bucket.areaCounts[area] = bucket.areaCounts.get(area, 0) + 1
+        stredisko = pos_stredisko.get(pos_id, "")
+        if stredisko:
+            bucket.strediskoCounts[stredisko] = bucket.strediskoCounts.get(stredisko, 0) + 1
 
     # ==========================================================================
     # COMPLIANCE_LOG -> dedupe, then aggregate realized/status counts
@@ -448,6 +489,12 @@ def run(workbook: MockWorkbook) -> str:
             if cnt > top_area_count:
                 top_area = area
                 top_area_count = cnt
+        top_stredisko = ""
+        top_stredisko_count = 0
+        for stredisko, cnt in b.strediskoCounts.items():
+            if cnt > top_stredisko_count:
+                top_stredisko = stredisko
+                top_stredisko_count = cnt
         compliance_percent = round((b.realizedVisits / b.plannedVisits) * 1000) / 10 if b.plannedVisits > 0 else 0
         km_by_day = [route_km_for_day(b.technician, b.year, b.week, i, pos_ids) for i, pos_ids in enumerate(b.possByDay)]
         optimal_km_by_day = [optimal_route_km_for_day(pos_ids) for pos_ids in b.possByDay]
@@ -545,6 +592,7 @@ def run(workbook: MockWorkbook) -> str:
             idle_hours_by_day[2] if idle_hours_by_day[2] is not None else "",
             idle_hours_by_day[3] if idle_hours_by_day[3] is not None else "",
             idle_hours_by_day[4] if idle_hours_by_day[4] is not None else "",
+            top_stredisko,
         ])
 
     header_row = [
@@ -565,9 +613,12 @@ def run(workbook: MockWorkbook) -> str:
         "volumeFlag", "pptDensityFlag", "durationFlag", "activeSignalCount", "combinedRiskFlag",
         "workSpanHoursMon", "workSpanHoursTue", "workSpanHoursWed", "workSpanHoursThu", "workSpanHoursFri",
         "idleHoursMon", "idleHoursTue", "idleHoursWed", "idleHoursThu", "idleHoursFri",
+        # Středisko (RSA/RSC/RSE...) - appended at the end, product owner
+        # 2026-07-11, see docs/BUSINESS_RULES.md section 24.
+        "stredisko",
     ]
     out_ws = workbook.get_worksheet("TECHNICIAN_PERFORMANCE_LOG")
-    out_ws.get_range("A2:BG100000").clear()
+    out_ws.get_range("A2:BH100000").clear()
     out_ws.get_range_by_indexes(0, 0, 1, len(header_row)).set_values([header_row])
     if out_rows:
         out_ws.get_range_by_indexes(1, 0, len(out_rows), len(header_row)).set_values(out_rows)
@@ -584,6 +635,12 @@ def run(workbook: MockWorkbook) -> str:
             if cnt > top_area_count:
                 top_area = area
                 top_area_count = cnt
+        top_stredisko = ""
+        top_stredisko_count = 0
+        for stredisko, cnt in b.strediskoCounts.items():
+            if cnt > top_stredisko_count:
+                top_stredisko = stredisko
+                top_stredisko_count = cnt
         compliance_percent = round((b.realizedVisits / b.plannedVisits) * 1000) / 10 if b.plannedVisits > 0 else 0
         km_by_day_for_summary = [route_km_for_day(b.technician, b.year, b.week, i, pos_ids) for i, pos_ids in enumerate(b.possByDay)]
         max_km_day = max(km_by_day_for_summary)
@@ -614,7 +671,7 @@ def run(workbook: MockWorkbook) -> str:
             avg_visit_duration_hours_for_summary, network_avg_duration(b.year, b.week)
         )
         by_tech_weeks.setdefault(b.technician, []).append({
-            "year": b.year, "week": b.week, "region": top_area,
+            "year": b.year, "week": b.week, "region": top_area, "stredisko": top_stredisko,
             "plannedVisits": b.plannedVisits, "realizedVisits": b.realizedVisits,
             "splnenoVcas": b.splnenoVcas, "splnenoPozde": b.splnenoPozde,
             "nesplneno": b.nesplneno, "navicEvidovano": b.navicEvidovano,
@@ -719,6 +776,7 @@ def run(workbook: MockWorkbook) -> str:
             long_run_avg_duration_vs_peer_percent if long_run_avg_duration_vs_peer_percent is not None else "",
             duration_flag_for_summary,
             active_signals_for_summary, combined_risk_flag_for_summary,
+            latest["stredisko"],
         ])
 
     summary_header_row = [
@@ -731,9 +789,12 @@ def run(workbook: MockWorkbook) -> str:
         "longRunAvgPptDensityVsPeerPercent", "pptDensityFlag",
         "longRunAvgDurationVsPeerPercent", "durationFlag",
         "activeSignalCount", "combinedRiskFlag",
+        # Středisko (RSA/RSC/RSE...) - appended at the end, product owner
+        # 2026-07-11, see docs/BUSINESS_RULES.md section 24.
+        "stredisko",
     ]
     summary_ws = workbook.get_worksheet("TECHNICIAN_PERFORMANCE_SUMMARY")
-    summary_ws.get_range("A2:AC100000").clear()
+    summary_ws.get_range("A2:AD100000").clear()
     summary_ws.get_range_by_indexes(0, 0, 1, len(summary_header_row)).set_values([summary_header_row])
     if summary_rows:
         summary_ws.get_range_by_indexes(1, 0, len(summary_rows), len(summary_header_row)).set_values(summary_rows)

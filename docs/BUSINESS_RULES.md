@@ -1439,3 +1439,64 @@ system, any historical compliance data evaluated before this fix should be treat
 unreliable for published-plan matching (the `Navic_evidovano`/historical-backfill rows
 from section 22 are unaffected - those never depended on `MANAGER_PLAN_PUBLISHED`
 matching in the first place).
+
+**Second instance, same root cause**: `PerformanceEngine.ts`/`performance_engine.py` had
+an identical `instanceof Date`/`_to_date()`-ISO-only bug in their own, separate
+`MANAGER_PLAN_PUBLISHED` → `plannedVisits`/`region` aggregation loop - silently zeroed
+`plannedVisits` and blanked `region` for every published plan (found while inspecting why
+`TECHNICIAN_PERFORMANCE_SUMMARY.region` was blank for every technician despite a
+freshly-published, now-correctly-matched plan). Fixed with the same `parsePlanDate()` /
+`_parse_plan_date()` approach, added as a new function (not a shared one - PerformanceEngine
+and ComplianceEngine have no shared module boundary), verified via the same seed extended
+to run Compliance→Performance together, byte-identical TS/Python output.
+
+**Středisko (RSA/RSC/RSE) added alongside the fix**: while fixing this, added a second
+per-technician aggregate - `stredisko`, the most common `POS_MASTER.posArea` value that
+week (distinct from the pre-existing `region`, which is `POS_MASTER.area`, a district
+name like "Praha"). Product owner, 2026-07-11: "do filtrů dej podle střediska (typicky to
+tam máš jako oblast) RSC, RSA apod." Appended as the last column on both
+`TECHNICIAN_PERFORMANCE_LOG` and `TECHNICIAN_PERFORMANCE_SUMMARY` (existing
+column-index-based readers unaffected), and surfaced as a new native-Table column
+("Středisko") on `PERFORMANCE` - filtering is Excel's built-in AutoFilter on that column,
+no custom filter UI needed. Also added a `CATEGORY_RULES.RULE` dropdown
+(`CORE`/`NORMAL`/`EXCLUDE`) and guidance comment, matching `TERMINAL_RULES.ACTIVE`'s
+existing YES/NO dropdown - product owner: "nemám tam možnost zapnout třeba to 1CD... chci
+aby to fungovalo fakt dost smooth."
+
+## 25. Product-owner course correction: Excel cockpit UX work paused for a web-app pivot (2026-07-11)
+
+Mid-session, after the above fixes, the product owner stopped feature work to reframe the
+whole project from a manager's-workflow perspective: the system had grown technically
+sound but operationally confusing - "musím přemýšlet nad jednotlivými enginy, jejich
+pořadím a stavem systému... To není chyba implementace. Je to chyba produktu." The real
+workflow is 10 steps (upload SalesApp/PPT/campaigns, generate a tour plan for an explicit
+start-week+length, review, publish, let the system track compliance, repeat), which
+collapses to 4 manager actions: **Nahrát data / Generovat tour plán / Publikovat /
+Aktualizovat sledování**. Hard rule, already true today but not visibly reassuring: **a
+new tour plan is only ever created by an explicit manual click** - the system may only
+surface "plan exists through week X, consider generating the next one," never act on it.
+
+An initial proposal (simplify the *Excel* UI into this 4-action "cockpit," collapsing
+Publish into one click and auto-refreshing tracking after import) was superseded
+mid-conversation by a bigger instruction: "Business logiku nech beze změny. Přestaň ji
+přizpůsobovat Excelu. Přesuň ji do backendu a navrhni jednoduchou webovou aplikaci pro
+manažera" (leave the business logic unchanged, stop adapting it to Excel, move it to a
+backend, design a simple web app for the manager). Confirmed via AskUserQuestion:
+**local-only** (FastAPI or similar, runs on the product owner's own machine, opened at
+`localhost` in a browser - no cloud, no accounts, no change to the standing "no external
+APIs / no online sync" rule) and **the existing `.xlsx` stays the data warehouse** (the
+web backend reads/writes it exactly as `desktop_client/xlsx_engine_io.py` already does -
+Office Scripts (`.ts`) become unnecessary since there's no more Excel UI driving them, but
+the 9 engines' logic itself - already ported to `desktop_client/engines/` and verified
+equivalent to the TS originals - does not change).
+
+A concept mockup (4-stage pipeline UI mapped 1:1 to the 10 real steps, with the
+"never auto-generate" rule as a visible on-page constraint) was published as an Artifact
+for review. **Status: proposal presented, not yet approved for implementation** - the
+product owner had not yet responded to the phased build plan (status cockpit first, then
+Generovat, then Publikovat, then sledování) when this session's work was interrupted for
+a git-hook commit. Also per the product owner's stated priority in the same message:
+Reporting/Performance/analytics expansion is paused - the next work, once the web-app
+direction is confirmed, should focus on Planning Engine quality itself (visit history,
+last-visit-per-POS, campaign weighting, GPS clustering, capacity, rule precedence), not
+new features.

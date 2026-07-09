@@ -432,7 +432,8 @@ def main(ref_path, out_path):
          "volumeVsPeerPercent", "pptDensityVsPeerPercent", "durationVsPeerPercent",
          "volumeFlag", "pptDensityFlag", "durationFlag", "activeSignalCount", "combinedRiskFlag",
          "workSpanHoursMon", "workSpanHoursTue", "workSpanHoursWed", "workSpanHoursThu", "workSpanHoursFri",
-         "idleHoursMon", "idleHoursTue", "idleHoursWed", "idleHoursThu", "idleHoursFri"],
+         "idleHoursMon", "idleHoursTue", "idleHoursWed", "idleHoursThu", "idleHoursFri",
+         "stredisko"],
         [],
     )
 
@@ -449,7 +450,8 @@ def main(ref_path, out_path):
          "volumeVsOwnAvgPercent", "longRunAvgVolumeVsPeerPercent", "volumeFlag",
          "longRunAvgPptDensityVsPeerPercent", "pptDensityFlag",
          "longRunAvgDurationVsPeerPercent", "durationFlag",
-         "activeSignalCount", "combinedRiskFlag"],
+         "activeSignalCount", "combinedRiskFlag",
+         "stredisko"],
         [],
     )
 
