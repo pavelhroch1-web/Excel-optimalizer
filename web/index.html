@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Field Force Optimizer</title>
+<link rel="stylesheet" href="styles.css">
+<script src="config.js"></script>
+</head>
+<body>
+
+<div id="login-screen" class="screen">
+  <div class="login-card">
+    <h1>Field Force Optimizer</h1>
+    <p class="sub">Tour Plán Cockpit</p>
+    <form id="login-form">
+      <input type="password" id="password" placeholder="Heslo" autofocus required>
+      <button type="submit">Přihlásit</button>
+    </form>
+    <p id="login-error" class="error"></p>
+  </div>
+</div>
+
+<div id="app-screen" class="screen hidden">
+  <header>
+    <h1>Field Force Optimizer</h1>
+    <button id="logout" class="ghost">Odhlásit</button>
+  </header>
+
+  <section class="strip" id="status-strip">
+    <div class="gauge">
+      <div class="label">Publikováno do týdne</div>
+      <div class="value" id="last-published">—</div>
+    </div>
+    <div class="gauge">
+      <div class="label">Návrh čeká</div>
+      <div class="value" id="draft-state">—</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Generovat tour plán</h2>
+    <form id="generate-form" class="row">
+      <label>Počáteční týden
+        <input type="number" id="start-week" min="1" max="53" required>
+      </label>
+      <label>Délka (týdnů)
+        <input type="number" id="length" min="1" max="12" value="4" required>
+      </label>
+      <button type="submit" id="generate-btn">Generovat tour plán</button>
+    </form>
+    <p id="generate-result" class="result"></p>
+  </section>
+
+  <section class="card">
+    <h2>Výsledek (MANAGER_PLAN)</h2>
+    <div class="row">
+      <button id="refresh-draft" class="ghost">Zobrazit / obnovit výsledek</button>
+      <button id="download-btn" class="primary">Stáhnout MANAGER_PLAN (.xlsx)</button>
+    </div>
+    <div id="draft-table-wrap">
+      <table id="draft-table">
+        <thead><tr id="draft-head"></tr></thead>
+        <tbody id="draft-body"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1549,3 +1549,44 @@ Czech string ("1. 6. 2026" → correctly 1 June, not misparsed as 6 January), an
 string all parsed identically in both engines; a garbage string was correctly dropped.
 Re-run against a copy of the real workbook confirmed zero behavior change on real data
 ("0 new realized visits imported", identical to the pre-fix run).
+
+## 27. Fáze 0: web cockpit MVP (2026-07-11)
+
+Product owner, after the Planning Engine audit/validation above: "teď je jediným cílem:
+kvalitní Planning Engine + jednoduché webové rozhraní pro jeho používání" - explicitly
+phased ("Fáze 0"), scope limited to exactly 5 things: login, load current data, generate
+a tour plan, view the result, export MANAGER_PLAN to Excel. No publish, no
+Reporting/Performance/Dashboards/admin - later phases, not started.
+
+Deployment constraint (product owner): no localhost/EXE dependency (company laptop can't
+run local servers/install apps); wants the same GitHub Pages workflow already used for
+another project, opened from a browser with no install, from anywhere. GitHub Pages only
+serves static files, so the split is: `web/` (static frontend, deployed via
+`.github/workflows/deploy-pages.yml`) + `backend/` (a small FastAPI service, hosting
+platform deliberately delegated to Claude - "nechci řešit infrastrukturu ani
+deployment... hosting je pouze prostředek, ne cíl").
+
+**`backend/`** is a thin HTTP wrapper - it owns zero business logic. Every endpoint
+downloads the real `.xlsx` (via `backend/github_storage.py`'s GitHub Contents API calls -
+no git CLI, no local clone), runs one of the existing, completely unchanged
+`desktop_client/engines/` functions against it via the existing `xlsx_engine_io.py`
+bridge, and (for the one write action, `/api/generate-plan`) commits the result straight
+back to this same GitHub repo. This sidesteps needing a paid persistent disk: the repo
+itself is the database, and every "Generovat tour plán" click becomes a real, free,
+versioned commit. Auth is a single shared password (`APP_PASSWORD` env var) with a
+stdlib-HMAC-signed bearer token (`backend/auth.py`) - deliberately no user database for a
+single-manager tool.
+
+Verified end-to-end against a full copy of the real production workbook (never against
+the live file - `github_storage.download_workbook`/`upload_workbook` were monkeypatched
+to a local copy for this test): login (wrong/right password), `/api/status`,
+`/api/generate-plan` for a week with real eligible POS (weeks 34-35: 1182 new planned
+visits across 27 technicians, matching Planning Engine's real output exactly), draft
+retrieval, and `.xlsx` download all passed. A first test against week 33 alone returned
+"0 new planned visits" - not a bug, matches the exact same real-data finding from this
+session's earlier manual Planning Engine run (week 33 genuinely has no eligible
+candidates in the current dataset).
+
+One-time hosting setup (Render.com, free tier - chosen for GitHub-native auto-deploy and
+zero required local install) is documented in `backend/README.md`, since it requires the
+product owner's own account/credentials and can't be done from within this session.

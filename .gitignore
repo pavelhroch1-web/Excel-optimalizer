@@ -11,3 +11,8 @@ node_modules/
 # Timestamped backups xlsx_engine_io.backup_workbook() makes next to the
 # real workbook before writing to it - not source, not committed.
 workbook/*.backup_*.xlsx
+
+# Backend secrets (APP_PASSWORD/GITHUB_TOKEN) - set as Render env vars,
+# never committed. This file is only here in case anyone creates one
+# locally for testing.
+backend/.env
