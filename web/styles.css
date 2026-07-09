@@ -99,6 +99,12 @@ th { color: var(--text-dim); font-weight: 600; }
 }
 #rules-campaigns-table input[type="text"] { width: 140px; }
 
+#cand-table-wrap { overflow-x: auto; margin-top: 12px; max-height: 70vh; overflow-y: auto; }
+#cand-table th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.st-sel { color: var(--good); font-weight: 600; }
+.st-hold { color: var(--warn); }
+.st-no { color: var(--text-dim); opacity: 0.7; }
+
 .row-actions { display: flex; gap: 6px; white-space: nowrap; }
 button.small { padding: 4px 8px; font-size: 12px; }
 button.danger { color: #B3453A; border-color: #B3453A55; }

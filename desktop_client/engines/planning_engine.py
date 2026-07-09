@@ -45,7 +45,38 @@ from .js_compat import at as _at, js_number as _js_number, num as _num, s as _s
 from .mock_workbook import MockWorkbook
 
 
-def run(workbook: MockWorkbook) -> str:
+def _assert_breakdown(item) -> None:
+    """Guards the score-breakdown read-out against ever drifting from the real
+    algorithm: the recorded base components MUST sum to the engine's own
+    baseScore (from core_logic.compute_score), and baseScore + urgencyBoost +
+    gpsBonus MUST equal the item's final score. If either invariant breaks,
+    raise loudly rather than show the manager a wrong breakdown."""
+    base_sum = (
+        item.pptComponent + item.coreBonus + item.aBonus
+        + item.gapPenalty + item.neglectedBonus
+    )
+    if abs(base_sum - item.baseScore) > 1e-6:
+        raise AssertionError(
+            f"Score breakdown drift for POS {item.pos}: components {base_sum} "
+            f"!= engine baseScore {item.baseScore}"
+        )
+    if abs((item.baseScore + item.urgencyBoost + item.gpsBonus) - item.score) > 1e-6:
+        raise AssertionError(
+            f"Score total drift for POS {item.pos}: base+boosts "
+            f"{item.baseScore + item.urgencyBoost + item.gpsBonus} != score {item.score}"
+        )
+
+
+def run(workbook: MockWorkbook, candidates_out: "Optional[list]" = None) -> str:
+    """Runs the Planning Engine exactly as before. `candidates_out` is an
+    OPTIONAL observability hook (added 2026-07-11 for the web "Kandidáti POS"
+    screen): when a list is passed, run() appends one dict per (technician,
+    week, candidate POS) describing that POS's score, its component breakdown,
+    and whether/why it was selected - a pure read-out of decisions the engine
+    already makes. When None (the normal path, and every equivalence-harness
+    call), run() behaves byte-for-byte identically - nothing about selection
+    or the MANAGER_PLAN output depends on this argument. Verified unchanged via
+    tools/sim/compare_engines.py."""
     def read_table(sheet_name: str) -> list[list]:
         ws = workbook.get_worksheet(sheet_name)
         rng = ws.get_used_range()
@@ -400,6 +431,25 @@ def run(workbook: MockWorkbook) -> str:
         item.score = score
         item.reason += gap_reason
 
+        # Score-breakdown read-out (observability only - does NOT feed back
+        # into `score`, which was set above by compute_score). Each component
+        # mirrors the identical term in core_logic.compute_score(); an
+        # assertion below (see _assert_breakdown) checks they still sum to the
+        # engine's own base score, so this can never silently drift from the
+        # real algorithm.
+        if candidates_out is not None:
+            item.pptComponent = item.ppt * SCORE_WEIGHTS.ppt
+            item.coreBonus = SCORE_WEIGHTS.core if item.core else 0.0
+            item.aBonus = SCORE_WEIGHTS.kategorizaceA if item.classification == "A" else 0.0
+            item.gapPenalty = 0.0
+            item.neglectedBonus = 0.0
+            if item.weeksSinceLastVisit is not None:
+                if item.weeksSinceLastVisit < min_gap and not item.forceInclude:
+                    item.gapPenalty = -1000000.0
+                if item.weeksSinceLastVisit >= NEGLECTED_AFTER:
+                    item.neglectedBonus = SCORE_WEIGHTS.neglectedBonus
+            item.baseScore = score
+
         groups.setdefault(tech, []).append(item)
 
     # ADDRESS DEDUP FOR MANDATORY-ELIGIBLE ITEMS (product owner, 2026-07-08,
@@ -427,9 +477,12 @@ def run(workbook: MockWorkbook) -> str:
     # comment.
     for tech in groups:
         for item in groups[tech]:
-            item.score += compute_urgency_boost(
+            _boost = compute_urgency_boost(
                 item.weeksSinceLastVisit, item.deadlineWeeks, URGENCY_BOOST_MAX, URGENCY_BOOST_RAMP_START
             )
+            item.score += _boost
+            if candidates_out is not None:
+                item.urgencyBoost = _boost
 
     # GEO CLUSTER BONUS - all bonuses computed from each item's BASE score
     # first, THEN applied, so a bonus never leaks into another item's bonus
@@ -439,6 +492,8 @@ def run(workbook: MockWorkbook) -> str:
         bonuses = [compute_geo_cluster_bonus(item, groups[tech], GEO_CLUSTER_CONFIG) for item in groups[tech]]
         for item, bonus in zip(groups[tech], bonuses):
             item.score += bonus
+            if candidates_out is not None:
+                item.gpsBonus = bonus
 
     # PREMIUM / PARETO TOP-20% (PER_TECHNICIAN)
     for tech in groups:
@@ -520,6 +575,40 @@ def run(workbook: MockWorkbook) -> str:
                     p.kategorie, p.nazev, p.ulice, p.cislo, p.mesto, p.oblast, p.posArea,
                     p.ppt, los.get(week, ""), lot.get(week, ""), reason, row.group,
                 ])
+
+            # OBSERVABILITY READ-OUT (candidates_out) - records this week's
+            # candidate pool and how each fared, straight from the same
+            # `available`/`planned` structures the engine just used to decide.
+            # No engine value is recomputed here; a per-item assertion checks
+            # the recorded components still sum to the engine's own baseScore.
+            if candidates_out is not None:
+                available_item_ids = {id(p) for p in available}
+                selected_pos_ids = {row.pos.pos for row in planned}
+                for p in groups[tech]:
+                    if id(p) in used_ids:
+                        continue  # already committed to an earlier week this run
+                    if p.pos in selected_pos_ids:
+                        status = "Vybráno"
+                    elif id(p) not in available_item_ids:
+                        status = "Odloženo (hold-back)"
+                    else:
+                        status = "Nevybráno"
+                    _assert_breakdown(p)
+                    candidates_out.append({
+                        "week": week, "tech": tech, "pos": p.pos, "nazev": p.nazev,
+                        "kategorie": p.kategorie, "market": p.market,
+                        "classification": p.classification, "core": p.core,
+                        "ppt": p.ppt, "x": p.x, "y": p.y,
+                        "weeksSinceLastVisit": p.weeksSinceLastVisit,
+                        "deadlineWeeks": p.deadlineWeeks,
+                        "mandatoryRuleId": p.mandatoryRuleId, "premium": p.premium,
+                        "score": p.score, "baseScore": p.baseScore,
+                        "pptComponent": p.pptComponent, "coreBonus": p.coreBonus,
+                        "aBonus": p.aBonus, "gapPenalty": p.gapPenalty,
+                        "neglectedBonus": p.neglectedBonus, "urgencyBoost": p.urgencyBoost,
+                        "gpsBonus": p.gpsBonus, "status": status,
+                        "reasonTags": ("CORE | " if p.core else "") + p.reason,
+                    })
 
     combined = kept_rows + output
     out_ws.get_range("A2:Q200000").clear()

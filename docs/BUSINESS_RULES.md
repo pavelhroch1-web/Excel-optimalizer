@@ -1621,3 +1621,43 @@ Also fixed the same day: `/api/rules` was opening the workbook via openpyxl 4 se
 times (once per rule sheet) instead of once - real inefficiency, not the size-limit bug,
 but fixed alongside it since it was found during the same investigation. Reduced to a
 single `openpyxl.load_workbook()` call reused across all 4 sheet reads.
+
+## 28. Web "Kandidáti POS" - transparent score read-out over the SAME engine (2026-07-11)
+
+Product owner needed to trust the planner before using it: "nechci black-box... chci
+přesně vědět, z jakých dat Planner rozhoduje", and explicitly "potvrď, že skóre každého
+POS se stále počítá přes stejný algoritmus jako v PlanningEngine.ts a planning_engine.py
+a že web pouze zobrazuje jeho výsledek."
+
+**Verified before building anything** (read-only investigation on the real workbook):
+- The web calls the SAME engine: `backend/main.py`'s `generate_plan()` calls
+  `desktop_client/engines/planning_engine.py::run()` - a grep confirmed the backend
+  contains ZERO scoring/selection logic. That Python engine is byte-verified equivalent
+  to `office-scripts/PlanningEngine.ts` via `tools/sim/compare_engines.py`.
+- **Technician name mismatch is real but harmless to the planner**: SalesApp uses "Jméno
+  Příjmení" ("Petr Dosoudil"), POS_MASTER uses "Příjmení Jméno" ("Dosoudil Petr").
+  Verified the planner is unaffected because visit→POS matching is by
+  **Store UID → terminalId → posId** (`compliance_engine.py`), never by technician name -
+  so `weeksSinceLastVisit`/`lastRealVisitDate` are correct regardless of name format.
+  Anomalies noted for a future name-normalization map: a 28th executor "701 Zdeněk Smička"
+  (not among the 27) and a trailing-space "Jan Štolba ".
+- **Dual-terminal POS**: in the current real data there are ZERO (11,605 POS = 11,605
+  unique terminalIds in both RAW_DATA and POS_MASTER). No "pick the stronger terminal"
+  rule exists in any engine - the collapse happens upstream in the source export. Product
+  owner confirmed: leave it to the export, don't add engine logic; a future import-time
+  duplicate-POS warning is the agreed safeguard.
+
+**How the score read-out stays faithful (no second copy of the algorithm)**:
+`planning_engine.run()` gained an OPTIONAL `candidates_out` list argument. When None (the
+normal path AND every equivalence-harness call), run() is byte-for-byte unchanged -
+`compare_engines.py` re-confirmed the real-data MANAGER_PLAN is identical to the unchanged
+TS engine after this change. When a list is passed (the web "Kandidáti POS" screen), run()
+appends each candidate POS's score plus its component breakdown (PPT, CORE bonus, A bonus,
+min-gap penalty, neglected bonus, urgency boost, GPS bonus) and its selected/held-back/
+not-selected status - all read straight from the same `available`/`planned` structures the
+engine just used to decide. A guard `_assert_breakdown()` raises if the recorded components
+ever fail to sum to the engine's own `baseScore`, or if base+boosts ≠ the final score - so
+a wrong breakdown can never be shown. `backend/candidates.py` runs this for one week
+(read-only, nothing persisted) and enriches each row with the POS's real last-visit date
+and SalesApp visit history. Verified on real data: for POS visited 1 week ago, the −1,000,000
+min-gap penalty is visible as exactly why a high-PPT CORE POS was NOT selected.

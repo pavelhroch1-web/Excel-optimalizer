@@ -147,6 +147,20 @@ class POSItem:
     premium: bool = False
     score: float = 0.0
     reason: str = ""
+    # Score-breakdown observability fields (added 2026-07-11 for the web
+    # "Kandidáti POS" transparency screen). Pure annotations - populated by
+    # PlanningEngine's run() at the exact points each component is already
+    # computed, and read by NOTHING in the selection/output logic, so they
+    # cannot change any planning decision or output row. They exist only so
+    # the web UI can show WHY a POS got the score the engine gave it.
+    baseScore: float = 0.0
+    pptComponent: float = 0.0
+    coreBonus: float = 0.0
+    aBonus: float = 0.0
+    gapPenalty: float = 0.0
+    neglectedBonus: float = 0.0
+    urgencyBoost: float = 0.0
+    gpsBonus: float = 0.0
 
 
 @dataclass

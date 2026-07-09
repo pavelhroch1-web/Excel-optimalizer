@@ -91,6 +91,57 @@ async function loadStatus() {
   }
 }
 
+document.getElementById("candidates-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const week = parseInt(document.getElementById("cand-week").value, 10);
+  const tech = document.getElementById("cand-technician").value.trim();
+  const result = document.getElementById("cand-result");
+  const body = document.getElementById("cand-body");
+  result.textContent = "Počítám skóre přes Planning Engine…";
+  body.innerHTML = "";
+  try {
+    const q = "/api/candidates?week=" + week + (tech ? "&technician=" + encodeURIComponent(tech) : "");
+    const res = await apiFetch(q);
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error(b.detail || "Načtení kandidátů se nezdařilo.");
+    }
+    const d = await res.json();
+    result.textContent = `Týden ${d.week}: ${d.total} kandidátů, z toho ${d.selected} vybráno. Technici: ${d.technicians.join(", ") || "—"}`;
+    const num = (v) => (v === null || v === undefined || v === "" ? "" : Math.round(v * 100) / 100);
+    body.innerHTML = d.candidates
+      .map((c) => {
+        const statusClass = c.status === "Vybráno" ? "st-sel" : c.status.startsWith("Odloženo") ? "st-hold" : "st-no";
+        const weeks = c.weeksSinceLastVisit === null || c.weeksSinceLastVisit === undefined ? "nikdy" : Math.round(c.weeksSinceLastVisit * 10) / 10;
+        return `<tr>
+          <td class="${statusClass}">${escapeHtml(c.status)}</td>
+          <td>${escapeHtml(c.pos)}</td>
+          <td>${escapeHtml(c.nazev)}</td>
+          <td>${escapeHtml(c.tech)}</td>
+          <td>${escapeHtml(c.kategorie)}</td>
+          <td>${escapeHtml(c.market)}</td>
+          <td>${escapeHtml(c.classification)}</td>
+          <td>${c.core ? "✓" : ""}</td>
+          <td>${escapeHtml(num(c.ppt))}</td>
+          <td>${escapeHtml(c.lastRealVisitDate)}</td>
+          <td>${escapeHtml(weeks)}</td>
+          <td><b>${escapeHtml(num(c.score))}</b></td>
+          <td>${escapeHtml(num(c.pptComponent))}</td>
+          <td>${escapeHtml(num(c.coreBonus))}</td>
+          <td>${escapeHtml(num(c.aBonus))}</td>
+          <td>${c.gapPenalty ? escapeHtml(num(c.gapPenalty)) : ""}</td>
+          <td>${c.neglectedBonus ? escapeHtml(num(c.neglectedBonus)) : ""}</td>
+          <td>${c.urgencyBoost ? escapeHtml(num(c.urgencyBoost)) : ""}</td>
+          <td>${c.gpsBonus ? escapeHtml(num(c.gpsBonus)) : ""}</td>
+          <td>${escapeHtml(c.reasonTags)}</td>
+        </tr>`;
+      })
+      .join("");
+  } catch (err) {
+    result.textContent = "Chyba: " + err.message;
+  }
+});
+
 document.getElementById("generate-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const startWeek = parseInt(document.getElementById("start-week").value, 10);

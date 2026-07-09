@@ -74,6 +74,35 @@
   </section>
 
   <section class="card">
+    <h2>Kandidáti POS</h2>
+    <p class="hint">Přesně ta data a skóre, ze kterých Planning Engine vybírá. Skóre počítá stejný engine jako "Generovat" - tady se jen zobrazuje jeho výsledek, nic se neukládá.</p>
+    <form id="candidates-form" class="row">
+      <label>Týden
+        <input type="number" id="cand-week" min="1" max="53" required>
+      </label>
+      <label>Technik (nepovinné)
+        <input type="text" id="cand-technician" placeholder="např. Myslivec Jan">
+      </label>
+      <button type="submit" id="cand-btn">Zobrazit kandidáty</button>
+    </form>
+    <p id="cand-result" class="result"></p>
+    <div id="cand-table-wrap">
+      <table id="cand-table">
+        <thead>
+          <tr>
+            <th>Stav</th><th>POS</th><th>Název</th><th>Technik</th><th>Kat.</th>
+            <th>Síť</th><th>Klas.</th><th>CORE</th><th>PPT</th>
+            <th>Posl. návštěva</th><th>Týd.</th><th>Skóre</th>
+            <th>PPT b.</th><th>CORE b.</th><th>A b.</th><th>Penal.</th>
+            <th>Zanedbáno</th><th>Urgence</th><th>GPS</th><th>Důvod</th>
+          </tr>
+        </thead>
+        <tbody id="cand-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
     <h2>Generovat tour plán</h2>
     <form id="generate-form" class="row">
       <label>Počáteční týden

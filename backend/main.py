@@ -41,6 +41,7 @@ from desktop_client.engines.mock_workbook import MockWorkbook  # noqa: E402
 
 import auth  # noqa: E402
 from auth import issue_token, require_auth  # noqa: E402
+import candidates as candidates_mod  # noqa: E402
 import github_storage  # noqa: E402
 import plan_io  # noqa: E402
 import rules_io  # noqa: E402
@@ -172,6 +173,18 @@ def generate_plan(body: GeneratePlanRequest):
             path, f"Generovat tour plán: týden {body.start_week}, délka {body.length} [MVP cockpit]"
         )
         return {"message": message}
+    finally:
+        os.remove(path)
+
+
+@app.get("/api/candidates", dependencies=[Depends(require_auth)])
+def get_candidates(week: int, technician: str | None = None):
+    """Runs the real Planning Engine for `week` and returns every candidate
+    POS with its engine-computed score + breakdown + selected/not status.
+    Read-only: nothing is written back to GitHub."""
+    path = _with_local_copy()
+    try:
+        return candidates_mod.list_candidates(path, week, technician)
     finally:
         os.remove(path)
 
