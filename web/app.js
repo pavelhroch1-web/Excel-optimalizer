@@ -107,9 +107,33 @@ document.getElementById("candidates-form").addEventListener("submit", async (e) 
       throw new Error(b.detail || "Načtení kandidátů se nezdařilo.");
     }
     const d = await res.json();
-    result.textContent = `Týden ${d.week}: ${d.total} kandidátů, z toho ${d.selected} vybráno. Technici: ${d.technicians.join(", ") || "—"}`;
-    const num = (v) => (v === null || v === undefined || v === "" ? "" : Math.round(v * 100) / 100);
-    body.innerHTML = d.candidates
+    currentCandidates = d.candidates;
+    currentCandMeta = { week: d.week, total: d.total, selected: d.selected, technicians: d.technicians };
+    renderCandidates();
+  } catch (err) {
+    result.textContent = "Chyba: " + err.message;
+  }
+});
+
+let currentCandidates = [];
+let currentCandMeta = {};
+
+function renderCandidates() {
+  const result = document.getElementById("cand-result");
+  const body = document.getElementById("cand-body");
+  const num = (v) => (v === null || v === undefined || v === "" ? "" : Math.round(v * 100) / 100);
+  const fStatus = document.getElementById("cand-filter-status").value;
+  const fWeeks = document.getElementById("cand-filter-weeks").value;
+  const fText = document.getElementById("cand-filter-text").value.trim().toLowerCase();
+  let rows = currentCandidates;
+  if (fStatus) rows = rows.filter((c) => (fStatus === "Odloženo" ? c.status.startsWith("Odloženo") : c.status === fStatus));
+  if (fWeeks !== "") {
+    const min = parseFloat(fWeeks);
+    rows = rows.filter((c) => c.weeksSinceLastVisit !== null && c.weeksSinceLastVisit !== undefined && c.weeksSinceLastVisit >= min);
+  }
+  if (fText) rows = rows.filter((c) => String(c.pos).toLowerCase().includes(fText) || String(c.nazev || "").toLowerCase().includes(fText));
+  result.textContent = `Týden ${currentCandMeta.week}: zobrazeno ${rows.length} z ${currentCandMeta.total} kandidátů (${currentCandMeta.selected} vybráno). Technici: ${(currentCandMeta.technicians || []).join(", ") || "—"}`;
+  body.innerHTML = rows
       .map((c) => {
         const statusClass = c.status === "Vybráno" ? "st-sel" : c.status.startsWith("Odloženo") ? "st-hold" : "st-no";
         const weeks = c.weeksSinceLastVisit === null || c.weeksSinceLastVisit === undefined ? "nikdy" : Math.round(c.weeksSinceLastVisit * 10) / 10;
@@ -133,13 +157,16 @@ document.getElementById("candidates-form").addEventListener("submit", async (e) 
           <td>${c.neglectedBonus ? escapeHtml(num(c.neglectedBonus)) : ""}</td>
           <td>${c.urgencyBoost ? escapeHtml(num(c.urgencyBoost)) : ""}</td>
           <td>${c.gpsBonus ? escapeHtml(num(c.gpsBonus)) : ""}</td>
-          <td>${escapeHtml(c.reasonTags)}</td>
+          <td>${escapeHtml(c.explanation || c.reasonTags)}</td>
         </tr>`;
       })
       .join("");
-  } catch (err) {
-    result.textContent = "Chyba: " + err.message;
-  }
+}
+
+["cand-filter-status", "cand-filter-weeks", "cand-filter-text"].forEach((id) => {
+  document.getElementById(id).addEventListener("input", () => {
+    if (currentCandidates.length) renderCandidates();
+  });
 });
 
 document.getElementById("generate-form").addEventListener("submit", async (e) => {

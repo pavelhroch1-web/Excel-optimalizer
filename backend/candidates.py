@@ -68,6 +68,35 @@ def _pos_master_extras(path: str) -> tuple[dict, dict]:
         wb.close()
 
 
+def _explain(c: dict) -> str:
+    """Human-readable 'why selected / why not' derived purely from the score
+    components the engine already produced - no new logic, just a translation
+    of the numbers into a sentence the manager can read at a glance."""
+    if c["status"] == "Vybráno":
+        parts = []
+        if c["core"]:
+            parts.append("CORE (garantováno)")
+        if c["mandatoryRuleId"]:
+            parts.append(f"povinné pravidlo {c['mandatoryRuleId']}")
+        if c["classification"] == "A":
+            parts.append("klasifikace A")
+        if c["neglectedBonus"]:
+            parts.append("dlouho nenavštíveno")
+        if c["urgencyBoost"]:
+            parts.append("blíží se termín (urgence)")
+        if c["premium"]:
+            parts.append("vysoké PPT (top 20 %)")
+        if c["gpsBonus"]:
+            parts.append("výhodná trasa (GPS shluk)")
+        return "Vybráno: " + (", ".join(parts) if parts else "vysoké skóre")
+    if c["status"].startswith("Odloženo"):
+        return "Odloženo: blíží se kampaň, POS ještě není urgentní (Smart Hold-back)"
+    # Not selected
+    if c["gapPenalty"] < 0:
+        return "Nevybráno: navštíveno příliš nedávno (penalizace min. rozestupu)"
+    return "Nevybráno: nižší skóre než vybrané POS / kapacita technika naplněna"
+
+
 def list_candidates(path: str, week: int, technician: str | None = None) -> dict:
     """Runs the engine for `week` and returns its scored candidate pool. Does
     NOT persist anything - the engine writes MANAGER_PLAN into the in-memory
@@ -84,6 +113,7 @@ def list_candidates(path: str, week: int, technician: str | None = None) -> dict
     for c in captured:
         c["lastRealVisitDate"] = last_visit.get(str(c["pos"]), "")
         c["visitHistory"] = history.get(str(c["pos"]), [])
+        c["explanation"] = _explain(c)
 
     if technician:
         captured = [c for c in captured if c["tech"] == technician]

@@ -85,6 +85,22 @@
       </label>
       <button type="submit" id="cand-btn">Zobrazit kandidáty</button>
     </form>
+    <div class="row" id="cand-filters">
+      <label>Stav
+        <select id="cand-filter-status">
+          <option value="">vše</option>
+          <option value="Vybráno">jen vybrané</option>
+          <option value="Nevybráno">jen nevybrané</option>
+          <option value="Odloženo">jen odložené</option>
+        </select>
+      </label>
+      <label>Min. týdnů od návštěvy
+        <input type="number" id="cand-filter-weeks" min="0" placeholder="např. 26">
+      </label>
+      <label>Hledat (POS / název)
+        <input type="text" id="cand-filter-text" placeholder="část ID nebo názvu">
+      </label>
+    </div>
     <p id="cand-result" class="result"></p>
     <div id="cand-table-wrap">
       <table id="cand-table">
@@ -94,7 +110,7 @@
             <th>Síť</th><th>Klas.</th><th>CORE</th><th>PPT</th>
             <th>Posl. návštěva</th><th>Týd.</th><th>Skóre</th>
             <th>PPT b.</th><th>CORE b.</th><th>A b.</th><th>Penal.</th>
-            <th>Zanedbáno</th><th>Urgence</th><th>GPS</th><th>Důvod</th>
+            <th>Zanedbáno</th><th>Urgence</th><th>GPS</th><th>Vysvětlení</th>
           </tr>
         </thead>
         <tbody id="cand-body"></tbody>
