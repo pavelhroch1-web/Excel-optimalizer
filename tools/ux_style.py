@@ -1506,6 +1506,53 @@ def build_technician_scorecard(wb):
         "F66:F70", DataBarRule(start_type="num", start_value=0, end_type="num", end_value=10, color=STATUS_CRITICAL),
     )
 
+    # ==========================================================================
+    # POS BEZ NÁVŠTĚVY (nikdy) - product owner, 2026-07-11: "rad bych i
+    # někde viděl jaké POS v kampani vůbec nejel" - distinct from "TOP
+    # PROBLÉMOVÉ POS" above (which ranks POS by how many times a planned
+    # visit was missed - repeated misses on a POS that HAS been visited
+    # before). This is the POS that were never visited even once.
+    # NOT based on POS_MASTER's lastRealVisitDate - checked against real
+    # data first and that field is unusable for this: ImportEngine.ts seeds
+    # it to "today" for every brand-new POS ("product owner confirmed that
+    # installation counts as the first visit"), so on the real workbook
+    # every single Active row already has a non-blank lastRealVisitDate -
+    # that signal would always report zero results. The uncontaminated
+    # "never visited" signal is a POS's total absence from
+    # VISIT_HISTORY_ACTUAL, which only ever gets a row when
+    # ComplianceEngine.ts processes a real SalesApp visit - untouched by
+    # ImportEngine.ts's install-day default.
+    # Technician match mirrors PerformanceEngine.ts's posTechnician lookup
+    # (managerOverrideTechnician wins over assignedTechnician when set).
+    # Sorted by businessScore descending - the most valuable un-visited POS
+    # first, since that's the actionable gap a manager would want to see.
+    # ==========================================================================
+    build_section_header(ws, "C72", "POS BEZ NÁVŠTĚVY (nikdy)")
+    pm_tech_match = 'IF(POS_MASTER!$AJ$2:$AJ$20000<>"",POS_MASTER!$AJ$2:$AJ$20000,POS_MASTER!$O$2:$O$20000)=$D$5'
+    pm_active = 'POS_MASTER!$Q$2:$Q$20000="Active"'
+    pm_never_visited = 'ISNA(MATCH(POS_MASTER!$A$2:$A$20000,VISIT_HISTORY_ACTUAL!$A$2:$A$200000,0))'
+    pm_never_visited_cond = f'({pm_tech_match})*({pm_active})*({pm_never_visited})'
+    never_visited_count_ref = build_kpi_card(
+        ws, "C", "D", 73, 74, 74, "Počet POS bez návštěvy",
+        f'=SUMPRODUCT({pm_never_visited_cond})',
+        value_color=STATUS_WARNING, fill_color=dashboard_ui.TINT_WARNING,
+    )
+    ws[never_visited_count_ref].font = font_card_value(size=16, color=STATUS_WARNING)
+    ws.merge_cells("E73:N74")
+    ws["E73"] = "Aktivní POS přiřazené tomuto technikovi, které dosud nemají v SalesApp ani jednu zaznamenanou reálnou návštěvu."
+    ws["E73"].font = Font(size=9, italic=True, color="595959")
+    ws["E73"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    style_dashboard_table_header(ws, 76, "CDEFG", ["POS", "Název", "Město", "Region", "Business Score"])
+    ws["C77"] = (
+        f'=IFERROR(SORT(FILTER(CHOOSE({{1,2,3,4,5}},POS_MASTER!$A$2:$A$20000,POS_MASTER!$G$2:$G$20000,'
+        f'POS_MASTER!$L$2:$L$20000,POS_MASTER!$H$2:$H$20000,POS_MASTER!$AC$2:$AC$20000),'
+        f'{pm_never_visited_cond}),5,-1),"— Žádné, vše bylo aspoň jednou navštíveno 🎉")'
+    )
+    ws["C77"].font = Font(size=10)
+    ws.conditional_formatting.add(
+        "C77", FormulaRule(formula=['ISNUMBER(SEARCH("Žádné",C77))'], font=Font(italic=True, color=STATUS_GOOD)),
+    )
+
     return ws
 
 

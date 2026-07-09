@@ -1107,4 +1107,35 @@ side under-counted `visitsMon`, `avgVisitDurationHours`, `workSpanHoursMon`, `id
 bug above). `python3 tools/check_sync.py` passed (18 blocks); full TS unit suite green (133 tests).
 Real workbook patched: `VISIT_HISTORY_ACTUAL`/`OTHER_VISIT_LOG` +2 columns each, `COMPLIANCE_LOG` +2,
 `TECHNICIAN_PERFORMANCE_LOG` +10; `POS_MASTER`/`RAW_DATA` row counts unchanged (11,606/11,607) after
-patching, `TECHNICIAN_SCORECARD` rebuilt with the two new tables.
+patching, `TECHNICIAN_SCORECARD` rebuilt with the two new tables. Follow-up
+(2026-07-11, same day): the weekly work-span/idle totals got their own KPI-style tile
+("Týden celkem", same visual treatment as the route-km weekly total) so they read at a
+glance instead of only per-day; full 8-engine pipeline re-verified equivalent on the
+real 11,605-POS dataset (`compare_engines.py`).
+
+**"POS BEZ NÁVŠTĚVY (nikdy)"** (product owner, same day, follow-up: "rad bych i někde
+viděl jaké POS v kampani vůbec nejel") - a new `TECHNICIAN_SCORECARD` table listing
+Active POS assigned to the selected technician that have never once appeared in
+`VISIT_HISTORY_ACTUAL` - pure sheet-level addition, no engine change, since the data
+already exists. Distinct from "TOP PROBLÉMOVÉ POS" above it (which ranks POS by *how
+many times* a planned visit was missed, on POS that HAVE been visited before) - this
+is specifically POS with zero real campaign visits ever.
+
+**Real data caught a bad initial design**: the first version used `POS_MASTER`'s
+`lastRealVisitDate` (blank = never visited) as the signal, matching the existing
+"TOP PROBLÉMOVÉ POS" section's style. Checked against the real workbook before
+shipping and found it always non-blank: `ImportEngine.ts` seeds `lastRealVisitDate` to
+"today" for every brand-new POS ("product owner confirmed that installation counts as
+the first visit" - see that file's comment), so on real data every single Active POS
+already carries a fabricated first-visit date, and the feature would have always shown
+zero results. Switched to checking a POS's total absence from `VISIT_HISTORY_ACTUAL`
+instead (`ISNA(MATCH(POS_MASTER!posId, VISIT_HISTORY_ACTUAL!posId, 0))`) - that sheet
+only ever gets a row when `ComplianceEngine.ts` processes a real, campaign-purpose
+SalesApp visit, so it's untouched by the install-day default and also correctly
+excludes ad-hoc/`OTHER_VISIT_LOG` visits from counting as "the campaign visit
+happened" (matches the literal ask: "v kampani vůbec nejel"). Verified in Python
+against the real workbook: with `VISIT_HISTORY_ACTUAL` still empty (no SalesApp import
+has happened yet on the real workbook), all 11,605 Active POS currently show as
+"never visited" - expected given no real import has run yet, same "known limitation"
+pattern already documented for `EFFICIENCY`/`TECHNICIAN_PERFORMANCE_LOG` above; the
+number becomes meaningful after the first real SalesApp import.
