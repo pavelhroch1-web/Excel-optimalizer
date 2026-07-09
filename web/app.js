@@ -50,6 +50,7 @@ function showApp() {
   appScreen.classList.remove("hidden");
   loadStatus();
   loadVersions();
+  loadRules();
 }
 function showLogin() {
   appScreen.classList.add("hidden");
@@ -123,6 +124,7 @@ document.getElementById("upload-form").addEventListener("submit", async (e) => {
     setResult("upload-result",
       "Draft vytvořen. " + (m.import || "") + " " + (m.compliance || ""), "ok");
     loadStatus();
+    loadRules();
   } catch (err) {
     setResult("upload-result", "Chyba: " + err.message, "err");
   } finally {
@@ -340,6 +342,110 @@ async function downloadFile(path, filename) {
     alert("Stažení selhalo: " + err.message);
   }
 }
+
+// ---- 2) planning filters (rule tables that constrain the engine input) ----
+// These are NOT display filters: the Planning Engine reads TERMINAL_RULES /
+// MARKET_RULES / CATEGORY_RULES / ACTIVITY_PLAN and excludes POS accordingly,
+// so saving here changes which POS the plan is generated from.
+
+let currentRules = null;
+const CATEGORY_OPTIONS = ["CORE", "NORMAL", "EXCLUDE"];
+
+async function loadRules() {
+  try {
+    currentRules = await apiJson("/api/rules");
+    renderToggleList("rules-terminal", "TYP TERMINALU", currentRules.terminal);
+    renderToggleList("rules-market", "MARKET", currentRules.market);
+    renderDropdownList("rules-category", "CATEGORY", "RULE", currentRules.category, CATEGORY_OPTIONS);
+    renderCampaigns(currentRules.campaigns);
+  } catch (err) {
+    setResult("rules-result", "Pravidla nelze načíst: " + err.message, "err");
+  }
+}
+
+function renderToggleList(containerId, keyField, rows) {
+  document.getElementById(containerId).innerHTML = (rows || [])
+    .map((row, i) => `
+    <label class="toggle-row">
+      <input type="checkbox" data-index="${i}" ${row.ACTIVE === "YES" ? "checked" : ""}>
+      ${row[keyField]}
+    </label>`).join("");
+}
+
+function renderDropdownList(containerId, keyField, valueField, rows, options) {
+  document.getElementById(containerId).innerHTML = (rows || [])
+    .map((row, i) => `
+    <label class="dropdown-row">
+      ${row[keyField]}
+      <select data-index="${i}">
+        ${options.map((o) => `<option value="${o}" ${row[valueField] === o ? "selected" : ""}>${o}</option>`).join("")}
+      </select>
+    </label>`).join("");
+}
+
+function renderCampaigns(rows) {
+  document.getElementById("rules-campaigns-body").innerHTML = (rows || [])
+    .map((row, i) => `
+    <tr>
+      <td>${row.TYPE ?? ""}</td>
+      <td>${row.ACTIVITY ?? ""}</td>
+      <td><input type="number" data-index="${i}" data-field="START_WEEK" value="${row.START_WEEK ?? ""}"></td>
+      <td><input type="number" data-index="${i}" data-field="END_WEEK" value="${row.END_WEEK ?? ""}"></td>
+      <td><input type="number" data-index="${i}" data-field="PRIORITY" value="${row.PRIORITY ?? ""}"></td>
+      <td>
+        <select data-index="${i}" data-field="OVERRIDE_GAP">
+          <option value="YES" ${row.OVERRIDE_GAP === "YES" ? "selected" : ""}>YES</option>
+          <option value="NO" ${row.OVERRIDE_GAP === "NO" ? "selected" : ""}>NO</option>
+        </select>
+      </td>
+    </tr>`).join("");
+}
+
+function collectToggleList(containerId, rows) {
+  const updated = (rows || []).map((r) => ({ ...r }));
+  document.querySelectorAll(`#${containerId} input[type="checkbox"]`).forEach((input) => {
+    updated[parseInt(input.dataset.index, 10)].ACTIVE = input.checked ? "YES" : "NO";
+  });
+  return updated;
+}
+
+function collectDropdownList(containerId, valueField, rows) {
+  const updated = (rows || []).map((r) => ({ ...r }));
+  document.querySelectorAll(`#${containerId} select`).forEach((sel) => {
+    updated[parseInt(sel.dataset.index, 10)][valueField] = sel.value;
+  });
+  return updated;
+}
+
+function collectCampaigns(rows) {
+  const updated = (rows || []).map((r) => ({ ...r }));
+  document.querySelectorAll("#rules-campaigns-body input, #rules-campaigns-body select").forEach((input) => {
+    const i = parseInt(input.dataset.index, 10);
+    updated[i][input.dataset.field] = input.type === "number" ? Number(input.value) : input.value;
+  });
+  return updated;
+}
+
+document.getElementById("reload-rules-btn").addEventListener("click", loadRules);
+
+document.getElementById("save-rules-btn").addEventListener("click", async () => {
+  setResult("rules-result", "Ukládám…", "");
+  try {
+    const payload = [
+      ["TERMINAL_RULES", collectToggleList("rules-terminal", currentRules.terminal)],
+      ["MARKET_RULES", collectToggleList("rules-market", currentRules.market)],
+      ["CATEGORY_RULES", collectDropdownList("rules-category", "RULE", currentRules.category)],
+      ["ACTIVITY_PLAN", collectCampaigns(currentRules.campaigns)],
+    ];
+    for (const [sheet, rows] of payload) {
+      await postJson("/api/rules", { sheet, rows });
+    }
+    setResult("rules-result", "Uloženo. Tour plán se teď vygeneruje jen z vybraných POS.", "ok");
+    await loadRules();
+  } catch (err) {
+    setResult("rules-result", "Chyba: " + err.message, "err");
+  }
+});
 
 // ---- boot -----------------------------------------------------------------
 

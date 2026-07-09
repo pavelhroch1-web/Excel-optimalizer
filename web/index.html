@@ -58,9 +58,48 @@
     <p id="upload-result" class="result"></p>
   </section>
 
-  <!-- 2) GENERATE -->
+  <!-- 2) PLANNING FILTERS (constrain the Planning Engine input set) -->
   <section class="card">
-    <h2>2 · Generovat tour plán</h2>
+    <h2>2 · Plánovací filtry</h2>
+    <p class="hint">Stejná pravidla jako v Excelu. <strong>Neomezují jen zobrazení – omezují vstupní množinu Planning Engine</strong>, takže se tour plán generuje jen z vybraných POS. Ulož je před krokem „Generovat". (Uložení je možné až po nahrání exportů – pravidla se ukládají do aktuálního Draftu.)</p>
+
+    <div class="rules-block">
+      <h3>Druh terminálu</h3>
+      <div id="rules-terminal" class="toggle-list"></div>
+    </div>
+
+    <div class="rules-block">
+      <h3>Partner / obchodní síť</h3>
+      <div id="rules-market" class="toggle-list"></div>
+    </div>
+
+    <div class="rules-block">
+      <h3>Kategorie (pravidlo)</h3>
+      <div id="rules-category" class="dropdown-list"></div>
+    </div>
+
+    <div class="rules-block">
+      <h3>Kampaně</h3>
+      <div id="rules-campaigns-wrap">
+        <table id="rules-campaigns-table">
+          <thead>
+            <tr><th>Typ</th><th>Kampaň</th><th>Od týdne</th><th>Do týdne</th><th>Priorita</th><th>Override gap</th></tr>
+          </thead>
+          <tbody id="rules-campaigns-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="row">
+      <button id="reload-rules-btn" class="ghost">Načíst pravidla</button>
+      <button id="save-rules-btn" class="primary">Uložit pravidla</button>
+    </div>
+    <p id="rules-result" class="result"></p>
+  </section>
+
+  <!-- 3) GENERATE -->
+  <section class="card">
+    <h2>3 · Generovat tour plán</h2>
     <form id="generate-form" class="row">
       <label>Počáteční týden
         <input type="number" id="start-week" min="1" max="53" required>
@@ -75,7 +114,7 @@
 
   <!-- 3) CANDIDATES -->
   <section class="card">
-    <h2>3 · Kandidáti POS</h2>
+    <h2>4 · Kandidáti POS</h2>
     <p class="hint">Přesně ta data a skóre, ze kterých Planning Engine vybírá. Skóre počítá stejný engine jako „Generovat".</p>
     <form id="candidates-form" class="row">
       <label>Týden
@@ -121,7 +160,7 @@
 
   <!-- 4) DRAFT + MANUAL EDITS -->
   <section class="card">
-    <h2>4 · Návrh a ruční úpravy</h2>
+    <h2>5 · Návrh a ruční úpravy</h2>
     <div class="row">
       <button id="refresh-draft" class="ghost">Zobrazit / obnovit návrh</button>
       <button id="download-draft-btn" class="ghost">Stáhnout návrh (.xlsx)</button>
@@ -160,7 +199,7 @@
 
   <!-- 5) PUBLISH -->
   <section class="card publish-card">
-    <h2>5 · Publikovat Tour Plán</h2>
+    <h2>6 · Publikovat Tour Plán</h2>
     <p class="hint">Publikace zmrazí nejnižší draftový týden do nové <strong>immutable verze</strong>. Od té chvíle na ni navazují všechny další běhy. Publikovaný plán už nikdy nezměníš.</p>
     <form id="publish-form" class="row">
       <label style="flex:1">Poznámka k verzi (nepovinné)
@@ -173,7 +212,7 @@
 
   <!-- 6) HISTORY + 7) DOWNLOAD -->
   <section class="card">
-    <h2>6 · Historie publikovaných verzí</h2>
+    <h2>7 · Historie publikovaných verzí</h2>
     <div class="row"><button id="refresh-versions" class="ghost">Obnovit historii</button></div>
     <div id="versions-wrap">
       <table id="versions-table">
