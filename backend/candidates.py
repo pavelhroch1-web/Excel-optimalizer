@@ -23,6 +23,8 @@ from desktop_client import xlsx_engine_io
 from desktop_client.engines import planning_engine
 from desktop_client.engines.mock_workbook import MockWorkbook
 
+import decision
+
 
 def _set_control(state: dict, key: str, value) -> None:
     control = state["CONTROL"]
@@ -246,4 +248,8 @@ def pos_detail(path: str, pos_id: str, week: int) -> dict:
     detail["visitHistory"] = history.get(pos_id, [])
     detail["week"] = week
     detail["found"] = True
+
+    # Decision Support layer (interpretation only - no new logic):
+    detail["recommendation"] = decision.recommend(detail)
+    detail["includeLever"] = decision.include_lever(detail)
     return detail

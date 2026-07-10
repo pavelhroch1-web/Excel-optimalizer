@@ -41,6 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import auth  # noqa: E402
 from auth import issue_token, require_auth  # noqa: E402
 import candidates as candidates_mod  # noqa: E402
+import decision as decision_mod  # noqa: E402
 import pipeline  # noqa: E402
 import plan_io  # noqa: E402
 import rules_io  # noqa: E402
@@ -292,10 +293,23 @@ def draft_candidates(week: int, technician: str | None = None):
 def draft_pos_detail(pos_id: str, week: int):
     """Full read-only diagnostic for one POS for the given week - the same
     data and score the Planning Engine used, plus why it is / is not a
-    candidate. No new logic; runs the same engine."""
+    candidate, plus the Decision Support recommendation. No new logic; runs
+    the same engine."""
     path = _require_draft_path()
     try:
         return candidates_mod.pos_detail(path, pos_id, week)
+    finally:
+        os.remove(path)
+
+
+@app.get("/api/draft/what-if", dependencies=[Depends(require_auth)])
+def draft_what_if(week: int):
+    """Decision Support 'Co kdyby...': impact of manager levers on the
+    candidate pool for `week`, derived from ONE engine run's own capture -
+    interpretation/simulation only, the Planning Engine is unchanged."""
+    path = _require_draft_path()
+    try:
+        return decision_mod.what_if(path, week)
     finally:
         os.remove(path)
 

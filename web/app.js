@@ -473,6 +473,34 @@ on("save-rules-btn", "click", async () => {
   }
 });
 
+// ---- Decision Support: Co kdyby... ----------------------------------------
+
+on("whatif-form", "submit", async (e) => {
+  e.preventDefault();
+  const week = parseInt(document.getElementById("whatif-week").value, 10) ||
+    parseInt(document.getElementById("cand-week").value, 10) ||
+    parseInt(document.getElementById("start-week").value, 10);
+  if (!week) { setResult("whatif-result", "Zadej týden.", "err"); return; }
+  document.getElementById("whatif-week").value = week;
+  setResult("whatif-result", "Počítám dopady (jeden běh Planning Engine)…", "");
+  document.getElementById("whatif-body").innerHTML = "";
+  try {
+    const d = await apiJson("/api/draft/what-if?week=" + week);
+    const b = d.baseline || {};
+    setResult("whatif-result",
+      `Týden ${d.week}: teď ${b.candidates} kandidátů, ${b.selected} naplánováno, ${b.heldBack} odloženo.`, "ok");
+    const rows = (d.scenarios || []).map((s) =>
+      `<tr><td>${escWi(s.label)}</td><td class="wi-impact ${s.delta >= 0 ? "pos" : "neg"}">${escWi(s.impact)}</td><td>${escWi(s.metric)}</td></tr>`).join("");
+    document.getElementById("whatif-body").innerHTML = rows
+      ? `<table class="pd-score-table wi-table"><thead><tr><th>Kdyby…</th><th>Dopad</th><th>Metrika</th></tr></thead><tbody>${rows}</tbody></table>`
+      : `<p class="pd-sub">Žádné páčky s dopadem pro tento týden.</p>`;
+  } catch (err) {
+    setResult("whatif-result", "Chyba: " + err.message, "err");
+  }
+});
+
+const escWi = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
 // ---- POS Detail panel (read-only diagnostic) ------------------------------
 
 const num = (n) => (n === null || n === undefined || n === "" ? "—" : Number(n).toLocaleString("cs-CZ"));
@@ -527,6 +555,20 @@ function renderPosDetail(d, week) {
   let html = "";
   html += `<div class="pd-verdict ${verdictClass}"><strong>${esc(d.status)}</strong> · ${esc(d.explanation || "")}</div>`;
   html += `<p class="pd-sub">Diagnostika pro týden ${week} – přesně data a rozhodnutí Planning Engine.</p>`;
+
+  // Decision Support: engine recommendation
+  const rec = d.recommendation;
+  if (rec) {
+    html += `<div class="pd-rec ${verdictClass}">`;
+    html += `<div class="pd-rec-head">Doporučení enginu: <strong>${esc(rec.verdict)}</strong></div>`;
+    if ((rec.reasons || []).length) {
+      html += `<ul class="pd-rec-list">` + rec.reasons.map((r) => `<li>${esc(r)}</li>`).join("") + `</ul>`;
+    }
+    if (d.includeLever) {
+      html += `<div class="pd-rec-lever">Aby se stal kandidátem: ${esc(d.includeLever)}.</div>`;
+    }
+    html += `</div>`;
+  }
 
   html += `<dl class="pd-grid">` +
     rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v ?? "—"}</dd>`).join("") + `</dl>`;

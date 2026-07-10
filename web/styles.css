@@ -157,3 +157,18 @@ button.danger { color: #B3453A; border-color: #B3453A55; }
 .pd-score-table td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 .pd-score-table tr.total td { font-weight: 600; border-top: 2px solid var(--border,#ccc); }
 .pd-chip { display: inline-block; background: var(--border,#eee); border-radius: 12px; padding: 2px 10px; font-size: 12.5px; margin: 2px 4px 2px 0; }
+
+/* ---- Decision Support ---- */
+.badge { font-size: 11px; background: var(--accent,#3b6ea5); color: #fff; border-radius: 10px; padding: 2px 8px; vertical-align: middle; font-weight: 600; }
+.pd-rec { margin: 4px 0 16px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border,#ddd); }
+.pd-rec.sel { border-color: color-mix(in srgb, var(--good,#2e7d32) 45%, var(--border)); background: color-mix(in srgb, var(--good,#2e7d32) 8%, transparent); }
+.pd-rec.no  { border-color: color-mix(in srgb, #B3453A 40%, var(--border)); background: color-mix(in srgb, #B3453A 6%, transparent); }
+.pd-rec.hold{ border-color: color-mix(in srgb, var(--warn,#b8860b) 45%, var(--border)); background: color-mix(in srgb, var(--warn,#b8860b) 8%, transparent); }
+.pd-rec-head { font-size: 14px; margin-bottom: 6px; }
+.pd-rec-list { margin: 0; padding-left: 18px; font-size: 13.5px; }
+.pd-rec-list li { margin: 2px 0; }
+.pd-rec-lever { margin-top: 8px; font-size: 13px; color: var(--text-dim); }
+.wi-table { margin-top: 12px; }
+.wi-impact { font-weight: 600; white-space: nowrap; }
+.wi-impact.pos { color: var(--good,#2e7d32); }
+.wi-impact.neg { color: #B3453A; }
