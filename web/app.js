@@ -828,5 +828,21 @@ on("cloud-form", "submit", async (e) => {
 
 // ---- boot -----------------------------------------------------------------
 
-if (getToken()) showApp();
-else showLogin();
+async function boot() {
+  // Local desktop app (served by the bundled FastAPI): no login needed.
+  if (window.FFO_LOCAL) {
+    try {
+      const res = await fetch(API_BASE + "/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: "local" }),
+      });
+      const data = await res.json();
+      if (data.token) setToken(data.token);
+    } catch (e) { /* fall through to login screen */ }
+    if (getToken()) { showApp(); return; }
+  }
+  if (getToken()) showApp();
+  else showLogin();
+}
+boot();

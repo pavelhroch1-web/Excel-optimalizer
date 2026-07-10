@@ -11,7 +11,10 @@ import time
 
 from fastapi import Header, HTTPException
 
-APP_PASSWORD = os.environ["APP_PASSWORD"]
+# Local desktop app runs on 127.0.0.1 for a single user, so auth is bypassed
+# (FFO_LOCAL=1). APP_PASSWORD has a default so importing never crashes.
+LOCAL_MODE = os.environ.get("FFO_LOCAL") == "1"
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "local")
 SECRET_KEY = os.environ.get("SECRET_KEY", APP_PASSWORD).encode("utf-8")
 TOKEN_TTL_SECONDS = 60 * 60 * 12  # 12 hours - re-login once a day of use is fine
 
@@ -39,6 +42,8 @@ def verify_token(token: str) -> bool:
 
 
 def require_auth(authorization: str = Header(default="")) -> None:
+    if LOCAL_MODE:
+        return  # single-user localhost app - no auth needed
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Přihlas se prosím znovu.")
     token = authorization.removeprefix("Bearer ").strip()

@@ -51,8 +51,16 @@ import state_xlsx  # noqa: E402
 import store  # noqa: E402
 
 ENGINE_VERSION = os.environ.get("ENGINE_VERSION", "FFO-V11")
+LOCAL_MODE = os.environ.get("FFO_LOCAL") == "1"
 
 app = FastAPI(title="Field Force Optimizer API")
+
+if LOCAL_MODE:
+    import db  # noqa: E402
+
+    @app.on_event("startup")
+    def _init_local_db() -> None:
+        db.init_db()
 
 _allowed_origins = os.environ.get("ALLOWED_ORIGIN", "*")
 app.add_middleware(
@@ -208,7 +216,8 @@ def health():
 
 @app.post("/api/login")
 def login(body: LoginRequest):
-    if body.password != auth.APP_PASSWORD:
+    # Local desktop app: single user on localhost, any/no password is fine.
+    if not LOCAL_MODE and body.password != auth.APP_PASSWORD:
         raise HTTPException(status_code=401, detail="Nesprávné heslo.")
     return {"token": issue_token()}
 
@@ -609,3 +618,42 @@ def save_rules(body: SaveRulesRequest):
         return {"ok": True}
     finally:
         os.remove(path)
+
+
+# --------------------------------------------------------------------------
+# Local desktop app: serve the existing frontend from THIS server so the UI
+# and API share one origin (127.0.0.1). config.js is generated to point the
+# frontend at the same origin; everything else in web/ is served as-is. The
+# GitHub Pages copy of web/ is untouched - this only runs when FFO_LOCAL=1.
+# --------------------------------------------------------------------------
+
+if LOCAL_MODE:
+    import sys as _sys
+
+    from fastapi.responses import HTMLResponse, Response
+    from fastapi.staticfiles import StaticFiles
+
+    def _web_dir() -> str:
+        for base in (getattr(_sys, "_MEIPASS", None),
+                     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))):
+            if base:
+                d = os.path.join(base, "web")
+                if os.path.isdir(d):
+                    return d
+        return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+
+    _WEB = _web_dir()
+
+    @app.get("/config.js")
+    def _local_config():
+        # Same-origin API + a marker so the frontend can auto-login locally.
+        return Response('window.FFO_API_BASE="";window.FFO_LOCAL=true;',
+                        media_type="application/javascript")
+
+    @app.get("/", response_class=HTMLResponse)
+    def _index():
+        with open(os.path.join(_WEB, "index.html"), encoding="utf-8") as f:
+            return f.read()
+
+    # Everything else (app.js, styles.css, ...) straight from web/.
+    app.mount("/", StaticFiles(directory=_WEB), name="web")

@@ -14,7 +14,9 @@ import os
 
 import httpx
 
-GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
+# Optional: only needed for the (cloud) GitHub Actions path. The local
+# desktop app never uses gh.py, so importing it must not require a token.
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "pavelhroch1-web/excel-optimalizer")
 GITHUB_BRANCH = os.environ.get("GITHUB_BRANCH", "main")
 
