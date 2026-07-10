@@ -738,6 +738,19 @@ if LOCAL_MODE:
         return planner_sim.assess(body.mode, body.start_week, body.length,
                                   body.visits_per_tech_week, body.tech_count)
 
+    import planner_advisor  # noqa: E402
+
+    class AdviseRequest(SimRequest):
+        clear_neglect_weeks: int | None = None
+
+    @app.post("/api/planner/advise", dependencies=[Depends(require_auth)])
+    def planner_advise(body: AdviseRequest):
+        """Decision-support: assessment + verdict, weakest link, binding
+        constraint, what-to-change recommendations, and goal-seek."""
+        return planner_advisor.advise(body.mode, body.start_week, body.length,
+                                      body.visits_per_tech_week, body.tech_count,
+                                      body.clear_neglect_weeks)
+
     @app.post("/api/planner/whatif", dependencies=[Depends(require_auth)])
     def planner_whatif(body: WhatIfRequest):
         return planner_sim.what_if(body.base.model_dump(), body.scenario.model_dump())

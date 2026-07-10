@@ -154,7 +154,7 @@ def assess(mode: str, start_week: int, length: int,
                        "Cadence = jen GECO/CORN. Bez uvažování nových POS v čase.",
     }
 
-    # Consistent, plain gaps summary (from the coherent numbers).
+    # Consistent, plain gaps summary - ONLY from reliable numbers.
     gaps = []
     if capacity["utilizationPct"] is not None and capacity["utilizationPct"] > 100:
         gaps.append(f"Kapacita přetížená ({capacity['utilizationPct']} %), "
@@ -163,9 +163,19 @@ def assess(mode: str, start_week: int, length: int,
         gaps.append(f"{capacity['overloadedTechnicians']} techniků přetíženo (nerovnoměrné rozložení).")
     if cadence_remaining:
         gaps.append(f"{cadence_remaining} POS mimo GECO/CORN cadence.")
-    for cmp in sc["campaigns"]:
-        if cmp.get("pct") is not None and cmp["pct"] < 80:
-            gaps.append(f"Kampaň {cmp.get('activity', cmp.get('name', '?'))}: pokrytí {cmp['pct']} %.")
+
+    # Campaign coverage is NOT yet trustworthy (needs editable targets + the
+    # activity-plan scope match, task #59). Mark it pending so the advisor does
+    # not drive decisions off placeholder numbers.
+    targets = {r["name"]: r["target_visits"]
+               for r in db.get("SELECT name, target_visits FROM campaigns")}
+    campaigns_configured = sum(1 for c in sc["campaigns"]
+                               if targets.get(c.get("name") or c.get("activity")))
+    notes = []
+    if sc["campaigns"]:
+        notes.append("Pokrytí kampaní se zatím nevyhodnocuje spolehlivě "
+                     f"(cíle nastaveny u {campaigns_configured}/{len(sc['campaigns'])}, "
+                     "rozsah kampaň→POS se dodělává).")
 
     return {
         "scenario": sim["scenario"],
@@ -177,6 +187,8 @@ def assess(mode: str, start_week: int, length: int,
         "perRegion": sim["perRegion"],
         "projection": projection,
         "gaps": gaps,
+        "notes": notes,
+        "campaignCoveragePending": True,
     }
 
 
