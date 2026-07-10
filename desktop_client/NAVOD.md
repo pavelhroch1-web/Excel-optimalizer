@@ -1,3 +1,39 @@
+# Tour Plán Generátor (.exe) — nejjednodušší cesta k plánu
+
+**Tohle je ta appka, o kterou ti šlo: jedno okno, jedno tlačítko, plán na
+5 týdnů jako Excel — celé lokálně na tvém PC, žádný server, žádné čekání,
+žádný OOM.** Používá naprosto stejný Planning Engine jako web.
+
+## Vyrobení .exe (jednou, na Windows PC s Pythonem)
+
+1. Stáhni si repo (Code → Download ZIP) a rozbal, nebo měj naklonované.
+2. Ve složce `desktop_client` **dvojklikni na `build_tourplan_exe.bat`**.
+   Sám doinstaluje potřebné knihovny a zabalí appku.
+3. Hotovo → vznikne **`dist\FieldForceTourPlan.exe`**. Tenhle jeden soubor
+   zkopíruj kamkoli (i na firemní PC) a spouštěj dvojklikem — Python už
+   na cílovém počítači potřeba není.
+
+> Předpoklad pro build: Python 3.10+ z https://python.org (při instalaci
+> zaškrtnout „Add python.exe to PATH"). Build si nemusíš dělat ty —
+> můžu ti hotový `.exe` poslat.
+
+## Používání
+
+1. Spusť `FieldForceTourPlan.exe`.
+2. **(Nepovinné) Data:** když chceš plán z čerstvých dat, klikni „Vybrat
+   SalesApp exporty…" a vyber týdenní exporty (můžeš víc naráz). POS export
+   je nepovinný — bez něj se síť vezme z posledního snapshotu.
+3. **Parametry:** počáteční týden, horizont (kolik týdnů), návštěv na
+   technika a týden. Override „Štolba za Dvořáka" necháš zaškrtnutý,
+   pokud ho chceš.
+4. **Generovat a uložit Excel** → vybereš, kam soubor uložit → za chvíli
+   je hotovo. Excel má list `TOUR_PLAN` (celý plán) a `SOUHRN` (přehled).
+
+První týden = **Dojezd** (nejzanedbanější POS), zbytek = **Kampaň**;
+GECO/CORN cadence garantováno, každý POS max. 1× za horizont.
+
+---
+
 # Distribution Client — návod pro běžného uživatele (stažení, instalace, použití)
 
 Tenhle návod je pro tebe jako uživatele appky, ne pro vývojáře — bez

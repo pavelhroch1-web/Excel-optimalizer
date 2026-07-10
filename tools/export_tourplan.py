@@ -233,12 +233,22 @@ def main():
 
 
 def generate(start_week, length, cap_per_tech, forced, seed_workbook, out):
-    """Full 5-week (or N-week) plan: first week = Dojezd (neglect cleanup),
-    remaining weeks = campaign (full weeks), plus manager overrides."""
-    forced = forced or []
+    """Full 5-week (or N-week) plan from the scaffold snapshot: first week =
+    Dojezd (neglect cleanup), remaining weeks = campaign, plus overrides."""
     print("Building base state (Import + Compliance)…")
     base = build_base(seed_workbook)
+    rows, idx, base = build_plan(base, start_week, length, cap_per_tech, forced)
+    print(f"Plan rows total: {len(rows)}")
+    write_excel(rows, idx, base, out, start_week, length)
+    print("Wrote", out, "(", round(os.path.getsize(out) / 1e6, 2), "MB )")
 
+
+def build_plan(base, start_week, length, cap_per_tech, forced):
+    """Build the plan on an ALREADY-PREPARED base state (import+compliance
+    done). Returns (rows, idx, base). Shared by the CLI (scaffold snapshot)
+    and the desktop app (which can fold in fresh uploads first). The engine
+    is untouched; this only orchestrates dojezd + campaign + overrides."""
+    forced = forced or []
     forced_ids = set(str(p) for o in forced for p in o["pos"])
     if forced_ids:
         print(f"Manager override: {mark_force_exclude(base, forced_ids)} POS vyňato z automatiky")
@@ -276,9 +286,7 @@ def generate(start_week, length, cap_per_tech, forced, seed_workbook, out):
     rows = [r for r in mp[1:] if r and r[idx["WEEK"]] not in (None, "")]
     rows.sort(key=lambda r: (str(r[idx["TECHNICIAN"]]), int(r[idx["WEEK"]]),
                              DAY_ORDER.get(str(r[idx["DAY"]]), 9)))
-    print(f"Plan rows total: {len(rows)}")
-    write_excel(rows, idx, base, out, start_week, length)
-    print("Wrote", out, "(", round(os.path.getsize(out) / 1e6, 2), "MB )")
+    return rows, idx, base
 
 
 def cli():
