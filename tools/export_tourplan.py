@@ -136,6 +136,18 @@ def build_forced_rows(state, posids, tech, week, reason):
     return rows
 
 
+def set_capacity_override(state, tech, year, week, capacity):
+    """CAPACITY_OVERRIDE row (technician|year|week -> capacity) so the engine
+    plans only that many automatic visits for the technician that week -
+    leaving room for forced overrides."""
+    co = state.setdefault("CAPACITY_OVERRIDE", [["technician", "year", "week", "capacity"]])
+    for row in co[1:]:
+        if str(row[0]) == tech and str(row[1]) == str(year) and str(row[2]) == str(week):
+            row[3] = capacity
+            return
+    co.append([tech, year, week, capacity])
+
+
 def _lock_week(state, week):
     pl = state["PLAN_LIFECYCLE"]
     h = [str(x) for x in pl[0]]
@@ -243,6 +255,12 @@ def main():
     # the campaign weeks are FULL (strong/campaign POS get visited now, not
     # deferred into emptiness). GECO/CORN cadence stays guaranteed.
     pipeline._set_control(base, "HOLDBACK_LOOKAHEAD_WEEKS", 0)
+    # Leave room for forced overrides: cap the technician's automatic picks that
+    # week so automatic + override stays near normal capacity.
+    for o in FORCE_ASSIGN:
+        auto_cap = max(CAP_PER_TECH_WEEK - len(o["pos"]), 0)
+        set_capacity_override(base, o["technician"], 2026, o["week"], auto_cap)
+        print(f"Kapacita: {o['technician']} t{o['week']} automaticky {auto_cap} + override {len(o['pos'])} = {auto_cap + len(o['pos'])}")
     print("Planning weeks 30-33 (Kampaň, plné týdny)…", run_planning(base, 30, 4))
 
     # inject manager overrides (forced POS -> specific technician + week)
