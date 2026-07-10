@@ -137,15 +137,23 @@ async function handleUpload(e) {
       : saFiles.length + "× SalesApp (síť z posledního snapshotu)";
     setResult("upload-result",
       `Nahrávám (${what}) a počítám Import + Compliance… Může to trvat 1–3 min a server se možná probouzí – nezavírej stránku.`, "");
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 300000); // 5 min hard cap
     try {
-      const data = await apiJson("/api/draft/upload", { method: "POST", body: fd });
+      const res = await apiFetch("/api/draft/upload", { method: "POST", body: fd, signal: ctrl.signal });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || ("Server vrátil " + res.status));
       const m = data.messages || {};
       setResult("upload-result", "Hotovo – Draft vytvořen. " + (m.import || "") + " " + (m.compliance || ""), "ok");
       loadStatus();
       loadRules();
     } catch (err) {
-      setResult("upload-result", "Chyba při nahrávání: " + err.message, "err");
+      const msg = err.name === "AbortError"
+        ? "Vypršel čas (5 min). Server se možná probouzí – zkus to prosím ještě jednou."
+        : (err.message || err);
+      setResult("upload-result", "Chyba při nahrávání: " + msg, "err");
     } finally {
+      clearTimeout(timer);
       if (btn) btn.disabled = false;
     }
   } catch (err) {
@@ -154,6 +162,22 @@ async function handleUpload(e) {
 }
 on("upload-form", "submit", handleUpload);
 on("upload-btn", "click", (e) => { e.preventDefault(); handleUpload(e); });
+
+// Immediate confirmation that file selection registered (so it never feels
+// like "nothing happens"): list chosen files the moment they are picked.
+function confirmUploadSelection() {
+  const posEl = document.getElementById("pos-export");
+  const saEl = document.getElementById("salesapp-files");
+  const names = [];
+  if (saEl) for (const f of saEl.files) names.push(f.name);
+  if (posEl && posEl.files[0]) names.push(posEl.files[0].name + " (POS)");
+  if (names.length) {
+    setResult("upload-result", "Vybráno " + names.length + " souborů: " + names.join(", ") +
+      " — teď klikni „Nahrát a vytvořit Draft“.", "ok");
+  }
+}
+on("salesapp-files", "change", confirmUploadSelection);
+on("pos-export", "change", confirmUploadSelection);
 
 // ---- 2) generate ----------------------------------------------------------
 
