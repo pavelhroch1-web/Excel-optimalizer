@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Field Force Optimizer</title>
-<link rel="stylesheet" href="styles.css?v=8">
-<script src="config.js?v=8"></script>
+<link rel="stylesheet" href="styles.css?v=9">
+<script src="config.js?v=9"></script>
 </head>
 <body>
 
@@ -23,7 +23,7 @@
 
 <div id="app-screen" class="screen hidden">
   <header>
-    <h1>Field Force Optimizer <span class="ver">v8</span></h1>
+    <h1>Field Force Optimizer <span class="ver">v9</span></h1>
     <button id="logout" class="ghost">Odhlásit</button>
   </header>
 
@@ -39,6 +39,23 @@
     <div class="gauge">
       <div class="label">Draft</div>
       <div class="value" id="draft-state">—</div>
+    </div>
+  </section>
+
+  <!-- CLOUD GENERATE: heavy plan on GitHub Actions (no OOM here) -->
+  <section class="card brain-card">
+    <h2>Vygenerovat plán (cloud) <span class="badge">GitHub výpočet</span></h2>
+    <p class="hint">Jedno tlačítko: plán na víc týdnů se spočítá na GitHub serveru (dost paměti), pak si stáhneš Excel. Bere síť z posledního snapshotu, engine se nemění. Nemusíš nikam do Actions.</p>
+    <form id="cloud-form" class="row">
+      <label>Počáteční týden<input type="number" id="cloud-week" min="1" max="53" value="29" required></label>
+      <label>Horizont (týdnů)<input type="number" id="cloud-length" min="1" max="8" value="5"></label>
+      <label>Návštěv/technik/týden<input type="number" id="cloud-visits" min="1" value="40"></label>
+      <button type="submit" id="cloud-btn" class="primary">Spustit výpočet na GitHubu</button>
+    </form>
+    <p id="cloud-result" class="result"></p>
+    <div class="row" id="cloud-download-row" style="display:none">
+      <button id="cloud-download-btn" class="primary">Stáhnout Excel</button>
+      <a id="cloud-run-link" class="ghost" href="#" target="_blank" rel="noopener" style="display:none">Zobrazit běh na GitHubu</a>
     </div>
   </section>
 
@@ -270,6 +287,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

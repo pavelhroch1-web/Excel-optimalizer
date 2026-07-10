@@ -84,3 +84,44 @@ def read_json(path_in_repo: str, default=None):
 
 def write_json(path_in_repo: str, obj, commit_message: str) -> None:
     upload_bytes(path_in_repo, json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8"), commit_message)
+
+
+# ---------------------------------------------------------------------------
+# GitHub Actions: run the heavy tour-plan generation on a runner (~7 GB RAM),
+# so the 512 MB free host never has to. The backend only orchestrates - it
+# dispatches the workflow and reports status; the runner does the compute and
+# commits the Excel back into the repo (output/), which we then serve.
+# ---------------------------------------------------------------------------
+
+def _actions_url(suffix: str) -> str:
+    return f"https://api.github.com/repos/{GITHUB_REPO}/actions/{suffix}"
+
+
+def dispatch_workflow(workflow_file: str, inputs: dict, ref: str = GITHUB_BRANCH) -> None:
+    """Trigger a workflow_dispatch run. `inputs` values are sent as strings
+    (GitHub requires string inputs). Needs a token with Actions: write."""
+    body = {"ref": ref, "inputs": {k: str(v) for k, v in inputs.items()}}
+    with httpx.Client(timeout=60) as client:
+        resp = client.post(_actions_url(f"workflows/{workflow_file}/dispatches"),
+                           headers=_HEADERS, json=body)
+    resp.raise_for_status()
+
+
+def latest_run(workflow_file: str) -> dict | None:
+    """Newest run of the workflow (any event), with status/conclusion/url."""
+    with httpx.Client(timeout=60) as client:
+        resp = client.get(_actions_url(f"workflows/{workflow_file}/runs"),
+                          headers=_HEADERS, params={"per_page": 1})
+    resp.raise_for_status()
+    runs = resp.json().get("workflow_runs", [])
+    if not runs:
+        return None
+    r = runs[0]
+    return {
+        "id": r["id"],
+        "status": r["status"],            # queued | in_progress | completed
+        "conclusion": r["conclusion"],    # success | failure | cancelled | None
+        "html_url": r["html_url"],
+        "created_at": r["created_at"],
+        "run_number": r["run_number"],
+    }

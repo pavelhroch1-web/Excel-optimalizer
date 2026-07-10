@@ -23,6 +23,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: write
+
 jobs:
   generate:
     runs-on: ubuntu-latest

@@ -41,6 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import auth  # noqa: E402
 from auth import issue_token, require_auth  # noqa: E402
 import brain as brain_mod  # noqa: E402
+import gh  # noqa: E402
 import candidates as candidates_mod  # noqa: E402
 import decision as decision_mod  # noqa: E402
 import pipeline  # noqa: E402
@@ -108,6 +109,12 @@ class AddPosRequest(BaseModel):
 class SaveRulesRequest(BaseModel):
     sheet: str
     rows: list[dict]
+
+
+class CloudGenerateRequest(BaseModel):
+    start_week: int
+    length: int = 5
+    visits_per_tech: int = 40
 
 
 # --------------------------------------------------------------------------
@@ -499,6 +506,71 @@ def download_draft_plan():
         return _stream_sheet(path, "MANAGER_PLAN", "MANAGER_PLAN_draft.xlsx")
     finally:
         os.remove(path)
+
+
+# --------------------------------------------------------------------------
+# Cloud generate: run the heavy multi-week plan on a GitHub Actions runner
+# (~7 GB RAM) instead of this 512 MB host. The backend only orchestrates:
+# it dispatches the workflow, reports the run status, and streams the Excel
+# the runner committed into output/. One button on the web, no OOM here.
+# --------------------------------------------------------------------------
+
+WORKFLOW_FILE = "generate-tourplan.yml"
+
+
+def _cloud_output_path(start_week: int) -> str:
+    return f"output/TOUR_PLAN_tydny_{start_week}.xlsx"
+
+
+@app.post("/api/cloud/generate", dependencies=[Depends(require_auth)])
+def cloud_generate(body: CloudGenerateRequest):
+    """Trigger the GitHub Actions workflow that builds the plan and commits
+    the Excel into the repo (output/). Returns immediately; poll /status."""
+    try:
+        gh.dispatch_workflow(WORKFLOW_FILE, {
+            "start_week": body.start_week,
+            "length": body.length,
+            "visits_per_tech": body.visits_per_tech,
+            "commit_output": "true",
+        })
+    except Exception as e:
+        raise HTTPException(status_code=502,
+                            detail=f"Nepodařilo se spustit GitHub workflow: {e}")
+    return {"ok": True, "start_week": body.start_week,
+            "output_path": _cloud_output_path(body.start_week)}
+
+
+@app.get("/api/cloud/status", dependencies=[Depends(require_auth)])
+def cloud_status(start_week: int | None = None):
+    """Status of the newest workflow run + whether the Excel is ready."""
+    run = gh.latest_run(WORKFLOW_FILE)
+    ready = False
+    if start_week is not None and run and run["status"] == "completed" \
+            and run["conclusion"] == "success":
+        ready = gh.exists(_cloud_output_path(start_week))
+    return {"run": run, "ready": ready}
+
+
+@app.get("/api/cloud/download", dependencies=[Depends(require_auth)])
+def cloud_download(start_week: int):
+    """Stream the Excel the runner committed into output/."""
+    repo_path = _cloud_output_path(start_week)
+    if not gh.exists(repo_path):
+        raise HTTPException(status_code=404,
+                            detail="Plán ještě není hotový nebo neexistuje.")
+    path = _tmp()
+    try:
+        gh.download(repo_path, path)
+        with open(path, "rb") as f:
+            data = f.read()
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename=TOUR_PLAN_tydny_{start_week}.xlsx"},
+        )
+    finally:
+        if os.path.exists(path):
+            os.remove(path)
 
 
 # --------------------------------------------------------------------------

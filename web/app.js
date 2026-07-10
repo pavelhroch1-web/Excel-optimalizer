@@ -761,6 +761,71 @@ function renderPosDetail(d, week) {
   return html;
 }
 
+// ---- cloud generate (GitHub Actions) --------------------------------------
+
+let cloudPollTimer = null;
+
+async function cloudDownload(week) {
+  const res = await apiFetch(`/api/cloud/download?start_week=${week}`);
+  if (!res.ok) { setResult("cloud-result", "Stažení selhalo.", "err"); return; }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `TOUR_PLAN_tydny_${week}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function cloudPoll(week) {
+  if (cloudPollTimer) clearTimeout(cloudPollTimer);
+  const tick = async () => {
+    let data;
+    try {
+      data = await apiJson(`/api/cloud/status?start_week=${week}`);
+    } catch (e) {
+      setResult("cloud-result", "Chyba stavu: " + e.message, "err");
+      return;
+    }
+    const run = data.run;
+    const link = document.getElementById("cloud-run-link");
+    if (run && link) { link.href = run.html_url; link.style.display = ""; }
+    if (data.ready) {
+      setResult("cloud-result", "Hotovo! Plán je připravený ke stažení.", "ok");
+      document.getElementById("cloud-download-row").style.display = "";
+      document.getElementById("cloud-download-btn").onclick = () => cloudDownload(week);
+      return;
+    }
+    if (run && run.status === "completed" && run.conclusion !== "success") {
+      setResult("cloud-result", `Výpočet skončil chybou (${run.conclusion}). Otevři běh na GitHubu.`, "err");
+      return;
+    }
+    const label = run ? (run.status === "queued" ? "ve frontě" : "počítá se") : "spouští se";
+    setResult("cloud-result", `GitHub výpočet – ${label}… (obnovuji každých 12 s)`, "");
+    cloudPollTimer = setTimeout(tick, 12000);
+  };
+  tick();
+}
+
+on("cloud-form", "submit", async (e) => {
+  e.preventDefault();
+  const week = parseInt(document.getElementById("cloud-week").value, 10);
+  const length = parseInt(document.getElementById("cloud-length").value, 10) || 5;
+  const visits = parseInt(document.getElementById("cloud-visits").value, 10) || 40;
+  document.getElementById("cloud-download-row").style.display = "none";
+  setResult("cloud-result", "Spouštím výpočet na GitHubu…", "");
+  try {
+    await postJson("/api/cloud/generate", { start_week: week, length, visits_per_tech: visits });
+  } catch (err) {
+    setResult("cloud-result", "Nepodařilo se spustit: " + err.message, "err");
+    return;
+  }
+  // small delay so the run has time to appear, then poll
+  setTimeout(() => cloudPoll(week), 4000);
+});
+
 // ---- boot -----------------------------------------------------------------
 
 if (getToken()) showApp();
