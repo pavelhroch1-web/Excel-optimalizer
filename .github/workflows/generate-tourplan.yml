@@ -61,6 +61,7 @@ jobs:
 
       - name: Commit output to repo (optional)
         if: ${{ github.event.inputs.commit_output == 'true' }}
+        continue-on-error: true
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

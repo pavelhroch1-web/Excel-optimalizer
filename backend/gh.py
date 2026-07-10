@@ -125,3 +125,31 @@ def latest_run(workflow_file: str) -> dict | None:
         "created_at": r["created_at"],
         "run_number": r["run_number"],
     }
+
+
+def run_artifact(run_id: int, name: str) -> dict | None:
+    """The named artifact of a run (or None). Avoids needing repo write access
+    - the runner uploads the Excel as an artifact, which we then download."""
+    with httpx.Client(timeout=60) as client:
+        resp = client.get(_actions_url(f"runs/{run_id}/artifacts"), headers=_HEADERS)
+    resp.raise_for_status()
+    for a in resp.json().get("artifacts", []):
+        if a["name"] == name and not a.get("expired"):
+            return {"id": a["id"], "size": a["size_in_bytes"]}
+    return None
+
+
+def download_artifact_xlsx(artifact_id: int) -> bytes:
+    """Download an artifact zip and return the first .xlsx inside it."""
+    import io
+    import zipfile
+    url = _actions_url(f"artifacts/{artifact_id}/zip")
+    with httpx.Client(timeout=120, follow_redirects=True) as client:
+        resp = client.get(url, headers=_HEADERS)
+        resp.raise_for_status()
+        data = resp.content
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        for n in zf.namelist():
+            if n.lower().endswith(".xlsx"):
+                return zf.read(n)
+    raise ValueError("Artifact neobsahuje .xlsx soubor.")

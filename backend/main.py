@@ -516,61 +516,53 @@ def download_draft_plan():
 # --------------------------------------------------------------------------
 
 WORKFLOW_FILE = "generate-tourplan.yml"
-
-
-def _cloud_output_path(start_week: int) -> str:
-    return f"output/TOUR_PLAN_tydny_{start_week}.xlsx"
+ARTIFACT_NAME = "tour-plan"
 
 
 @app.post("/api/cloud/generate", dependencies=[Depends(require_auth)])
 def cloud_generate(body: CloudGenerateRequest):
-    """Trigger the GitHub Actions workflow that builds the plan and commits
-    the Excel into the repo (output/). Returns immediately; poll /status."""
+    """Trigger the GitHub Actions workflow that builds the plan and uploads
+    the Excel as an artifact. Returns immediately; poll /status."""
     try:
         gh.dispatch_workflow(WORKFLOW_FILE, {
             "start_week": body.start_week,
             "length": body.length,
             "visits_per_tech": body.visits_per_tech,
-            "commit_output": "true",
         })
     except Exception as e:
         raise HTTPException(status_code=502,
                             detail=f"Nepodařilo se spustit GitHub workflow: {e}")
-    return {"ok": True, "start_week": body.start_week,
-            "output_path": _cloud_output_path(body.start_week)}
+    return {"ok": True, "start_week": body.start_week}
 
 
 @app.get("/api/cloud/status", dependencies=[Depends(require_auth)])
-def cloud_status(start_week: int | None = None):
-    """Status of the newest workflow run + whether the Excel is ready."""
+def cloud_status():
+    """Status of the newest workflow run + whether its Excel artifact is ready."""
     run = gh.latest_run(WORKFLOW_FILE)
     ready = False
-    if start_week is not None and run and run["status"] == "completed" \
-            and run["conclusion"] == "success":
-        ready = gh.exists(_cloud_output_path(start_week))
+    if run and run["status"] == "completed" and run["conclusion"] == "success":
+        ready = gh.run_artifact(run["id"], ARTIFACT_NAME) is not None
     return {"run": run, "ready": ready}
 
 
 @app.get("/api/cloud/download", dependencies=[Depends(require_auth)])
-def cloud_download(start_week: int):
-    """Stream the Excel the runner committed into output/."""
-    repo_path = _cloud_output_path(start_week)
-    if not gh.exists(repo_path):
+def cloud_download(start_week: int = 0):
+    """Stream the Excel from the newest successful run's artifact."""
+    run = gh.latest_run(WORKFLOW_FILE)
+    art = gh.run_artifact(run["id"], ARTIFACT_NAME) if run else None
+    if not art:
         raise HTTPException(status_code=404,
-                            detail="Plán ještě není hotový nebo neexistuje.")
-    path = _tmp()
+                            detail="Plán ještě není hotový nebo artifact vypršel.")
     try:
-        gh.download(repo_path, path)
-        with open(path, "rb") as f:
-            data = f.read()
-        return StreamingResponse(
-            io.BytesIO(data),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f"attachment; filename=TOUR_PLAN_tydny_{start_week}.xlsx"},
-        )
-    finally:
-        if os.path.exists(path):
-            os.remove(path)
+        data = gh.download_artifact_xlsx(art["id"])
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Stažení artifactu selhalo: {e}")
+    name = f"TOUR_PLAN_tydny_{start_week}.xlsx" if start_week else "TOUR_PLAN.xlsx"
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={name}"},
+    )
 
 
 # --------------------------------------------------------------------------
