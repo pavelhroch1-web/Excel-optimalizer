@@ -24,11 +24,15 @@ from openpyxl.utils import get_column_letter
 
 from desktop_client.engines import compliance_engine, import_engine, planning_engine
 from desktop_client.engines.mock_workbook import MockWorkbook
+from desktop_client.engines.core_logic import POSItem, WorkDay, geo_days
+from desktop_client.engines.dates_logic import work_days, to_cs_cz_date_string
 
 import config_store
 import pipeline
 import snapshot_store
 import brain
+
+CAP_PER_TECH_WEEK = 40  # ~8 visits/day * 5 days
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCAFFOLD = os.path.join(ROOT, "workbook", "FieldForceOptimizer_V11_scaffold.xlsx")
@@ -54,6 +58,76 @@ def build_base():
     return state
 
 
+def _lock_week(state, week):
+    pl = state["PLAN_LIFECYCLE"]
+    h = [str(x) for x in pl[0]]
+    wi, si = h.index("week"), h.index("status")
+    for row in pl[1:]:
+        if str(row[wi]) == str(week):
+            row[si] = "Published"
+            return
+    pl.append([2026, week, "Published", "", ""])
+
+
+def build_week29_cleanup(state, week, cap_per_tech=CAP_PER_TECH_WEEK):
+    """Week-29 dojezd: pick the LONGEST-neglected eligible POS per technician
+    (rank by weeksSinceLastVisit), then let the engine route them into days.
+    The engine decides eligibility (candidates_out = the filtered pool); the
+    manager goal is neglect, not PPT."""
+    import copy
+    # 1) eligible pool from the engine's own filter (candidates_out).
+    probe = copy.deepcopy(state)
+    pipeline._set_control(probe, "CAMPAIGN_START_WEEK", week)
+    pipeline._set_control(probe, "CAMPAIGN_LENGTH", 1)
+    cap = []
+    planning_engine.run(MockWorkbook(probe), candidates_out=cap)
+
+    # 2) address fields (not in candidates_out) from POS_MASTER
+    pm = state["POS_MASTER"]
+    h = {n: i for i, n in enumerate(pm[0])}
+    addr = {}
+    for r in pm[1:]:
+        addr[str(r[h["posId"]])] = {
+            "ulice": r[h["street"]], "cislo": r[h["houseNumber"]], "mesto": r[h["city"]],
+            "oblast": r[h["area"]], "posArea": r[h["posArea"]],
+        }
+
+    # 3) rank each technician's eligible POS by neglect (desc), take capacity
+    by_tech = {}
+    for c in cap:
+        by_tech.setdefault(c["tech"], []).append(c)
+
+    days = work_days(2026, week)
+    wd = [WorkDay(day=d.day, dateIso=to_cs_cz_date_string(d.date)) for d in days]
+    rows = []
+    for tech, pool in by_tech.items():
+        pool.sort(key=lambda c: (c.get("weeksSinceLastVisit") if c.get("weeksSinceLastVisit") is not None else -1),
+                  reverse=True)
+        chosen = pool[:cap_per_tech]
+        items = []
+        for c in chosen:
+            a = addr.get(str(c["pos"]), {})
+            it = POSItem(
+                pos=str(c["pos"]), tech=tech, kategorie=c.get("kategorie", ""), market=c.get("market", ""),
+                classification=c.get("classification", ""), nazev=c.get("nazev", ""),
+                ulice=a.get("ulice", ""), cislo=a.get("cislo", ""), mesto=a.get("mesto", ""),
+                oblast=a.get("oblast", ""), posArea=a.get("posArea", ""),
+                ppt=c.get("ppt", 0) or 0, x=c.get("x", 0) or 0, y=c.get("y", 0) or 0,
+                weeksSinceLastVisit=c.get("weeksSinceLastVisit"), forceInclude=False,
+                core=bool(c.get("core")), mandatoryRuleId=c.get("mandatoryRuleId"),
+            )
+            wsv = c.get("weeksSinceLastVisit")
+            it.score = float(wsv) if wsv is not None else 0.0  # anchor by neglect
+            it.reason = (f"MANDATORY ({c['mandatoryRuleId']}) | " if c.get("mandatoryRuleId") else "") + \
+                        f"DOJEZD (zanedbáno {wsv if wsv is not None else '?'} týd.) | "
+            items.append(it)
+        for pv in geo_days(items, wd):
+            p = pv.pos
+            rows.append([week, pv.dateIso, pv.day, tech, p.pos, p.kategorie, p.nazev,
+                         p.ulice, p.cislo, p.mesto, p.oblast, p.posArea, p.ppt, "", "", p.reason, pv.group])
+    return rows
+
+
 def run_planning(state, start, length):
     pipeline._set_control(state, "CAMPAIGN_START_WEEK", start)
     pipeline._set_control(state, "CAMPAIGN_LENGTH", length)
@@ -67,15 +141,26 @@ def main():
     print("Building base state (Import + Compliance)…")
     base = build_base()
 
-    # A usable 5-week plan needs FULL weeks (technicians work every week).
-    # Campaign-mode hold-back empties whole pre-campaign weeks, so for a
-    # hand-out plan we sweep the network (Dojezd): campaigns off -> no
-    # hold-back, every week filled by neglect/score. All hard functionality
-    # still applies - GECO/CORN cadence guaranteed, CORE, PPT/premium, GPS
-    # clustering, address dedup. Each POS is planned at most once across the
-    # 5 weeks (the engine's own used-set).
-    brain.apply_mode(base, "dojezd")
-    print("Planning weeks 29-33 (Dojezd sítě, plné týdny)…", run_planning(base, 29, 5))
+    # WEEK 29 = DOJEZD: visit the LONGEST-neglected POS (rank by
+    # weeksSinceLastVisit), NOT the high-PPT ones - those stay fresh for the
+    # campaign weeks. The engine still decides who is eligible (filters) and
+    # routes the chosen POS into days (geo_days); the manager goal here is
+    # "clean up the neglected network", not "grab the strongest".
+    week29_rows = build_week29_cleanup(base, 29)
+    print(f"Week 29 (Dojezd, nejzanedbanější): {len(week29_rows)} návštěv")
+
+    # Inject week 29 as a locked week so the campaign run carries it and never
+    # re-plans its POS; the strong POS remain available for weeks 30-33.
+    mp = base["MANAGER_PLAN"]
+    for r in week29_rows:
+        mp.append(r)
+    _lock_week(base, 29)
+
+    # WEEKS 30-33 = KAMPAŇ: campaigns active, but hold-back look-ahead off so
+    # the campaign weeks are FULL (strong/campaign POS get visited now, not
+    # deferred into emptiness). GECO/CORN cadence stays guaranteed.
+    pipeline._set_control(base, "HOLDBACK_LOOKAHEAD_WEEKS", 0)
+    print("Planning weeks 30-33 (Kampaň, plné týdny)…", run_planning(base, 30, 4))
 
     plan = base["MANAGER_PLAN"]
     hdr = plan[0]
@@ -117,11 +202,14 @@ def write_excel(rows, idx, state):
     s.append(["Celkem naplánováno návštěv", len(rows)])
     s.append(["Počet techniků", len(per_tech)])
     s.append([])
-    s.append(["Režim", "Dojezd sítě (plné týdny) – GECO/CORN garantováno, CORE, PPT, neglect, GPS shluky"])
+    s.append(["Strategie", "T29 = Dojezd (nejzanedbanější POS) · T30–33 = Kampaň (silné POS, plné týdny)"])
+    s.append(["", "GECO/CORN cadence garantováno, každý POS max. 1× za 5 týdnů"])
     s.append(["Návštěvy po týdnech", ""])
     s.cell(s.max_row, 1).font = Font(bold=True)
+    labels = {29: "Týden 29 (Dojezd – zanedbané)", 30: "Týden 30 (Kampaň)", 31: "Týden 31 (Kampaň)",
+              32: "Týden 32 (Kampaň)", 33: "Týden 33 (Kampaň)"}
     for w in (29, 30, 31, 32, 33):
-        s.append([f"Týden {w}", per_week.get(w, 0)])
+        s.append([labels[w], per_week.get(w, 0)])
     s.append([])
     s.append(["Návštěvy po technicích", ""])
     s.cell(s.max_row, 1).font = Font(bold=True)
