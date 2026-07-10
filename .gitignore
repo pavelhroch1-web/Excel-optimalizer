@@ -16,3 +16,6 @@ workbook/*.backup_*.xlsx
 # never committed. This file is only here in case anyone creates one
 # locally for testing.
 backend/.env
+
+# generated tour-plan exports
+TOUR_PLAN_*.xlsx
