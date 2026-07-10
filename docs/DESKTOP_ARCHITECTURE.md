@@ -93,6 +93,24 @@ config the plan is byte-identical to the pre-DB baseline (5117 rows); modes
 diverge (dojezd 8019 vs kampan 7181).** The engine's algorithm is untouched —
 editing a rule/setting changes planning with no code change.
 
+## Route Planner (module) — decisions from the product owner
+The Route Planner is the **long-term technician visit plan** (who visits which
+POS, when), driven by the agreed business rules via the engine. Confirmed
+workflow:
+- **Order within a day is left to the technician** — the app only decides WHICH
+  POS belong to a day (geographic grouping); no intra-day sequencing.
+- **Km are supportive information only** (efficiency indicator), never an
+  optimisation goal; no fixed technician start point.
+- The manager's need is **review & control** (see the plan per technician over
+  weeks, verify coverage of goals/campaigns/cadence, regenerate with different
+  rules) — not manual editing yet.
+- Typical horizon **4–6 weeks**.
+
+Implemented as a read model over the engine's output: `route_planner.py`
+(materialise `draft_plans` + per-technician week→day view with supportive km),
+endpoints `/api/planner/technicians` + `/api/planner/route`, and a Route
+Planner review card in the UI. No planning logic is duplicated here.
+
 ## Roadmap
 - **Fáze 0 (hotovo):** portable `.exe`, SQLite datastore, Planning Engine reads
   config from SQLite (db_state), existing UI, immutable publish.

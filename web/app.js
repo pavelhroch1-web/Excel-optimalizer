@@ -60,6 +60,7 @@ function showApp() {
   loadVersions();
   loadRules();
   loadStrategyModes();
+  loadRouteTechnicians();
 }
 function showLogin() {
   appScreen.classList.add("hidden");
@@ -824,6 +825,64 @@ on("cloud-form", "submit", async (e) => {
   }
   // small delay so the run has time to appear, then poll
   setTimeout(() => cloudPoll(week), 4000);
+});
+
+// ---- route planner (long-term per-technician plan) ------------------------
+
+async function loadRouteTechnicians() {
+  const sel = document.getElementById("route-technician");
+  if (!sel) return;
+  try {
+    const data = await apiJson("/api/planner/technicians");
+    const techs = data.technicians || [];
+    sel.innerHTML = techs.length
+      ? techs.map((t) => `<option value="${esc(t.technician)}">${esc(t.technician)} (${t.visits}, t${t.wk_from}–${t.wk_to})</option>`).join("")
+      : `<option value="">— nejdřív vygeneruj plán —</option>`;
+  } catch (e) {
+    sel.innerHTML = `<option value="">—</option>`;
+  }
+}
+
+function renderRoute(r) {
+  const DAYS = { MON: "Po", TUE: "Út", WED: "St", THU: "Čt", FRI: "Pá" };
+  if (!r.weeks || !r.weeks.length) return `<p class="pd-sub">Pro tohoto technika není v plánu žádná návštěva.</p>`;
+  let html = `<p class="pd-sub">Celkem <strong>${r.totalVisits}</strong> návštěv v ${r.weeks.length} týdnech.</p>`;
+  for (const w of r.weeks) {
+    html += `<div class="pd-section">Týden ${w.week} — ${w.visits} návštěv · ~${w.supportive_km} km (info)</div>`;
+    for (const d of w.days) {
+      html += `<div style="margin:6px 0 2px"><strong>${DAYS[d.day] || d.day}</strong> ${d.date ? "· " + esc(d.date) : ""} — ${d.count} POS · ~${d.supportive_km} km</div>`;
+      html += `<table class="pd-score-table"><tbody>` +
+        d.stops.map((s) =>
+          `<tr><td><span class="pos-link" data-pos="${esc(s.pos_id)}">${esc(s.pos_id)}</span></td>` +
+          `<td>${esc(s.name || "")}</td><td>${esc(s.city || "")}</td>` +
+          `<td>${esc(s.category || "")}</td><td>${esc(s.reason || "")}</td></tr>`).join("") +
+        `</tbody></table>`;
+    }
+  }
+  return html;
+}
+
+on("route-form", "submit", async (e) => {
+  e.preventDefault();
+  const tech = document.getElementById("route-technician").value;
+  if (!tech) { setResult("route-result", "Vyber technika (nejdřív vygeneruj plán).", "err"); return; }
+  const wf = document.getElementById("route-week-from").value;
+  const wt = document.getElementById("route-week-to").value;
+  setResult("route-result", "Načítám plán…", "");
+  try {
+    const q = new URLSearchParams({ technician: tech });
+    if (wf) q.set("week_from", wf);
+    if (wt) q.set("week_to", wt);
+    const r = await apiJson("/api/planner/route?" + q.toString());
+    document.getElementById("route-body").innerHTML = renderRoute(r);
+    setResult("route-result", "", "ok");
+    // POS links open the existing POS detail panel
+    document.querySelectorAll("#route-body .pos-link").forEach((el) => {
+      el.addEventListener("click", () => openPosDetail && openPosDetail(el.dataset.pos));
+    });
+  } catch (err) {
+    setResult("route-result", "Chyba: " + err.message, "err");
+  }
 });
 
 // ---- boot -----------------------------------------------------------------
