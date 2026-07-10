@@ -154,12 +154,17 @@ def import_activity_plan(conn, wb) -> int:
         name = _g(row, hidx, "ACTIVITY")
         if name is None:
             continue
+        odhad_raw = _g(row, hidx, "ODHAD_NAVSTEV_ZA_KAMPAN")
+        try:
+            target = int(float(odhad_raw)) if odhad_raw not in (None, "") else None
+        except (ValueError, TypeError):
+            target = None
         conn.execute(
-            "INSERT INTO campaigns (kind, name, year, start_week, end_week, priority, override_gap, estimate) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO campaigns (kind, name, year, start_week, end_week, priority, override_gap, estimate, target_visits) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             (_g(row, hidx, "TYPE"), str(name), 2026, _g(row, hidx, "START_WEEK"),
              _g(row, hidx, "END_WEEK"), _g(row, hidx, "PRIORITY"), _g(row, hidx, "OVERRIDE_GAP"),
-             str(_g(row, hidx, "ODHAD_NAVSTEV_ZA_KAMPAN") or "")))
+             str(odhad_raw or ""), target))
         n += 1
     return n
 

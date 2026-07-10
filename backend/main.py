@@ -668,6 +668,32 @@ if LOCAL_MODE:
     def data_summary():
         return {t: db.get(f"SELECT COUNT(*) AS c FROM {t}")[0]["c"] for t in _DATA_TABLES}
 
+    # Campaigns: editable in-app (target_visits = campaign goal; Excel ODHAD is
+    # often empty, and the app is the source of truth).
+    class CampaignUpdate(BaseModel):
+        target_visits: int | None = None
+        priority: int | None = None
+        objective_id: int | None = None
+
+    @app.get("/api/campaigns", dependencies=[Depends(require_auth)])
+    def list_campaigns():
+        rows = db.get("SELECT id, kind, name, year, start_week, end_week, priority, "
+                      "override_gap, estimate, target_visits, objective_id, active "
+                      "FROM campaigns ORDER BY start_week, name")
+        return {"campaigns": [dict(r) for r in rows]}
+
+    @app.put("/api/campaigns/{campaign_id}", dependencies=[Depends(require_auth)])
+    def update_campaign(campaign_id: int, body: CampaignUpdate):
+        sets, params = [], []
+        for f in ("target_visits", "priority", "objective_id"):
+            v = getattr(body, f)
+            if v is not None:
+                sets.append(f"{f}=?"); params.append(v)
+        if sets:
+            params.append(campaign_id)
+            db.run(f"UPDATE campaigns SET {', '.join(sets)}, updated_at=datetime('now') WHERE id=?", tuple(params))
+        return {"ok": True}
+
     import pos_insights  # noqa: E402
 
     @app.get("/api/pos/{pos_id}/visits", dependencies=[Depends(require_auth)])

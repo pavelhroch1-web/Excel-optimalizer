@@ -143,7 +143,8 @@ CREATE TABLE IF NOT EXISTS campaigns (
     end_week     INTEGER,
     priority     INTEGER,
     override_gap INTEGER,
-    estimate     TEXT,                      -- ODHAD (demand), kept as-is
+    estimate     TEXT,                      -- ODHAD raw text (kept as-is)
+    target_visits INTEGER,                  -- campaign goal, editable in-app (seed from ODHAD)
     objective_id INTEGER REFERENCES objectives(id),  -- campaign -> business objective
     active       INTEGER NOT NULL DEFAULT 1,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
