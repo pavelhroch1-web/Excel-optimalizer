@@ -60,6 +60,7 @@ function showApp() {
   loadVersions();
   loadRules();
   loadStrategyModes();
+  loadPlannerModes();
   loadRouteTechnicians();
 }
 function showLogin() {
@@ -825,6 +826,132 @@ on("cloud-form", "submit", async (e) => {
   }
   // small delay so the run has time to appear, then poll
   setTimeout(() => cloudPoll(week), 4000);
+});
+
+// ---- planner (decision-support work tool) ---------------------------------
+
+let _plannerParams = null;
+
+async function loadPlannerModes() {
+  const sel = document.getElementById("planner-mode");
+  if (!sel) return;
+  try {
+    const d = await apiJson("/api/strategy-modes");
+    sel.innerHTML = (d.modes || []).map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join("");
+  } catch (e) { /* ignore */ }
+}
+
+function tile(label, value, sub, cls) {
+  return `<div class="pl-tile ${cls || ""}"><div class="v">${value}</div><div class="l">${esc(label)}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ""}</div>`;
+}
+
+function renderAdvise(a) {
+  const ad = a.advice, cap = a.capacity, cad = a.coverage.cadence, neg = a.coverage.neglect;
+  const utl = cap.utilizationPct;
+  const utilCls = utl == null ? "" : (utl > 100 ? "bad" : (utl > 90 ? "warn" : "good"));
+  let html = "";
+  // verdict
+  html += `<div class="pl-verdict ${ad.verdict.level}"><div class="dot"></div><div>` +
+    `<h3>${ad.verdict.level === "good" ? "✓ Dává smysl" : ad.verdict.level === "risk" ? "✗ Rizika" : "◐ Se slabinami"}</h3>` +
+    `<p class="vsum">${esc(ad.verdict.summary)}</p>` +
+    `<div class="vrow"><b>Nejslabší místo:</b> ${esc(ad.weakestLink)}</div>` +
+    `<div class="vrow"><b>Co brzdí růst:</b> ${esc(ad.bindingConstraint)}</div>` +
+    `</div></div>`;
+  // tiles
+  html += `<div class="pl-tiles">`;
+  html += tile("Vytížení kapacity", (utl == null ? "—" : utl + " %"),
+    `${cap.plannedVisits} z ${cap.totalCapacity} návštěv`, utilCls);
+  html += tile("Přetížení technici", cap.overloadedTechnicians,
+    `z ${cap.technicians} · ${cap.underloadedTechnicians} nevyužito`, cap.overloadedTechnicians ? "warn" : "good");
+  html += tile("Cadence GECO/CORN", (cad.pct == null ? "—" : cad.pct + " %"),
+    `mimo: ${Math.max((cad.overdue || 0) - (cad.covered || 0), 0)}`, ((cad.overdue - cad.covered) > 0) ? "bad" : "good");
+  html += tile("Neglect backlog", neg.backlogBefore, `dojede se ${neg.cleared}`, neg.remainingAfter ? "warn" : "good");
+  html += tile("Kampaně", "zatím —", "cíle + rozsah se dodělávají", "pending");
+  html += `</div>`;
+  // recommendations
+  if (ad.recommendations && ad.recommendations.length) {
+    html += `<div class="pl-section">Co změnit</div><ul class="pl-recs">` +
+      ad.recommendations.map((r) => `<li>${esc(r)}</li>`).join("") + `</ul>`;
+  }
+  // workload bars
+  const techs = (a.perTechnician || []).slice(0, 20);
+  if (techs.length) {
+    html += `<div class="pl-section">Vytížení techniků (návštěv/týden vs kapacita ${cap.visitsPerTechWeek})</div>`;
+    html += techs.map((t) => {
+      const w = Math.min(100, Math.round((t.utilizationPct || 0)));
+      return `<div class="pl-tech ${t.status}"><span class="nm">${esc(t.technician)}</span>` +
+        `<span class="pl-bar"><span style="width:${w}%"></span></span>` +
+        `<span class="ut">${t.avgPerWeek}/t · ${t.utilizationPct ?? "—"} %</span></div>`;
+    }).join("");
+  }
+  // region (informational, collapsible)
+  if (a.perRegion && a.perRegion.length) {
+    html += `<div class="pl-section">Zátěž regionů (informativně)</div>`;
+    html += `<div style="font-size:13px;color:var(--text-dim)">` +
+      a.perRegion.slice(0, 8).map((r) => `${esc(r.region)}: ${r.visits}`).join(" · ") + `</div>`;
+  }
+  return html;
+}
+
+function renderCompare(base, scen) {
+  const row = (label, b, s) => {
+    const d = (typeof b === "number" && typeof s === "number") ? s - b : null;
+    const dcls = d == null || d === 0 ? "" : (d > 0 ? "pos" : "neg");
+    return `<div class="vrow"><b>${esc(label)}:</b> ${b} → ${s}` +
+      (d != null && d !== 0 ? ` <span class="pl-delta ${dcls}">(${d > 0 ? "+" : ""}${d})</span>` : "") + `</div>`;
+  };
+  return `<div class="pl-compare">` +
+    `<div class="col"><h4>Aktuální</h4>${verdictMini(base)}</div>` +
+    `<div class="arrow">→</div>` +
+    `<div class="col"><h4>Co kdyby</h4>${verdictMini(scen)}</div></div>` +
+    `<div style="margin-top:10px">` +
+    row("Vytížení %", base.capacity.utilizationPct, scen.capacity.utilizationPct) +
+    row("Přetížení techniků", base.capacity.overloadedTechnicians, scen.capacity.overloadedTechnicians) +
+    row("Naplánováno návštěv", base.capacity.plannedVisits, scen.capacity.plannedVisits) +
+    `</div>`;
+}
+function verdictMini(a) {
+  const v = a.advice.verdict;
+  return `<span class="badge" style="background:${v.level === "good" ? "var(--good)" : v.level === "risk" ? "#B3453A" : "var(--warn)"}">${v.level}</span> ${esc(a.advice.weakestLink)}`;
+}
+
+on("planner-form", "submit", async (e) => {
+  e.preventDefault();
+  const p = {
+    mode: document.getElementById("planner-mode").value,
+    start_week: parseInt(document.getElementById("planner-week").value, 10),
+    length: parseInt(document.getElementById("planner-length").value, 10) || 5,
+    visits_per_tech_week: parseFloat(document.getElementById("planner-visits").value) || null,
+    tech_count: parseInt(document.getElementById("planner-techs").value, 10) || null,
+  };
+  if (!p.start_week) { setResult("planner-result", "Zadej počáteční týden.", "err"); return; }
+  setResult("planner-result", "Počítám scénář (běží engine)…", "");
+  try {
+    const a = await postJson("/api/planner/advise", p);
+    _plannerParams = p; window._plannerBase = a;
+    document.getElementById("planner-out").innerHTML = renderAdvise(a);
+    setResult("planner-result", "", "ok");
+    document.getElementById("planner-whatif-wrap").classList.remove("hidden");
+    document.getElementById("whatif-visits").value = p.visits_per_tech_week || 40;
+  } catch (err) {
+    setResult("planner-result", "Chyba: " + err.message, "err");
+  }
+});
+
+on("planner-whatif-form", "submit", async (e) => {
+  e.preventDefault();
+  if (!_plannerParams) return;
+  const scen = { ..._plannerParams,
+    visits_per_tech_week: parseFloat(document.getElementById("whatif-visits").value) || _plannerParams.visits_per_tech_week,
+    tech_count: parseInt(document.getElementById("whatif-techs").value, 10) || _plannerParams.tech_count,
+  };
+  document.getElementById("planner-compare").innerHTML = "<p class='result'>Počítám…</p>";
+  try {
+    const s = await postJson("/api/planner/advise", scen);
+    document.getElementById("planner-compare").innerHTML = renderCompare(window._plannerBase, s);
+  } catch (err) {
+    document.getElementById("planner-compare").innerHTML = `<p class="result err">Chyba: ${esc(err.message)}</p>`;
+  }
 });
 
 // ---- route planner (long-term per-technician plan) ------------------------

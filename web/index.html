@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Field Force Optimizer</title>
-<link rel="stylesheet" href="styles.css?v=10">
-<script src="config.js?v=10"></script>
+<link rel="stylesheet" href="styles.css?v=11">
+<script src="config.js?v=11"></script>
 </head>
 <body>
 
@@ -23,7 +23,7 @@
 
 <div id="app-screen" class="screen hidden">
   <header>
-    <h1>Field Force Optimizer <span class="ver">v10</span></h1>
+    <h1>Field Force Optimizer <span class="ver">v11</span></h1>
     <button id="logout" class="ghost">Odhlásit</button>
   </header>
 
@@ -39,6 +39,32 @@
     <div class="gauge">
       <div class="label">Draft</div>
       <div class="value" id="draft-state">—</div>
+    </div>
+  </section>
+
+  <!-- PLANNER: decision-support work tool -->
+  <section class="card planner-card">
+    <h2>Planner <span class="badge">Rozhodovací nástroj</span></h2>
+    <p class="hint">Otevři scénář a během chvíle víš: dává plán obchodní smysl, kde je nejslabší místo, co brzdí růst a co změnit. Vše se řídí konfigurací a Business Rules.</p>
+    <form id="planner-form" class="row">
+      <label>Strategie<select id="planner-mode"></select></label>
+      <label>Počáteční týden<input type="number" id="planner-week" min="1" max="53" required></label>
+      <label>Horizont (týdnů)<input type="number" id="planner-length" min="1" max="12" value="5"></label>
+      <label>Návštěv/technik/týden<input type="number" id="planner-visits" min="1" value="40"></label>
+      <label>Techniků (nepovinné)<input type="number" id="planner-techs" min="1" placeholder="auto"></label>
+      <button type="submit" id="planner-btn" class="primary">Vyhodnotit scénář</button>
+    </form>
+    <p id="planner-result" class="result"></p>
+    <div id="planner-out"></div>
+
+    <div class="pl-whatif hidden" id="planner-whatif-wrap">
+      <div class="pl-section">Co kdyby…</div>
+      <form id="planner-whatif-form" class="row">
+        <label>Návštěv/technik/týden<input type="number" id="whatif-visits" min="1"></label>
+        <label>Techniků<input type="number" id="whatif-techs" min="1" placeholder="stejně"></label>
+        <button type="submit" class="ghost">Porovnat se scénářem</button>
+      </form>
+      <div id="planner-compare"></div>
     </div>
   </section>
 
@@ -303,6 +329,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>
