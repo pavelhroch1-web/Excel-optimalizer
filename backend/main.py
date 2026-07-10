@@ -312,7 +312,9 @@ def draft_generate(body: GenerateRequest):
             import db_state
             db_state.configure(state, body.mode, body.start_week, body.length,
                                body.visits_per_tech_week)
+            _local_after_generate = True
         else:
+            _local_after_generate = False
             # Field Brain: a strategy mode + capacity only change goals/weights
             # via config; the Planning Engine algorithm is unchanged.
             brain_mod.apply_mode(state, body.mode)
@@ -320,6 +322,10 @@ def draft_generate(body: GenerateRequest):
         messages = pipeline.run_planning(state, body.start_week, body.length)
         state_xlsx.save_state(state, path)
         store.save_draft(path, f"Generovat tour plan: tyden {body.start_week}, delka {body.length}, rezim {body.mode}")
+        if _local_after_generate:
+            # Persist the plan into draft_plans for the Route Planner / analytics.
+            import route_planner
+            route_planner.materialize_draft_plans(state)
         return {"messages": messages, "summary": pipeline._summarize(state, body.start_week, body.length)}
     finally:
         os.remove(path)
@@ -668,6 +674,18 @@ if LOCAL_MODE:
     def pos_visits(pos_id: str):
         """Informational: who visited this POS (technician vs OZ), when, what."""
         return pos_insights.pos_visit_summary(pos_id)
+
+    # Route Planner: long-term per-technician visit plan (read model over the
+    # draft the engine produced; km are supportive info only).
+    import route_planner  # noqa: E402
+
+    @app.get("/api/planner/technicians", dependencies=[Depends(require_auth)])
+    def planner_technicians():
+        return {"technicians": route_planner.planned_technicians()}
+
+    @app.get("/api/planner/route", dependencies=[Depends(require_auth)])
+    def planner_route(technician: str, week_from: int | None = None, week_to: int | None = None):
+        return route_planner.technician_route(technician, week_from, week_to)
 
     # Business Rules: planning logic as data (toggle / edit params, no code).
     import business_rules as _rules  # noqa: E402
