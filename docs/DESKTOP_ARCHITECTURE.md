@@ -93,6 +93,17 @@ config the plan is byte-identical to the pre-DB baseline (5117 rows); modes
 diverge (dojezd 8019 vs kampan 7181).** The engine's algorithm is untouched —
 editing a rule/setting changes planning with no code change.
 
+## Campaign coverage — definitions from the product owner
+- **Target (how many)** = the Activity Plan **ODHAD** (`ODHAD_NAVSTEV_ZA_KAMPAN`).
+  It is often empty in the Excel, so the app owns it: `campaigns.target_visits`
+  is editable in-app (seeded from ODHAD when present).
+- **Scope (which POS)** = the Activity Plan **TYPE**, exactly as the engine
+  already matches campaigns to POS: every POS carries Lottery (LOS) + scratch
+  (LOT), so LOS/LOT campaigns effectively span the network; market/terminal
+  campaigns are a subset (`market_ok` / `terminal_ok`). Coverage must reuse the
+  engine's `ActivityPlanWindow` + matching, not a divergent reimplementation.
+- Coverage % = matching POS visited during the campaign window / target.
+
 ## Route Planner (module) — decisions from the product owner
 The Route Planner is the **long-term technician visit plan** (who visits which
 POS, when), driven by the agreed business rules via the engine. Confirmed
