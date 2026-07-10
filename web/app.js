@@ -115,31 +115,45 @@ async function loadStatus() {
 
 // ---- 1) upload ------------------------------------------------------------
 
-on("upload-form", "submit", async (e) => {
-  e.preventDefault();
-  const posFile = document.getElementById("pos-export").files[0];
-  const saFiles = document.getElementById("salesapp-files").files;
-  if (!posFile) return;
-  const fd = new FormData();
-  fd.append("pos_export", posFile);
-  for (const f of saFiles) fd.append("salesapp", f);
-
-  const btn = document.getElementById("upload-btn");
-  btn.disabled = true;
-  setResult("upload-result", "Nahrávám a počítám Import + Compliance… (může trvat i minutu)", "");
+async function handleUpload(e) {
+  if (e) e.preventDefault();
+  setResult("upload-result", "Připravuji nahrání…", "");
   try {
-    const data = await apiJson("/api/draft/upload", { method: "POST", body: fd });
-    const m = data.messages || {};
+    const posEl = document.getElementById("pos-export");
+    const saEl = document.getElementById("salesapp-files");
+    const posFile = posEl && posEl.files[0];
+    const saFiles = (saEl && saEl.files) || [];
+    if (!posFile && saFiles.length === 0) {
+      setResult("upload-result", "Vyber aspoň jeden soubor: SalesApp export (týdenní) a/nebo POS export.", "err");
+      return;
+    }
+    const fd = new FormData();
+    if (posFile) fd.append("pos_export", posFile);
+    for (const f of saFiles) fd.append("salesapp", f);
+
+    const btn = document.getElementById("upload-btn");
+    if (btn) btn.disabled = true;
+    const what = posFile ? "POS export + " + saFiles.length + "× SalesApp"
+      : saFiles.length + "× SalesApp (síť z posledního snapshotu)";
     setResult("upload-result",
-      "Draft vytvořen. " + (m.import || "") + " " + (m.compliance || ""), "ok");
-    loadStatus();
-    loadRules();
+      `Nahrávám (${what}) a počítám Import + Compliance… Může to trvat 1–3 min a server se možná probouzí – nezavírej stránku.`, "");
+    try {
+      const data = await apiJson("/api/draft/upload", { method: "POST", body: fd });
+      const m = data.messages || {};
+      setResult("upload-result", "Hotovo – Draft vytvořen. " + (m.import || "") + " " + (m.compliance || ""), "ok");
+      loadStatus();
+      loadRules();
+    } catch (err) {
+      setResult("upload-result", "Chyba při nahrávání: " + err.message, "err");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   } catch (err) {
-    setResult("upload-result", "Chyba: " + err.message, "err");
-  } finally {
-    btn.disabled = false;
+    setResult("upload-result", "Chyba: " + (err && err.message ? err.message : err), "err");
   }
-});
+}
+on("upload-form", "submit", handleUpload);
+on("upload-btn", "click", (e) => { e.preventDefault(); handleUpload(e); });
 
 // ---- 2) generate ----------------------------------------------------------
 

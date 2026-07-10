@@ -282,18 +282,41 @@ def _published_weeks(state: dict) -> set:
     return out
 
 
+def read_workbook_sheet(path: str, sheet: str) -> list[list]:
+    """Reads one named sheet of a workbook as plain rows (or [] if absent)."""
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        if sheet not in wb.sheetnames:
+            return []
+        ws = wb[sheet]
+        rows = [[_cell_to_json(v) for v in row] for row in ws.iter_rows(values_only=True)]
+        while rows and all(v == "" for v in rows[-1]):
+            rows.pop()
+        return rows
+    finally:
+        wb.close()
+
+
 def build_upload_draft(
-    raw_data_rows: list[list],
+    raw_data_rows: list[list] | None,
     salesapp_exports: list[list[list]],
     seed_workbook: str | None = None,
 ) -> dict:
     """The Upload step: resume from the latest published snapshot, fold in
     this run's fresh exports, and run Import -> Compliance (NOT planning).
     Returns {state, messages}. `state` is the ready-to-plan Draft workbook
-    state; the caller persists it as the current draft."""
+    state; the caller persists it as the current draft.
+
+    raw_data_rows None/empty -> a weekly SalesApp-only run: reuse the network
+    (RAW_DATA) from the snapshot workbook, so the manager does not have to
+    re-upload the POS export every week."""
     config_state = config_store.load_config_state(seed_workbook)
     snapshot = snapshot_store.load_snapshot(seed_workbook)
     salesapp_rows = merge_salesapp(salesapp_exports)
+
+    if not raw_data_rows:
+        raw_data_rows = read_workbook_sheet(seed_workbook, "RAW_DATA") if seed_workbook else []
+
     state = build_state(config_state, raw_data_rows, salesapp_rows, snapshot=snapshot)
     messages = run_import_compliance(state)
     return {"state": state, "messages": messages}

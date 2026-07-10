@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Field Force Optimizer</title>
-<link rel="stylesheet" href="styles.css?v=6">
-<script src="config.js?v=6"></script>
+<link rel="stylesheet" href="styles.css?v=7">
+<script src="config.js?v=7"></script>
 </head>
 <body>
 
@@ -47,11 +47,11 @@
     <h2>1 · Nahrát exporty</h2>
     <p class="hint">Nahraj čerstvé exporty. Draft vždy naváže na poslední publikovaný snapshot – publikovaný plán se nikdy nezmění.</p>
     <form id="upload-form">
-      <label class="filelabel">POS export (Základní údaje o prodejních místech)
-        <input type="file" id="pos-export" accept=".xlsx" required>
-      </label>
-      <label class="filelabel">SalesApp exporty (můžeš vybrat víc)
+      <label class="filelabel">SalesApp exporty (týdenní, můžeš vybrat víc)
         <input type="file" id="salesapp-files" accept=".xlsx" multiple>
+      </label>
+      <label class="filelabel">POS export (nepovinné – když nenahraješ, síť se vezme z posledního snapshotu)
+        <input type="file" id="pos-export" accept=".xlsx">
       </label>
       <button type="submit" id="upload-btn" class="primary">Nahrát a vytvořit Draft</button>
     </form>
@@ -270,6 +270,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

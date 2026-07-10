@@ -226,20 +226,28 @@ def status():
 
 @app.post("/api/draft/upload", dependencies=[Depends(require_auth)])
 async def draft_upload(
-    pos_export: UploadFile = File(...),
+    pos_export: UploadFile | None = File(default=None),
     salesapp: list[UploadFile] = File(default=[]),
 ):
     """Builds a fresh Draft: resume from the latest published snapshot, fold
-    in this run's POS export (-> RAW_DATA) and SalesApp exports
-    (-> SALESAPP_IMPORT, deduped by UID), run Import + Compliance. Does NOT
-    plan yet and does NOT touch any published plan."""
+    in this run's exports, run Import + Compliance. Does NOT plan yet and does
+    NOT touch any published plan.
+
+    The POS export is OPTIONAL: a normal weekly run only brings a fresh
+    SalesApp export (where technicians actually went). When no POS export is
+    uploaded, the network (RAW_DATA) is taken from the latest snapshot - the
+    POS structure changes rarely."""
     seed = None
     pos_path = None
     sa_paths: list[str] = []
     draft_path = None
     try:
-        pos_path, pos_meta = await _save_upload(pos_export)
-        raw = pipeline.read_export_rows(pos_path)
+        if pos_export is not None and (pos_export.filename or ""):
+            pos_path, pos_meta = await _save_upload(pos_export)
+            raw = pipeline.read_export_rows(pos_path)
+        else:
+            pos_meta = None
+            raw = None  # pipeline falls back to the snapshot's RAW_DATA
 
         sa_exports = []
         sa_meta = []
@@ -248,6 +256,9 @@ async def draft_upload(
             sa_paths.append(p)
             sa_exports.append(pipeline.read_export_rows(p))
             sa_meta.append(m)
+
+        if raw is None and not sa_exports:
+            raise HTTPException(status_code=400, detail="Nahraj aspoň jeden soubor (SalesApp a/nebo POS export).")
 
         seed = store.snapshot_temp()  # latest snapshot (or bootstrap)
         result = pipeline.build_upload_draft(raw, sa_exports, seed_workbook=seed)
