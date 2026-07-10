@@ -707,6 +707,11 @@ if LOCAL_MODE:
         return planner_sim.simulate(body.mode, body.start_week, body.length,
                                     body.visits_per_tech_week, body.tech_count)
 
+    @app.post("/api/planner/assess", dependencies=[Depends(require_auth)])
+    def planner_assess(body: SimRequest):
+        return planner_sim.assess(body.mode, body.start_week, body.length,
+                                  body.visits_per_tech_week, body.tech_count)
+
     @app.post("/api/planner/whatif", dependencies=[Depends(require_auth)])
     def planner_whatif(body: WhatIfRequest):
         return planner_sim.what_if(body.base.model_dump(), body.scenario.model_dump())

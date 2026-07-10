@@ -109,6 +109,77 @@ def simulate(mode: str, start_week: int, length: int,
     }
 
 
+def assess(mode: str, start_week: int, length: int,
+           visits_per_tech_week: float | None = None,
+           tech_count: int | None = None) -> dict:
+    """Composite decision-support: the whole rule set at once - coverage
+    scorecard (CORE / GECO-CORN cadence / neglect / campaigns) from the Field
+    Brain pre-flight, PLUS technician workload, region load, and a transparent
+    network-coverage projection. Config-driven; the engine decides."""
+    import math
+    import os
+
+    sim = simulate(mode, start_week, length, visits_per_tech_week, tech_count)
+
+    path = store.snapshot_temp()
+    try:
+        sc = brain.preflight(path, start_week, length, mode, visits_per_tech_week, tech_count)
+    finally:
+        os.remove(path)
+
+    # Capacity/utilization from the ACTUAL multi-week plan (consistent with the
+    # per-technician workload), not from preflight's candidate accounting.
+    per_tech = sim["scenario"]["capacityPerWeek"]
+    n_tech = tech_count or len(sim["perTechnician"])
+    weekly = (n_tech * per_tech) if (n_tech and per_tech) else None
+    total_capacity = (weekly * length) if weekly else None
+    planned = sim["plannedTotal"]
+    capacity = {
+        "technicians": n_tech, "visitsPerTechWeek": per_tech, "weeks": length,
+        "weeklyThroughput": weekly, "totalCapacity": total_capacity,
+        "plannedVisits": planned,
+        "utilizationPct": (round(100 * planned / total_capacity, 1) if total_capacity else None),
+        "overloadedTechnicians": sum(1 for t in sim["perTechnician"] if t["status"] == "over"),
+        "underloadedTechnicians": sum(1 for t in sim["perTechnician"] if t["status"] == "under"),
+    }
+
+    neglect_backlog = sc["neglect"]["backlogBefore"]
+    cadence_remaining = max(sc["cadence"]["overdue"] - sc["cadence"]["covered"], 0)
+    projection = {
+        "weeklyThroughput": weekly,
+        "neglectBacklog": neglect_backlog,
+        "estWeeksToClearNeglect": (math.ceil(neglect_backlog / weekly) if weekly else None),
+        "cadenceOverdueRemaining": cadence_remaining,   # GECO/CORN not covered this horizon
+        "assumptions": "Odhad = neglect backlog / (technici × kapacita/týden). "
+                       "Cadence = jen GECO/CORN. Bez uvažování nových POS v čase.",
+    }
+
+    # Consistent, plain gaps summary (from the coherent numbers).
+    gaps = []
+    if capacity["utilizationPct"] is not None and capacity["utilizationPct"] > 100:
+        gaps.append(f"Kapacita přetížená ({capacity['utilizationPct']} %), "
+                    f"{capacity['overloadedTechnicians']} techniků nad limitem.")
+    elif capacity["overloadedTechnicians"]:
+        gaps.append(f"{capacity['overloadedTechnicians']} techniků přetíženo (nerovnoměrné rozložení).")
+    if cadence_remaining:
+        gaps.append(f"{cadence_remaining} POS mimo GECO/CORN cadence.")
+    for cmp in sc["campaigns"]:
+        if cmp.get("pct") is not None and cmp["pct"] < 80:
+            gaps.append(f"Kampaň {cmp.get('activity', cmp.get('name', '?'))}: pokrytí {cmp['pct']} %.")
+
+    return {
+        "scenario": sim["scenario"],
+        "coverage": {"core": sc["core"], "cadence": sc["cadence"],
+                     "neglect": sc["neglect"], "campaigns": sc["campaigns"]},
+        "capacity": capacity,
+        "plannedByWeek": sim["plannedByWeek"],
+        "perTechnician": sim["perTechnician"],
+        "perRegion": sim["perRegion"],
+        "projection": projection,
+        "gaps": gaps,
+    }
+
+
 def what_if(base: dict, scenario: dict) -> dict:
     """Run two scenarios and return both + deltas on headline numbers.
     Each dict: {mode,start_week,length,visits_per_tech_week,tech_count}."""
