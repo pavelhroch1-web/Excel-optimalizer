@@ -34,6 +34,25 @@ import brain
 
 CAP_PER_TECH_WEEK = 40  # ~8 visits/day * 5 days
 
+# Manager overrides: force specific POS to a specific technician + week,
+# regardless of the algorithm (e.g. a technician is off, another must cover
+# important POS). These POS are taken OUT of the automatic plan and placed
+# exactly as instructed.
+FORCE_ASSIGN = [
+    {
+        "technician": "Štolba Jan",
+        "week": 30,
+        "reason": "OVERRIDE (Štolba za Dvořáka)",
+        "pos": [
+            "82640301", "82703901", "82932701", "82639901", "82619503", "82611003",
+            "82632101", "82640101", "82602601", "82924701", "82639902", "82636701",
+            "82922801", "82641101", "82921302", "82637201", "82628001", "82640103",
+            "82704101", "82640701", "82815501", "82616507", "82642001", "82642201",
+            "82639701",
+        ],
+    },
+]
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCAFFOLD = os.path.join(ROOT, "workbook", "FieldForceOptimizer_V11_scaffold.xlsx")
 OUT = os.path.join(ROOT, "TOUR_PLAN_tydny_29-33.xlsx")
@@ -56,6 +75,65 @@ def build_base():
     # last-visit is current, then it's ready to plan.
     pipeline.run_import_compliance(state)
     return state
+
+
+def _force_excluded_posids():
+    s = set()
+    for o in FORCE_ASSIGN:
+        s.update(str(p) for p in o["pos"])
+    return s
+
+
+def mark_force_exclude(state, posids):
+    """Take POS out of the automatic plan (managerOverrideType=FORCE_EXCLUDE),
+    so neither the week-29 cleanup nor the campaign run places them - they are
+    injected manually per the override."""
+    pm = state["POS_MASTER"]
+    h = {n: i for i, n in enumerate(pm[0])}
+    ci = h["managerOverrideType"]
+    n = 0
+    for r in pm[1:]:
+        if str(r[h["posId"]]) in posids:
+            r[ci] = "FORCE_EXCLUDE"
+            n += 1
+    return n
+
+
+def build_forced_rows(state, posids, tech, week, reason):
+    """Build MANAGER_PLAN rows for an explicit POS list assigned to `tech` in
+    `week`, routed into days by the engine's geo_days. POS are placed as
+    instructed regardless of score/filters (manager override)."""
+    pm = state["POS_MASTER"]
+    h = {n: i for i, n in enumerate(pm[0])}
+    by_id = {str(r[h["posId"]]): r for r in pm[1:]}
+    days = work_days(2026, week)
+    wd = [WorkDay(day=d.day, dateIso=to_cs_cz_date_string(d.date)) for d in days]
+    items = []
+    for pid in posids:
+        r = by_id.get(str(pid))
+        if not r:
+            print("  ! override POS nenalezen:", pid)
+            continue
+
+        def g(col):
+            return r[h[col]] if col in h else ""
+        it = POSItem(
+            pos=str(pid), tech=tech, kategorie=g("category"), market=g("market"),
+            classification=g("classification"), nazev=g("nazev"), ulice=g("street"),
+            cislo=g("houseNumber"), mesto=g("city"), oblast=g("area"), posArea=g("posArea"),
+            ppt=float(g("ppt") or 0), x=float(g("gpsX") or 0), y=float(g("gpsY") or 0),
+            weeksSinceLastVisit=g("weeksSinceLastVisit"), forceInclude=True,
+            core=False, mandatoryRuleId=None,
+        )
+        it.score = 1.0
+        it.reason = reason + " | "
+        items.append(it)
+    rows = []
+    for pv in geo_days(items, wd):
+        p = pv.pos
+        rows.append([week, pv.dateIso, pv.day, tech, p.pos, p.kategorie, p.nazev,
+                     p.ulice, p.cislo, p.mesto, p.oblast, p.posArea, p.ppt, "", "", p.reason, pv.group])
+    return rows
 
 
 def _lock_week(state, week):
@@ -141,6 +219,11 @@ def main():
     print("Building base state (Import + Compliance)…")
     base = build_base()
 
+    # Manager overrides: pull the forced POS out of the automatic plan first.
+    forced = _force_excluded_posids()
+    if forced:
+        print(f"Manager override: {mark_force_exclude(base, forced)} POS vyňato z automatiky (řízené ručně)")
+
     # WEEK 29 = DOJEZD: visit the LONGEST-neglected POS (rank by
     # weeksSinceLastVisit), NOT the high-PPT ones - those stay fresh for the
     # campaign weeks. The engine still decides who is eligible (filters) and
@@ -161,6 +244,14 @@ def main():
     # deferred into emptiness). GECO/CORN cadence stays guaranteed.
     pipeline._set_control(base, "HOLDBACK_LOOKAHEAD_WEEKS", 0)
     print("Planning weeks 30-33 (Kampaň, plné týdny)…", run_planning(base, 30, 4))
+
+    # inject manager overrides (forced POS -> specific technician + week)
+    mp2 = base["MANAGER_PLAN"]
+    for o in FORCE_ASSIGN:
+        frows = build_forced_rows(base, o["pos"], o["technician"], o["week"], o["reason"])
+        for r in frows:
+            mp2.append(r)
+        print(f"Override: {len(frows)} POS → {o['technician']}, týden {o['week']}")
 
     plan = base["MANAGER_PLAN"]
     hdr = plan[0]
