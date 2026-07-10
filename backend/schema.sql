@@ -16,13 +16,28 @@
 -- Reference / master data
 -- ---------------------------------------------------------------------------
 
+-- People in the field. role distinguishes TECHNIK / OZ / OTHER so KPIs and
+-- capacity can be tracked per role (the app manages the whole Field Force,
+-- not just technicians). capacity_per_week feeds Planning; extra flexible
+-- fields go in attributes (JSON) so new per-person data needs no migration.
 CREATE TABLE IF NOT EXISTS technicians (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT NOT NULL UNIQUE,
-    area        TEXT,
-    active      INTEGER NOT NULL DEFAULT 1,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    name              TEXT NOT NULL UNIQUE,
+    role              TEXT NOT NULL DEFAULT 'TECHNIK',   -- TECHNIK | OZ | OTHER
+    region            TEXT,
+    area              TEXT,
+    capacity_per_week INTEGER,
+    active            INTEGER NOT NULL DEFAULT 1,
+    attributes        TEXT,                              -- JSON escape hatch
+    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Region catalog for KPI aggregation (Dashboard/Reporting per region).
+CREATE TABLE IF NOT EXISTS regions (
+    code    TEXT PRIMARY KEY,
+    name    TEXT,
+    active  INTEGER NOT NULL DEFAULT 1
 );
 
 -- Current POS master (one row per POS). Change history is in pos_master_history.
@@ -94,6 +109,7 @@ CREATE TABLE IF NOT EXISTS salesapp_visits (
     region        TEXT,                     -- Agency region
     technician    TEXT,                     -- Executor
     executor_uid  TEXT,
+    visitor_role  TEXT,                     -- TECHNIK | OZ (derived from executor)
     visit_date    TEXT,
     started_at    TEXT,                     -- for VISIT ORDER within a day (route seq)
     finished_at   TEXT,
@@ -126,6 +142,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     priority     INTEGER,
     override_gap INTEGER,
     estimate     TEXT,                      -- ODHAD (demand), kept as-is
+    objective_id INTEGER REFERENCES objectives(id),  -- campaign -> business objective
     active       INTEGER NOT NULL DEFAULT 1,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
@@ -267,6 +284,112 @@ CREATE TABLE IF NOT EXISTS config (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- ---------------------------------------------------------------------------
+-- BUSINESS OBJECTIVES (Field Brain plans GOALS, not just visits)
+--
+-- A visit can satisfy several objectives at once (Cadence, Sportka, Losy,
+-- Vánoce, Merchandising, Compliance, Audit, ...). Modelled as a catalog +
+-- many-to-many links, so:
+--   * adding a new objective = INSERT a row in `objectives` (no schema change)
+--   * a planned stop can target several objectives (plan_stop_objectives)
+--   * a real visit can fulfil several objectives (visit_objectives)
+--   * "POS complete this week" = every due objective (pos_objectives) is
+--     fulfilled -> a further visit has no business value. Computed by query
+--     from these tables; no dedicated table needed.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS objectives (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    code        TEXT NOT NULL UNIQUE,        -- CADENCE / SPORTKA / LOSY / VANOCE / MERCH / COMPLIANCE / AUDIT ...
+    name        TEXT,
+    category    TEXT,
+    description TEXT,
+    params      TEXT,                        -- JSON (cadence weeks, campaign link, weights...)
+    active      INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- What objectives are DUE at a POS, over a period. Field Brain reads this as
+-- demand; flexible period (week_from/week_to) + priority + JSON params.
+CREATE TABLE IF NOT EXISTS pos_objectives (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    pos_id       TEXT NOT NULL,
+    objective_id INTEGER NOT NULL REFERENCES objectives(id),
+    year         INTEGER,
+    week_from    INTEGER,
+    week_to      INTEGER,
+    priority     INTEGER,
+    status       TEXT DEFAULT 'due',         -- due | done | waived
+    source       TEXT,                        -- cadence | campaign | manual
+    params       TEXT,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_posobj_pos ON pos_objectives(pos_id);
+CREATE INDEX IF NOT EXISTS ix_posobj_obj ON pos_objectives(objective_id);
+
+-- Objectives a PLANNED stop is meant to fulfil (polymorphic: draft/published).
+CREATE TABLE IF NOT EXISTS plan_stop_objectives (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_kind    TEXT NOT NULL,               -- 'published' | 'draft'
+    plan_id      INTEGER NOT NULL,            -- published_plans.id or draft_plans.id
+    objective_id INTEGER NOT NULL REFERENCES objectives(id)
+);
+CREATE INDEX IF NOT EXISTS ix_planobj ON plan_stop_objectives(plan_kind, plan_id);
+
+-- Objectives a REAL visit fulfilled (reality from SalesApp).
+CREATE TABLE IF NOT EXISTS visit_objectives (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    visit_id     INTEGER NOT NULL REFERENCES salesapp_visits(id),
+    objective_id INTEGER NOT NULL REFERENCES objectives(id),
+    fulfilled    INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_visitobj ON visit_objectives(visit_id);
+
+-- ---------------------------------------------------------------------------
+-- GENERIC time-series METRICS: one table for every KPI/scorecard over time,
+-- for any entity (technician / OZ / region / pos / campaign / network /
+-- field_brain). Dashboards & Reporting write and read here, so new KPIs need
+-- no new tables - just a new metric_key.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS metrics (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL,               -- technician | oz | region | pos | campaign | network | field_brain
+    entity_id   TEXT,                        -- name/id of the entity (NULL for network-wide)
+    metric_key  TEXT NOT NULL,               -- e.g. plan_fulfilment_pct, km_actual, risk_score
+    year        INTEGER,
+    week        INTEGER,
+    period      TEXT,                         -- optional label: 'W29-2026', 'campaign:VANOCE'
+    value_num   REAL,
+    value_text  TEXT,
+    computed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_metrics_e ON metrics(entity_type, entity_id, metric_key);
+CREATE INDEX IF NOT EXISTS ix_metrics_p ON metrics(year, week);
+
+-- ---------------------------------------------------------------------------
+-- GENERIC events / audit log: any module can append without a schema change.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT NOT NULL DEFAULT (datetime('now')),
+    kind        TEXT NOT NULL,               -- import | publish | recompute | override ...
+    entity_type TEXT,
+    entity_id   TEXT,
+    payload     TEXT                          -- JSON
+);
+CREATE INDEX IF NOT EXISTS ix_events_kind ON events(kind);
+
+-- Seed the default business objectives (idempotent; add more anytime).
+INSERT OR IGNORE INTO objectives (code, name, category) VALUES
+    ('CADENCE',    'Pravidelná návštěva (cadence)', 'cadence'),
+    ('SPORTKA',    'Sportka',                        'campaign'),
+    ('LOSY',       'Stírací losy',                   'campaign'),
+    ('VANOCE',     'Vánoční kampaň',                 'campaign'),
+    ('MERCH',      'Merchandising',                  'merchandising'),
+    ('COMPLIANCE', 'Compliance',                     'compliance'),
+    ('AUDIT',      'Audit',                          'audit');
 
 -- ---------------------------------------------------------------------------
 -- IMMUTABILITY: published plans & snapshots can never be modified in place.

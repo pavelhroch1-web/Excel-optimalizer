@@ -93,6 +93,43 @@ Nothing "works" inside a spreadsheet anymore.
 - **Maps/routing:** open-source only (OpenStreetMap + Leaflet + OSRM/
   GraphHopper). No Google Maps API, no paid dependency.
 
+## Full Field Force Management system — module-ready data model
+
+This is not just a planner. The SQLite model is designed so every planned
+module is **additive (new rows / new queries), never a schema migration**.
+Three extensibility pillars make that true:
+
+1. **Catalogs + link tables** — the relational core, incl. **Business
+   Objectives**. Field Brain plans *goals*, not just visits: a visit can
+   satisfy several objectives (Cadence, Sportka, Losy, Vánoce, Merchandising,
+   Compliance, Audit…). New objective = one row in `objectives`.
+2. **Generic `metrics` time-series** — any KPI for any entity (technician /
+   OZ / region / POS / campaign / network / field_brain) over time. New KPI =
+   new `metric_key`, no new table. Powers Dashboard + Reporting + Scorecard +
+   route efficiency.
+3. **Generic `events` + JSON `params`/`attributes`** — audit and flexible
+   per-entity fields without migrations.
+
+Module → tables it already has:
+
+| Module | Backed by |
+|---|---|
+| Dashboard (KPI tech/OZ/region, campaign & network status, risks, Field Brain scorecard) | `metrics`, `technicians.role`, `regions`, `campaigns`, `pos_master` |
+| POS card (last tech/OZ visit, full history, purposes, active campaigns, future/published plan, publish history, closure, compliance) | `pos_master`, `salesapp_visits`, `pos_objectives`, `published_plans`, `plan_lifecycle`, `closed_pos` |
+| Planning (draft/published, multi-week, modes, tech+OZ capacity, simulations, Field Brain) | `drafts`, `snapshots`, `draft_plans`, `published_plans`, `campaigns`, `technicians`, `plan_stop_objectives` |
+| SalesApp Analytics (visit order, km, travel/POS time, efficiency, plan vs reality, maps) | `salesapp_visits` (start/finish times), `route_metrics`, `published_plans` (gps/day_seq) |
+| Reporting (history of tech/OZ/POS/campaign/region, performance over time) | `metrics`, `events`, all history tables |
+| Field Brain (business objectives, dedup visits, value per visit, "POS complete") | `objectives`, `pos_objectives` (due), `visit_objectives` (done), `plan_stop_objectives` |
+| Publish (immutable) | `snapshots`, `published_plans` (+ DB triggers) |
+
+**"POS complete this week"** = every due objective (`pos_objectives`) is
+fulfilled (`visit_objectives`) → a further visit has no business value.
+Computed by query from these tables; Field Brain uses it to avoid duplicate
+visits and maximise the business value of each visit.
+
+People carry a **`role` (TECHNIK / OZ / OTHER)** and `capacity_per_week`, so
+KPIs and capacity are tracked per role across the whole Field Force.
+
 ## Running
 - Dev: `python3 desktop_app.py` (needs `pip install -r
   desktop_client/requirements-desktop.txt`).
