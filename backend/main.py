@@ -651,6 +651,13 @@ if LOCAL_MODE:
     def data_summary():
         return {t: db.get(f"SELECT COUNT(*) AS c FROM {t}")[0]["c"] for t in _DATA_TABLES}
 
+    import pos_insights  # noqa: E402
+
+    @app.get("/api/pos/{pos_id}/visits", dependencies=[Depends(require_auth)])
+    def pos_visits(pos_id: str):
+        """Informational: who visited this POS (technician vs OZ), when, what."""
+        return pos_insights.pos_visit_summary(pos_id)
+
     import sys as _sys
 
     from fastapi.responses import HTMLResponse, Response

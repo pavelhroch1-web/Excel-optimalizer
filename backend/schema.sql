@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS regions (
 -- Current POS master (one row per POS). Change history is in pos_master_history.
 CREATE TABLE IF NOT EXISTS pos_master (
     pos_id                TEXT PRIMARY KEY,
+    terminal_id           TEXT,             -- links SalesApp Store UID -> POS
     name                  TEXT,
     street                TEXT,
     house_number          TEXT,
@@ -65,6 +66,7 @@ CREATE TABLE IF NOT EXISTS pos_master (
 );
 CREATE INDEX IF NOT EXISTS ix_pos_master_tech ON pos_master(technician);
 CREATE INDEX IF NOT EXISTS ix_pos_master_active ON pos_master(active);
+CREATE INDEX IF NOT EXISTS ix_pos_master_terminal ON pos_master(terminal_id);
 
 -- Slowly-changing history of POS master (audit of what changed and when).
 CREATE TABLE IF NOT EXISTS pos_master_history (

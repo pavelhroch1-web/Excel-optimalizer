@@ -42,7 +42,8 @@ def _g(row, hidx, name):
 # ---------------------------------------------------------------------------
 
 _POS_MAP = {
-    "posId": "pos_id", "nazev": "name", "street": "street", "houseNumber": "house_number",
+    "posId": "pos_id", "terminalId": "terminal_id",
+    "nazev": "name", "street": "street", "houseNumber": "house_number",
     "city": "city", "area": "area", "posArea": "pos_area", "category": "category",
     "market": "market", "classification": "classification", "terminalType": "terminal_type",
     "ppt": "ppt", "gpsX": "gps_x", "gpsY": "gps_y", "assignedTechnician": "technician",
@@ -88,6 +89,12 @@ def import_salesapp(conn, wb, filename: str | None = None) -> int:
     hidx, it, header = _rows(ws)
     purpose_cols = [(str(h), i) for i, h in enumerate(header) if str(h).startswith("Účel")]
 
+    # Link SalesApp visit -> POS the same way the engine does:
+    # SalesApp "Store UID" == pos_master.terminal_id -> posId.
+    term_to_pos = {str(r["terminal_id"]): r["pos_id"]
+                   for r in conn.execute(
+                       "SELECT terminal_id, pos_id FROM pos_master WHERE terminal_id IS NOT NULL")}
+
     cur = conn.execute(
         "INSERT INTO salesapp_imports (filename, row_count) VALUES (?, 0)", (filename,))
     import_id = cur.lastrowid
@@ -112,8 +119,10 @@ def import_salesapp(conn, wb, filename: str | None = None) -> int:
         if uid is None:
             continue
         purpose, role = purpose_and_role(row)
+        store_uid = _g(row, hidx, "Store UID")
+        pos_id = term_to_pos.get(str(store_uid)) if store_uid is not None else None
         batch.append((
-            str(uid), _g(row, hidx, "Store UID"), _g(row, hidx, "Store UID"),
+            str(uid), pos_id, store_uid,
             _g(row, hidx, "Store"), _g(row, hidx, "Store address"), _g(row, hidx, "Agency region"),
             _g(row, hidx, "Executor"), _g(row, hidx, "Executor UID"), role,
             _g(row, hidx, "Date"), _g(row, hidx, "Started at"), _g(row, hidx, "Finished at"),

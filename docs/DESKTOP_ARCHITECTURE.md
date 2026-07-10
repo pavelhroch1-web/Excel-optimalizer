@@ -130,6 +130,22 @@ visits and maximise the business value of each visit.
 People carry a **`role` (TECHNIK / OZ / OTHER)** and `capacity_per_week`, so
 KPIs and capacity are tracked per role across the whole Field Force.
 
+### OZ = informational only (never planned)
+Field Brain plans **only technicians**. OZ are an information/control layer:
+the planner and POS Explorer can see that an OZ already covered a POS (when,
+what, how many visits) so a technician does not re-drive it without business
+value. This needs no separate model — it falls out of `salesapp_visits.
+visitor_role` + `visit_objectives`. Helper: `pos_insights.pos_visit_summary()`
+/ `GET /api/pos/{id}/visits` returns last technician visit, last OZ visit,
+per-role counts, and recent visits.
+
+### SalesApp visit → POS linkage (must stay stable)
+A SalesApp visit's **`Store UID` == `pos_master.terminal_id` → `pos_id`**
+(the same mapping the engine uses). The importer resolves it, so
+`salesapp_visits.pos_id` is the real POS (≈70% of visits link; the rest are
+SalesApp stores not in POS_MASTER, e.g. "jiné POS"). All POS-level reporting
+and the "POS already covered" logic depend on this link.
+
 ## Running
 - Dev: `python3 desktop_app.py` (needs `pip install -r
   desktop_client/requirements-desktop.txt`).
