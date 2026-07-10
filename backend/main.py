@@ -628,6 +628,29 @@ def save_rules(body: SaveRulesRequest):
 # --------------------------------------------------------------------------
 
 if LOCAL_MODE:
+    # ----------------------------------------------------------------------
+    # Import (Excel -> SQLite): the only way real data enters the datastore.
+    # POS Master, SalesApp history, Activity Plan, config in one workbook.
+    # ----------------------------------------------------------------------
+    import importer  # noqa: E402
+
+    _DATA_TABLES = ["pos_master", "salesapp_visits", "campaigns", "technicians",
+                    "closed_pos", "snapshots", "published_plans", "draft_plans",
+                    "route_metrics"]
+
+    @app.post("/api/import/workbook", dependencies=[Depends(require_auth)])
+    async def import_workbook_ep(workbook: UploadFile = File(...)):
+        path, prov = await _save_upload(workbook)
+        try:
+            counts = importer.import_workbook(path, prov["filename"])
+            return {"ok": True, "counts": counts, "file": prov}
+        finally:
+            os.remove(path)
+
+    @app.get("/api/data/summary", dependencies=[Depends(require_auth)])
+    def data_summary():
+        return {t: db.get(f"SELECT COUNT(*) AS c FROM {t}")[0]["c"] for t in _DATA_TABLES}
+
     import sys as _sys
 
     from fastapi.responses import HTMLResponse, Response

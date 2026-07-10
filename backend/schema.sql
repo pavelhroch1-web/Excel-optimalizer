@@ -87,21 +87,30 @@ CREATE TABLE IF NOT EXISTS salesapp_imports (
 CREATE TABLE IF NOT EXISTS salesapp_visits (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     uid           TEXT UNIQUE,              -- SalesApp UID; dedup key
-    pos_id        TEXT,
-    technician    TEXT,
-    executor      TEXT,
+    pos_id        TEXT,                     -- linked POS (best-effort; engine is authoritative)
+    store_uid     TEXT,                     -- SalesApp Store UID (raw)
+    store_name    TEXT,
+    store_address TEXT,
+    region        TEXT,                     -- Agency region
+    technician    TEXT,                     -- Executor
+    executor_uid  TEXT,
     visit_date    TEXT,
-    purpose       TEXT,
+    started_at    TEXT,                     -- for VISIT ORDER within a day (route seq)
+    finished_at   TEXT,
+    real_duration REAL,
+    seq           INTEGER,                  -- computed later: order within tech-day
+    purpose       TEXT,                     -- ; -joined matched purpose columns
     los_activity  TEXT,
     lot_activity  TEXT,
-    gps_x         REAL,
+    gps_x         REAL,                     -- usually NULL; join pos_master for GPS
     gps_y         REAL,
     import_id     INTEGER REFERENCES salesapp_imports(id),
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS ix_visits_pos  ON salesapp_visits(pos_id);
-CREATE INDEX IF NOT EXISTS ix_visits_date ON salesapp_visits(visit_date);
-CREATE INDEX IF NOT EXISTS ix_visits_tech ON salesapp_visits(technician);
+CREATE INDEX IF NOT EXISTS ix_visits_pos   ON salesapp_visits(pos_id);
+CREATE INDEX IF NOT EXISTS ix_visits_store ON salesapp_visits(store_uid);
+CREATE INDEX IF NOT EXISTS ix_visits_date  ON salesapp_visits(visit_date);
+CREATE INDEX IF NOT EXISTS ix_visits_tech  ON salesapp_visits(technician);
 
 -- ---------------------------------------------------------------------------
 -- Campaigns (Activity Plan)
@@ -171,7 +180,10 @@ CREATE TABLE IF NOT EXISTS published_plans (
     pos_area     TEXT,
     ppt          REAL,
     reason       TEXT,
-    day_group    INTEGER,
+    day_group    INTEGER,               -- geo cluster within the day
+    day_seq      INTEGER,               -- planned order within the day (for route km; filled later)
+    gps_x        REAL,                  -- snapshotted with the plan (POS GPS may change later)
+    gps_y        REAL,
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_pub_week ON published_plans(year, week);
@@ -196,9 +208,33 @@ CREATE TABLE IF NOT EXISTS draft_plans (
     pos_area     TEXT,
     ppt          REAL,
     reason       TEXT,
-    day_group    INTEGER
+    day_group    INTEGER,
+    day_seq      INTEGER,
+    gps_x        REAL,
+    gps_y        REAL
 );
 CREATE INDEX IF NOT EXISTS ix_draft_week ON draft_plans(year, week);
+
+-- Route analysis (Phase 2/3): one row per technician-day, for plan or reality.
+-- Empty for now - the data model is ready so km/efficiency can be computed
+-- later from published_plans (planned) and salesapp_visits (reality) without
+-- any schema change. No maps/routing yet.
+CREATE TABLE IF NOT EXISTS route_metrics (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    source        TEXT NOT NULL,            -- 'plan' | 'reality'
+    snapshot_id   TEXT REFERENCES snapshots(id),
+    technician    TEXT,
+    year          INTEGER,
+    week          INTEGER,
+    visit_date    TEXT,
+    stop_count    INTEGER,
+    planned_km    REAL,
+    optimal_km    REAL,
+    actual_km     REAL,
+    efficiency    REAL,                     -- optimal/actual
+    computed_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_route_tech ON route_metrics(technician, year, week);
 
 -- Per-week lifecycle: once Published, that week is locked.
 CREATE TABLE IF NOT EXISTS plan_lifecycle (
