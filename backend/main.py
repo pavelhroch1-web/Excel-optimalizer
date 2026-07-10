@@ -679,6 +679,47 @@ if LOCAL_MODE:
             _rules.set_params(code, body.params, body.scope, body.scope_value)
         return {"ok": True, "effective": _rules.effective()}
 
+    # Settings platform: configure planner/optimization/dashboard/report/map/
+    # scoring from the app. Definitions drive a generic admin UI; values override.
+    import settings as _settings  # noqa: E402
+
+    class SettingUpdate(BaseModel):
+        value: object
+        scope: str = "global"
+        scope_value: str | None = None
+
+    class ViewUpsert(BaseModel):
+        definition: object
+        is_default: bool = False
+
+    @app.get("/api/settings/definitions", dependencies=[Depends(require_auth)])
+    def settings_definitions(namespace: str | None = None):
+        return {"definitions": _settings.definitions(namespace)}
+
+    @app.get("/api/settings/{namespace}", dependencies=[Depends(require_auth)])
+    def settings_get(namespace: str):
+        return {"namespace": namespace, "values": _settings.effective(namespace),
+                "definitions": _settings.definitions(namespace)}
+
+    @app.put("/api/settings/{namespace}/{key}", dependencies=[Depends(require_auth)])
+    def settings_put(namespace: str, key: str, body: SettingUpdate):
+        _settings.set_value(namespace, key, body.value, body.scope, body.scope_value)
+        return {"ok": True, "values": _settings.effective(namespace)}
+
+    @app.get("/api/views/{namespace}", dependencies=[Depends(require_auth)])
+    def views_list(namespace: str):
+        return {"views": _settings.list_views(namespace)}
+
+    @app.put("/api/views/{namespace}/{name}", dependencies=[Depends(require_auth)])
+    def views_put(namespace: str, name: str, body: ViewUpsert):
+        _settings.save_view(namespace, name, body.definition, body.is_default)
+        return {"ok": True, "views": _settings.list_views(namespace)}
+
+    @app.delete("/api/views/{namespace}/{name}", dependencies=[Depends(require_auth)])
+    def views_delete(namespace: str, name: str):
+        _settings.delete_view(namespace, name)
+        return {"ok": True}
+
     import sys as _sys
 
     from fastapi.responses import HTMLResponse, Response

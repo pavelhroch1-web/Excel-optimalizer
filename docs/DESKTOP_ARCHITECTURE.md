@@ -139,6 +139,26 @@ visitor_role` + `visit_objectives`. Helper: `pos_insights.pos_visit_summary()`
 / `GET /api/pos/{id}/visits` returns last technician visit, last OZ visit,
 per-role counts, and recent visits.
 
+### Configuration platform (admin-configurable, not code)
+The system is driven by configuration, so the single admin changes behaviour
+without touching Python or the schema. Two layers:
+
+- **`business_rules`** — planning rules (toggle/params/scope), see below.
+- **Settings platform** — `setting_definitions` (catalog: namespace, key, type,
+  default, range/options, UI group → drives a generic admin UI) + `settings`
+  (values/overrides, scoped) + `saved_views` (named dashboard/report/map views).
+  Namespaces: **planner** (max visits/day, work hours, km/day, horizon, modes),
+  **optimization** (weights: campaign/cadence/neglected/distance/workload/ppt,
+  objective priority), **scoring** (POS + technician score building blocks),
+  **dashboard** (KPIs, charts), **report** (sections, export), **map** (heatmap,
+  layers, colors, filters). Effective value = override else typed default.
+
+Adding a new KPI / weight / metric / rule = **a new definition row (or one
+INSERT)**, never an algorithm change. Managed via `settings.py` /
+`business_rules.py` and `GET/PUT /api/settings/*`, `/api/rules/business`,
+`/api/views/*`. The engine, dashboards, reports and maps only READ effective
+config.
+
 ### Business Rules = data, not code
 Planning logic is configurable from the database, not hardcoded. `business_rules`
 is a typed catalog — one row per rule (CADENCE, MIN_GAP, NEGLECTED_AFTER,

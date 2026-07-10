@@ -428,6 +428,101 @@ INSERT OR IGNORE INTO business_rules (code, name, category, enabled, params) VAL
     ('GPS_EXTRA',        'Extra návštěvy podle GPS clusteru', 'capacity', 1, '{"max_extra_visits":5}'),
     ('OZ_COVERAGE',      'Nenaplánovat POS pokryté nedávno OZ', 'coverage', 0, '{"skip_if_oz_within_weeks":4}');
 
+-- ---------------------------------------------------------------------------
+-- SETTINGS PLATFORM: everything configurable from the app, not the code.
+--
+-- Split of concerns so a generic admin UI can render any setting and adding a
+-- new one is data-only:
+--   * setting_definitions = the CATALOG (namespace, key, type, default, range/
+--     options, UI group) -> drives the admin UI automatically.
+--   * settings            = actual VALUES / overrides (with the same scope
+--     mechanism as business_rules). Effective value = override else default.
+--   * saved_views         = named dashboard/report/map views ("uložené pohledy").
+--
+-- Namespaces: planner, optimization, dashboard, report, map, scoring, general.
+-- The Planning Engine / dashboards / reports / maps only READ effective
+-- settings; the algorithm stays generic. New KPI/metric/weight = a new
+-- definition row (+ optional value), never a code or schema change.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS setting_definitions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    namespace     TEXT NOT NULL,             -- planner | optimization | dashboard | report | map | scoring | general
+    key           TEXT NOT NULL,
+    label         TEXT,
+    description   TEXT,
+    value_type    TEXT NOT NULL DEFAULT 'string', -- number | bool | string | enum | json
+    default_value TEXT,
+    min_value     REAL,
+    max_value     REAL,
+    options       TEXT,                        -- JSON array for enum
+    ui_group      TEXT,
+    sort_order    INTEGER NOT NULL DEFAULT 100,
+    active        INTEGER NOT NULL DEFAULT 1,
+    UNIQUE (namespace, key)
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    namespace   TEXT NOT NULL,
+    key         TEXT NOT NULL,
+    value       TEXT,                          -- stored as text; typed per definition
+    scope       TEXT NOT NULL DEFAULT 'global',
+    scope_value TEXT,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (namespace, key, scope, scope_value)
+);
+CREATE INDEX IF NOT EXISTS ix_settings_ns ON settings(namespace);
+
+CREATE TABLE IF NOT EXISTS saved_views (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    namespace   TEXT NOT NULL,                 -- dashboard | report | map
+    name        TEXT NOT NULL,
+    definition  TEXT,                          -- JSON (widgets/columns/layers/filters)
+    is_default  INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (namespace, name)
+);
+
+-- Seed setting definitions (defaults match current behaviour; edit anytime).
+INSERT OR IGNORE INTO setting_definitions
+    (namespace, key, label, value_type, default_value, min_value, max_value, options, ui_group, sort_order) VALUES
+    -- planner
+    ('planner','max_visits_per_day','Max. návštěv/den','number','8',1,20,NULL,'Kapacita',10),
+    ('planner','work_hours_per_day','Pracovní doba (h)','number','8',1,12,NULL,'Kapacita',20),
+    ('planner','max_km_per_day','Max. km/den','number','250',0,1000,NULL,'Kapacita',30),
+    ('planner','planning_horizon_weeks','Plánovací horizont (týdnů)','number','5',1,12,NULL,'Horizont',40),
+    ('planner','default_mode','Výchozí režim','enum','vyvazeny',NULL,NULL,'["dojezd","kampan","vyvazeny","cela_sit"]','Režim',50),
+    ('planner','workday_start','Začátek dne','string','08:00',NULL,NULL,NULL,'Kapacita',60),
+    ('planner','workday_end','Konec dne','string','16:30',NULL,NULL,NULL,'Kapacita',70),
+    -- optimization (weights that feed scoring)
+    ('optimization','weight_campaign','Váha kampaní','number','1.0',0,10,NULL,'Váhy',10),
+    ('optimization','weight_cadence','Váha cadence','number','1.0',0,10,NULL,'Váhy',20),
+    ('optimization','weight_neglected','Váha zanedbání','number','1.0',0,10,NULL,'Váhy',30),
+    ('optimization','weight_distance','Váha vzdálenosti','number','1.0',0,10,NULL,'Váhy',40),
+    ('optimization','weight_workload','Váha vytížení','number','1.0',0,10,NULL,'Váhy',50),
+    ('optimization','weight_ppt','Váha PPT','number','1.0',0,10,NULL,'Váhy',60),
+    ('optimization','objective_priority','Priorita cílů','json','["COMPLIANCE","CADENCE","SPORTKA","LOSY","VANOCE","MERCH","AUDIT"]',NULL,NULL,NULL,'Cíle',70),
+    -- scoring (POS + technician score building blocks)
+    ('scoring','core_bonus','Bonus CORE','number','100000000',0,NULL,NULL,'POS skóre',10),
+    ('scoring','category_a_bonus','Bonus kategorie A','number','10000000',0,NULL,NULL,'POS skóre',20),
+    ('scoring','ppt_weight','Váha PPT ve skóre','number','1',0,NULL,NULL,'POS skóre',30),
+    ('scoring','neglected_bonus','Bonus za zanedbání','number','50000',0,NULL,NULL,'POS skóre',40),
+    ('scoring','min_gap_penalty','Penalizace pod min. rozestup','number','-1000000',NULL,0,NULL,'POS skóre',50),
+    ('scoring','technician_score','Vzorec skóre technika (JSON)','json','{"visits":0.4,"km_efficiency":0.3,"campaign_fulfilment":0.3}',NULL,NULL,NULL,'Technik skóre',60),
+    -- dashboard
+    ('dashboard','default_kpis','Výchozí KPI','json','["plan_fulfilment_pct","visits","km","route_efficiency","campaign_status"]',NULL,NULL,NULL,'KPI',10),
+    ('dashboard','refresh_seconds','Obnovení (s)','number','0',0,3600,NULL,'Obecné',20),
+    ('dashboard','chart_theme','Téma grafů','enum','auto',NULL,NULL,'["auto","light","dark"]','Vzhled',30),
+    -- report
+    ('report','default_export_format','Výchozí formát exportu','enum','xlsx',NULL,NULL,'["xlsx","csv","pdf"]','Export',10),
+    ('report','sections','Sekce reportu','json','["technicians","oz","pos","campaigns","regions","performance"]',NULL,NULL,NULL,'Obsah',20),
+    -- map
+    ('map','heatmap_enabled','Heatmapa zapnutá','bool','true',NULL,NULL,NULL,'Vrstvy',10),
+    ('map','layers','Vrstvy mapy','json','["planned_route","actual_route","pos","heatmap"]',NULL,NULL,NULL,'Vrstvy',20),
+    ('map','color_scheme','Barevné schéma','enum','viridis',NULL,NULL,'["viridis","turbo","cividis"]','Vzhled',30),
+    ('map','default_filters','Výchozí filtry','json','{"role":"TECHNIK"}',NULL,NULL,NULL,'Filtry',40);
+
 -- Seed the default business objectives (idempotent; add more anytime).
 INSERT OR IGNORE INTO objectives (code, name, category) VALUES
     ('CADENCE',    'Pravidelná návštěva (cadence)', 'cadence'),
