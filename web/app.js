@@ -62,6 +62,7 @@ function showApp() {
   loadStrategyModes();
   loadPlannerModes();
   loadRouteTechnicians();
+  loadExclusionCount();
 }
 function showLogin() {
   appScreen.classList.add("hidden");
@@ -952,6 +953,36 @@ on("planner-whatif-form", "submit", async (e) => {
   } catch (err) {
     document.getElementById("planner-compare").innerHTML = `<p class="result err">Chyba: ${esc(err.message)}</p>`;
   }
+});
+
+// ---- hard-exclude POS from planning ---------------------------------------
+
+async function loadExclusionCount() {
+  const el = document.getElementById("excl-count");
+  if (!el) return;
+  try { el.textContent = (await apiJson("/api/exclusions")).count; } catch (e) { /* ignore */ }
+}
+
+on("excl-form", "submit", async (e) => {
+  e.preventDefault();
+  const ids = document.getElementById("excl-ids").value.trim();
+  if (!ids) return;
+  try {
+    const r = await postJson("/api/exclusions", { pos_ids: ids, reason: "manuálně" });
+    setResult("excl-result", `Vyřazeno ${r.added} POS. Celkem vyřazeno: ${r.count}.`, "ok");
+    document.getElementById("excl-ids").value = "";
+    document.getElementById("excl-count").textContent = r.count;
+  } catch (err) { setResult("excl-result", "Chyba: " + err.message, "err"); }
+});
+
+on("excl-clear", "click", async () => {
+  if (!confirm("Zrušit všechna vyřazení POS?")) return;
+  try {
+    const r = await apiFetch("/api/exclusions/_all", { method: "DELETE" });
+    const d = await r.json();
+    setResult("excl-result", "Vyřazení zrušena.", "ok");
+    document.getElementById("excl-count").textContent = d.count;
+  } catch (err) { setResult("excl-result", "Chyba: " + err.message, "err"); }
 });
 
 // ---- route planner (long-term per-technician plan) ------------------------

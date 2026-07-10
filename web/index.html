@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Field Force Optimizer</title>
-<link rel="stylesheet" href="styles.css?v=11">
-<script src="config.js?v=11"></script>
+<link rel="stylesheet" href="styles.css?v=12">
+<script src="config.js?v=12"></script>
 </head>
 <body>
 
@@ -23,7 +23,7 @@
 
 <div id="app-screen" class="screen hidden">
   <header>
-    <h1>Field Force Optimizer <span class="ver">v11</span></h1>
+    <h1>Field Force Optimizer <span class="ver">v12</span></h1>
     <button id="logout" class="ghost">Odhlásit</button>
   </header>
 
@@ -65,6 +65,17 @@
         <button type="submit" class="ghost">Porovnat se scénářem</button>
       </form>
       <div id="planner-compare"></div>
+    </div>
+
+    <div class="pl-whatif">
+      <div class="pl-section">Vyřadit POS z plánování (natvrdo) <span id="excl-count" class="badge">0</span></div>
+      <p class="hint" style="margin:0 0 8px">Zadej čísla POS (oddělená čárkou, mezerou nebo na řádky). Tyto POS se nikdy nenaplánují – engine je odmítne. Platí pro všechny scénáře i generování.</p>
+      <form id="excl-form" class="row">
+        <input type="text" id="excl-ids" placeholder="např. 71001302, 71001303" style="flex:1;min-width:220px">
+        <button type="submit" class="ghost">Vyřadit</button>
+        <button type="button" id="excl-clear" class="ghost danger">Zrušit všechna vyřazení</button>
+      </form>
+      <p id="excl-result" class="result"></p>
     </div>
   </section>
 
@@ -329,6 +340,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>

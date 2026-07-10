@@ -288,6 +288,15 @@ CREATE TABLE IF NOT EXISTS config (
     value TEXT
 );
 
+-- POS hard-excluded from planning (manager blacklist). The engine already
+-- honours a BLACKLIST; db_state injects these IDs into it before planning,
+-- so excluded POS are never planned (rejection reason "Na blacklistu").
+CREATE TABLE IF NOT EXISTS pos_exclusions (
+    pos_id     TEXT PRIMARY KEY,
+    reason     TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- ---------------------------------------------------------------------------
 -- BUSINESS OBJECTIVES (Field Brain plans GOALS, not just visits)
 --

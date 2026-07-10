@@ -668,6 +668,37 @@ if LOCAL_MODE:
     def data_summary():
         return {t: db.get(f"SELECT COUNT(*) AS c FROM {t}")[0]["c"] for t in _DATA_TABLES}
 
+    # Hard-exclude POS from planning (manager blacklist). Paste POS IDs; they
+    # are injected into the engine BLACKLIST by db_state and never planned.
+    import re as _re
+
+    class ExclusionsRequest(BaseModel):
+        pos_ids: str | list = ""
+        reason: str | None = None
+
+    @app.get("/api/exclusions", dependencies=[Depends(require_auth)])
+    def list_exclusions():
+        rows = db.get("SELECT pos_id, reason, created_at FROM pos_exclusions ORDER BY pos_id")
+        return {"exclusions": [dict(r) for r in rows], "count": len(rows)}
+
+    @app.post("/api/exclusions", dependencies=[Depends(require_auth)])
+    def add_exclusions(body: ExclusionsRequest):
+        raw = body.pos_ids if isinstance(body.pos_ids, list) else _re.split(r"[\s,;]+", str(body.pos_ids))
+        ids = [str(x).strip() for x in raw if str(x).strip()]
+        for pid in ids:
+            db.run("INSERT INTO pos_exclusions (pos_id, reason) VALUES (?, ?) "
+                   "ON CONFLICT(pos_id) DO UPDATE SET reason=excluded.reason", (pid, body.reason))
+        return {"ok": True, "added": len(ids),
+                "count": db.get("SELECT COUNT(*) AS c FROM pos_exclusions")[0]["c"]}
+
+    @app.delete("/api/exclusions/{pos_id}", dependencies=[Depends(require_auth)])
+    def delete_exclusion(pos_id: str):
+        if pos_id == "_all":
+            db.run("DELETE FROM pos_exclusions")
+        else:
+            db.run("DELETE FROM pos_exclusions WHERE pos_id=?", (pos_id,))
+        return {"ok": True, "count": db.get("SELECT COUNT(*) AS c FROM pos_exclusions")[0]["c"]}
+
     # Campaigns: editable in-app (target_visits = campaign goal; Excel ODHAD is
     # often empty, and the app is the source of truth).
     class CampaignUpdate(BaseModel):

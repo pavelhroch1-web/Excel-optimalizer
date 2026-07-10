@@ -74,6 +74,24 @@ def _apply_planner_settings(state: dict) -> None:
         brain._set_control(state, "TARGET_VISITS_DAY", pl["max_visits_per_day"])
 
 
+def _apply_exclusions(state: dict) -> int:
+    """Inject the manager's hard-excluded POS into the engine's BLACKLIST so
+    they are never planned (engine rejects them: 'Na blacklistu')."""
+    import db
+    ids = [str(r["pos_id"]) for r in db.get("SELECT pos_id FROM pos_exclusions")]
+    if not ids:
+        return 0
+    bl = state.get("BLACKLIST")
+    if not bl:
+        bl = [["posId"]]
+        state["BLACKLIST"] = bl
+    existing = {str(r[0]).strip() for r in bl[1:] if r and r[0] not in (None, "")}
+    for pid in ids:
+        if pid not in existing:
+            bl.append([pid])
+    return len(ids)
+
+
 def configure(state: dict, mode: str, start_week: int, length: int,
               visits_per_tech_week: float | None = None) -> dict:
     """Apply all DB config + mode to `state` in place, then set the planning
@@ -81,6 +99,7 @@ def configure(state: dict, mode: str, start_week: int, length: int,
     -> explicit capacity override -> mode."""
     _apply_business_rules(state)
     _apply_planner_settings(state)
+    _apply_exclusions(state)
     if visits_per_tech_week:
         brain.apply_capacity(state, visits_per_tech_week)
     # "cela_sit" behaves like dojezd for campaign windows (whole-network sweep).
