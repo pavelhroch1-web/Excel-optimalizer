@@ -383,6 +383,51 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS ix_events_kind ON events(kind);
 
+-- ---------------------------------------------------------------------------
+-- BUSINESS RULES: planning logic as DATA, not hardcoded Python.
+--
+-- Every planning rule (cadence, min gap between visits, campaign priority,
+-- hold-back, OZ-coverage skip, max visits/week, neglected boost, GPS extras...)
+-- is a row here: toggle `enabled`, edit `params` (JSON), or add a scoped
+-- override - all without code changes. The Planning Engine only READS these
+-- (the db_state layer translates enabled rules into the config the engine
+-- already consumes; the engine's algorithm is unchanged).
+--
+-- Scoped overrides: several rows may share a `code` with different scope
+-- (global < market < category < technician < pos); the loader merges them,
+-- most-specific winning. Adding a rule = INSERT a row (no schema change).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS business_rules (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    code        TEXT NOT NULL,               -- MIN_GAP, CADENCE, HOLDBACK, MAX_VISITS_WEEK ...
+    name        TEXT,
+    description TEXT,
+    category    TEXT,                          -- cadence | spacing | campaign | capacity | holdback | coverage
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    params      TEXT,                          -- JSON parameters
+    scope       TEXT NOT NULL DEFAULT 'global',-- global | market | category | technician | pos
+    scope_value TEXT,                          -- e.g. a market code / category / technician name
+    priority    INTEGER NOT NULL DEFAULT 100,
+    valid_from  TEXT,
+    valid_to    TEXT,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (code, scope, scope_value)
+);
+CREATE INDEX IF NOT EXISTS ix_rules_code ON business_rules(code, enabled);
+
+-- Seed the rule catalog with defaults matching today's engine behaviour.
+-- (idempotent; params are editable from the app / API afterwards.)
+INSERT OR IGNORE INTO business_rules (code, name, category, enabled, params) VALUES
+    ('CADENCE',          'Pravidelná kadence (GECO/CORN/MANDATORY)', 'cadence', 1,
+        '{"rules":[{"code":"GECO","match":"category","value":"1GECO","every_weeks":5},{"code":"CORN","match":"market","value":"CORN","every_weeks":4},{"code":"MANDATORY_9PODNIK","once_per_campaign":true}],"dedup_by":"address"}'),
+    ('MIN_GAP',          'Minimální rozestup mezi návštěvami', 'spacing', 1, '{"weeks":6}'),
+    ('NEGLECTED_AFTER',  'Bonus za dlouho nenavštívené POS', 'spacing', 1, '{"weeks":26,"bonus":50000}'),
+    ('HOLDBACK',         'Smart hold-back před kampaní', 'holdback', 1, '{"lookahead_weeks":2,"tolerance":1}'),
+    ('MAX_VISITS_WEEK',  'Maximální počet návštěv na technika/týden', 'capacity', 1, '{"per_week":40,"per_day":8}'),
+    ('CAMPAIGN_PRIORITY','Priorita kampaní', 'campaign', 1, '{"source":"campaigns"}'),
+    ('GPS_EXTRA',        'Extra návštěvy podle GPS clusteru', 'capacity', 1, '{"max_extra_visits":5}'),
+    ('OZ_COVERAGE',      'Nenaplánovat POS pokryté nedávno OZ', 'coverage', 0, '{"skip_if_oz_within_weeks":4}');
+
 -- Seed the default business objectives (idempotent; add more anytime).
 INSERT OR IGNORE INTO objectives (code, name, category) VALUES
     ('CADENCE',    'Pravidelná návštěva (cadence)', 'cadence'),

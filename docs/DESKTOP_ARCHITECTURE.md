@@ -139,6 +139,19 @@ visitor_role` + `visit_objectives`. Helper: `pos_insights.pos_visit_summary()`
 / `GET /api/pos/{id}/visits` returns last technician visit, last OZ visit,
 per-role counts, and recent visits.
 
+### Business Rules = data, not code
+Planning logic is configurable from the database, not hardcoded. `business_rules`
+is a typed catalog — one row per rule (CADENCE, MIN_GAP, NEGLECTED_AFTER,
+HOLDBACK, MAX_VISITS_WEEK, CAMPAIGN_PRIORITY, GPS_EXTRA, OZ_COVERAGE, …) with
+`enabled` + JSON `params` + optional **scope** (global < market < category <
+technician < pos, most-specific wins). Toggle a rule, change its parameters, or
+add a scoped override — no code change; adding a rule = one INSERT.
+
+The **Planning Engine only reads** these: the db_state layer (Priority 2) calls
+`business_rules.effective()` and maps the enabled rules into the config the
+engine already consumes, so the algorithm is unchanged. Managed via
+`business_rules.py` and `GET/PUT /api/rules/business`.
+
 ### SalesApp visit → POS linkage (must stay stable)
 A SalesApp visit's **`Store UID` == `pos_master.terminal_id` → `pos_id`**
 (the same mapping the engine uses). The importer resolves it, so

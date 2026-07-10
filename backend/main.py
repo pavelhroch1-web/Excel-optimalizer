@@ -658,6 +658,27 @@ if LOCAL_MODE:
         """Informational: who visited this POS (technician vs OZ), when, what."""
         return pos_insights.pos_visit_summary(pos_id)
 
+    # Business Rules: planning logic as data (toggle / edit params, no code).
+    import business_rules as _rules  # noqa: E402
+
+    class RuleUpdate(BaseModel):
+        enabled: bool | None = None
+        params: dict | None = None
+        scope: str = "global"
+        scope_value: str | None = None
+
+    @app.get("/api/rules/business", dependencies=[Depends(require_auth)])
+    def get_business_rules():
+        return {"rules": _rules.list_rules(), "effective": _rules.effective()}
+
+    @app.put("/api/rules/business/{code}", dependencies=[Depends(require_auth)])
+    def update_business_rule(code: str, body: RuleUpdate):
+        if body.enabled is not None:
+            _rules.set_enabled(code, body.enabled, body.scope, body.scope_value)
+        if body.params is not None:
+            _rules.set_params(code, body.params, body.scope, body.scope_value)
+        return {"ok": True, "effective": _rules.effective()}
+
     import sys as _sys
 
     from fastapi.responses import HTMLResponse, Response
