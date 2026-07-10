@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import auth  # noqa: E402
 from auth import issue_token, require_auth  # noqa: E402
+import brain as brain_mod  # noqa: E402
 import candidates as candidates_mod  # noqa: E402
 import decision as decision_mod  # noqa: E402
 import pipeline  # noqa: E402
@@ -68,6 +69,16 @@ class LoginRequest(BaseModel):
 class GenerateRequest(BaseModel):
     start_week: int
     length: int = 1
+    mode: str = "vyvazeny"
+    visits_per_tech_week: float | None = None
+
+
+class PreflightRequest(BaseModel):
+    start_week: int
+    length: int = 5
+    mode: str = "vyvazeny"
+    visits_per_tech_week: float | None = None
+    tech_count_override: int | None = None
 
 
 class PublishRequest(BaseModel):
@@ -268,12 +279,38 @@ def draft_generate(body: GenerateRequest):
     path = _require_draft_path()
     try:
         state = state_xlsx.load_state(path)
+        # Field Brain: a strategy mode + capacity only change goals/weights via
+        # config; the Planning Engine algorithm is unchanged.
+        brain_mod.apply_mode(state, body.mode)
+        brain_mod.apply_capacity(state, body.visits_per_tech_week)
         messages = pipeline.run_planning(state, body.start_week, body.length)
         state_xlsx.save_state(state, path)
-        store.save_draft(path, f"Generovat tour plan: tyden {body.start_week}, delka {body.length}")
+        store.save_draft(path, f"Generovat tour plan: tyden {body.start_week}, delka {body.length}, rezim {body.mode}")
         return {"messages": messages, "summary": pipeline._summarize(state, body.start_week, body.length)}
     finally:
         os.remove(path)
+
+
+@app.post("/api/draft/preflight", dependencies=[Depends(require_auth)])
+def draft_preflight(body: PreflightRequest):
+    """Field Brain pre-flight: simulate the horizon under a strategy mode +
+    capacity and COMPUTE the business scorecard (CORE / cadence / neglect /
+    campaign coverage / capacity) + a managerial recommendation BEFORE
+    generating. Read-only."""
+    path = _require_draft_path()
+    try:
+        return brain_mod.preflight(
+            path, body.start_week, body.length, body.mode,
+            body.visits_per_tech_week, body.tech_count_override,
+        )
+    finally:
+        os.remove(path)
+
+
+@app.get("/api/strategy-modes", dependencies=[Depends(require_auth)])
+def strategy_modes():
+    return {"modes": [{"id": k, "label": v["label"], "desc": v["desc"]}
+                      for k, v in brain_mod.STRATEGY_MODES.items()]}
 
 
 # --------------------------------------------------------------------------

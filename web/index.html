@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Field Force Optimizer</title>
-<link rel="stylesheet" href="styles.css?v=5">
-<script src="config.js?v=5"></script>
+<link rel="stylesheet" href="styles.css?v=6">
+<script src="config.js?v=6"></script>
 </head>
 <body>
 
@@ -97,9 +97,31 @@
     <p id="rules-result" class="result"></p>
   </section>
 
-  <!-- 3) GENERATE -->
+  <!-- Field Brain: strategy + pre-flight scorecard -->
+  <section class="card brain-card">
+    <h2>Field Brain <span class="badge">Manažerský mozek</span></h2>
+    <p class="hint">Mozek rozhoduje <strong>co</strong> je cílem, Planning Engine <strong>jak</strong> ho splnit. Vyber strategii a kapacitu, spočítej pokrytí cílů na horizont a teprve pak generuj plán. Engine se nemění.</p>
+    <form id="brain-form" class="row">
+      <label>Strategie
+        <select id="brain-mode"></select>
+      </label>
+      <label>Počáteční týden<input type="number" id="brain-week" min="1" max="53" required></label>
+      <label>Horizont (týdnů)<input type="number" id="brain-length" min="1" max="8" value="5"></label>
+      <label>Návštěv/technik/týden<input type="number" id="brain-visits" min="1" value="40"></label>
+      <label>Techniků (nepovinné)<input type="number" id="brain-techs" min="1" placeholder="auto"></label>
+      <button type="submit" id="brain-btn" class="primary">Spočítat pokrytí (pre-flight)</button>
+    </form>
+    <p id="brain-mode-desc" class="hint"></p>
+    <p id="brain-result" class="result"></p>
+    <div id="brain-scorecard"></div>
+    <div class="row" id="brain-generate-row" style="display:none">
+      <button id="brain-generate-btn" class="primary">Generovat plán v tomto režimu</button>
+    </div>
+  </section>
+
+  <!-- 3) GENERATE (jednoduchý jednotýdenní fallback) -->
   <section class="card">
-    <h2>3 · Generovat tour plán</h2>
+    <h2>3 · Generovat tour plán (ručně)</h2>
     <form id="generate-form" class="row">
       <label>Počáteční týden
         <input type="number" id="start-week" min="1" max="53" required>
@@ -248,6 +270,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=5"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

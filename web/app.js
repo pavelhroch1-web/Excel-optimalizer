@@ -59,6 +59,7 @@ function showApp() {
   loadStatus();
   loadVersions();
   loadRules();
+  loadStrategyModes();
 }
 function showLogin() {
   appScreen.classList.add("hidden");
@@ -472,6 +473,104 @@ on("save-rules-btn", "click", async () => {
     setResult("rules-result", "Chyba: " + err.message, "err");
   }
 });
+
+// ---- Field Brain: strategy modes + pre-flight scorecard -------------------
+
+let brainModesLoaded = false;
+
+async function loadStrategyModes() {
+  if (brainModesLoaded) return;
+  try {
+    const d = await apiJson("/api/strategy-modes");
+    const sel = document.getElementById("brain-mode");
+    if (!sel) return;
+    sel.innerHTML = (d.modes || []).map((m) => `<option value="${escWi(m.id)}">${escWi(m.label)}</option>`).join("");
+    sel._descs = {};
+    (d.modes || []).forEach((m) => (sel._descs[m.id] = m.desc));
+    const showDesc = () => {
+      const el = document.getElementById("brain-mode-desc");
+      if (el) el.textContent = sel._descs[sel.value] || "";
+    };
+    sel.addEventListener("change", showDesc);
+    showDesc();
+    brainModesLoaded = true;
+  } catch (_) {}
+}
+
+on("brain-form", "submit", async (e) => {
+  e.preventDefault();
+  const body = brainRequest();
+  setResult("brain-result", "Simuluji horizont stejným Planning Enginem a počítám pokrytí cílů…", "");
+  document.getElementById("brain-scorecard").innerHTML = "";
+  document.getElementById("brain-generate-row").style.display = "none";
+  try {
+    const sc = await postJson("/api/draft/preflight", body);
+    setResult("brain-result", "Pre-flight hotový. Zkontroluj pokrytí, pak generuj.", "ok");
+    document.getElementById("brain-scorecard").innerHTML = renderScorecard(sc);
+    document.getElementById("brain-generate-row").style.display = "flex";
+  } catch (err) {
+    setResult("brain-result", "Chyba: " + err.message, "err");
+  }
+});
+
+on("brain-generate-btn", "click", async () => {
+  const r = brainRequest();
+  setResult("brain-result", "Generuji plán ve zvoleném režimu…", "");
+  try {
+    const d = await postJson("/api/draft/generate",
+      { start_week: r.start_week, length: r.length, mode: r.mode, visits_per_tech_week: r.visits_per_tech_week });
+    setResult("brain-result", (d.messages && d.messages.planning) || "Plán vygenerován.", "ok");
+    loadDraft();
+    loadStatus();
+  } catch (err) {
+    setResult("brain-result", "Chyba: " + err.message, "err");
+  }
+});
+
+function brainRequest() {
+  const techs = parseInt(document.getElementById("brain-techs").value, 10);
+  return {
+    start_week: parseInt(document.getElementById("brain-week").value, 10),
+    length: parseInt(document.getElementById("brain-length").value, 10) || 5,
+    mode: document.getElementById("brain-mode").value,
+    visits_per_tech_week: parseFloat(document.getElementById("brain-visits").value) || null,
+    tech_count_override: isNaN(techs) ? null : techs,
+  };
+}
+
+function tile(label, value, sub, cls) {
+  return `<div class="bt ${cls || ""}"><div class="bt-v">${value}</div><div class="bt-l">${escWi(label)}</div>${sub ? `<div class="bt-s">${escWi(sub)}</div>` : ""}</div>`;
+}
+
+function renderScorecard(sc) {
+  const c = sc.capacity;
+  const capCls = c.utilizationPct != null && c.utilizationPct > 100 ? "warn" : "ok";
+  let h = `<div class="brain-tiles">`;
+  h += tile("Kapacita", c.totalCapacity != null ? Math.round(c.totalCapacity) : "—",
+    `${c.technicians} tech × ${c.visitsPerTechWeek || "?"}/týd × ${c.weeks}`, "");
+  h += tile("Naplánováno", c.plannedVisits, c.utilizationPct != null ? c.utilizationPct + " % kapacity" : "", capCls);
+  h += tile("CORE", sc.core.pct + " %", `${sc.core.covered}/${sc.core.due}`, sc.core.pct >= 95 ? "ok" : "warn");
+  h += tile("Cadence GECO/CORN", sc.cadence.pct + " %", `${sc.cadence.covered}/${sc.cadence.overdue}`, sc.cadence.pct >= 99 ? "ok" : "warn");
+  h += tile("Neglect zbyde", sc.neglect.remainingAfter, `z ${sc.neglect.backlogBefore} (dojede ${sc.neglect.cleared})`, sc.neglect.remainingAfter === 0 ? "ok" : "warn");
+  h += `</div>`;
+
+  if ((sc.campaigns || []).length) {
+    h += `<div class="pd-section">Pokrytí kampaní v horizontu</div>`;
+    h += `<table class="pd-score-table"><thead><tr><th>Kampaň</th><th>Typ</th><th>Týdny</th><th>Pokrytí</th><th>Riziko</th></tr></thead><tbody>`;
+    h += sc.campaigns.map((cp) => {
+      const cls = cp.pct >= 90 ? "wi-impact pos" : "wi-impact neg";
+      return `<tr><td>${escWi(cp.name)}</td><td>${escWi(cp.type)}</td><td>t${cp.startWeek}–${cp.endWeek}</td>` +
+        `<td class="${cls}">≈ ${cp.pct} %</td><td>${cp.riskPct} %</td></tr>`;
+    }).join("");
+    h += `</tbody></table>`;
+    h += `<p class="pd-sub">Pozn.: „poptávka" kampaně je zatím odhad = počet aktivních POS (sloupec ODHAD v Activity Planu neobsahuje číslo). Řekni mi, jak se má cílová množina Sportky/losů definovat, a čísla zpřesním.</p>`;
+  }
+
+  const byWeek = Object.entries(sc.plannedByWeek || {}).map(([w, n]) => `t${w}: ${n}`).join("  ·  ");
+  h += `<div class="pd-section">Rozložení do týdnů</div><p class="pd-sub">${byWeek || "—"}</p>`;
+  h += `<div class="brain-rec"><strong>Doporučení mozku:</strong> ${escWi(sc.recommendation)}</div>`;
+  return h;
+}
 
 // ---- Decision Support: Co kdyby... ----------------------------------------
 
