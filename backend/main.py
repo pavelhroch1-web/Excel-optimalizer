@@ -687,6 +687,30 @@ if LOCAL_MODE:
     def planner_route(technician: str, week_from: int | None = None, week_to: int | None = None):
         return route_planner.technician_route(technician, week_from, week_to)
 
+    # Planner simulation / decision-support: run the engine under a scenario
+    # (mode + capacity) and measure workload / region load / totals.
+    import planner_sim  # noqa: E402
+
+    class SimRequest(BaseModel):
+        mode: str = "vyvazeny"
+        start_week: int
+        length: int = 5
+        visits_per_tech_week: float | None = None
+        tech_count: int | None = None
+
+    class WhatIfRequest(BaseModel):
+        base: SimRequest
+        scenario: SimRequest
+
+    @app.post("/api/planner/simulate", dependencies=[Depends(require_auth)])
+    def planner_simulate(body: SimRequest):
+        return planner_sim.simulate(body.mode, body.start_week, body.length,
+                                    body.visits_per_tech_week, body.tech_count)
+
+    @app.post("/api/planner/whatif", dependencies=[Depends(require_auth)])
+    def planner_whatif(body: WhatIfRequest):
+        return planner_sim.what_if(body.base.model_dump(), body.scenario.model_dump())
+
     # Business Rules: planning logic as data (toggle / edit params, no code).
     import business_rules as _rules  # noqa: E402
 
