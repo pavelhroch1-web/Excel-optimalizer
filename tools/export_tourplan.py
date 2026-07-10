@@ -63,13 +63,13 @@ PLAN_COLS = ["WEEK", "DATE", "DAY", "TECHNICIAN", "POS", "KATEGORIE", "NAZEV_PRO
 DAY_ORDER = {"MON": 1, "TUE": 2, "WED": 3, "THU": 4, "FRI": 5}
 
 
-def build_base():
-    cfg = config_store.load_config_state(SCAFFOLD)
-    snap = snapshot_store.load_snapshot(SCAFFOLD)
+def build_base(seed_workbook=SCAFFOLD):
+    cfg = config_store.load_config_state(seed_workbook)
+    snap = snapshot_store.load_snapshot(seed_workbook)
     for s in ("MANAGER_PLAN", "MANAGER_PLAN_PUBLISHED", "PLAN_LIFECYCLE"):
         snap[s] = [snap[s][0]]
-    raw = pipeline.read_workbook_sheet(SCAFFOLD, "RAW_DATA")
-    sa = [pipeline.read_workbook_sheet(SCAFFOLD, "SALESAPP_IMPORT")]
+    raw = pipeline.read_workbook_sheet(seed_workbook, "RAW_DATA")
+    sa = [pipeline.read_workbook_sheet(seed_workbook, "SALESAPP_IMPORT")]
     state = pipeline.build_state(cfg, raw, pipeline.merge_salesapp(sa), snapshot=snap)
     # state already carries the accumulated POS_MASTER; run import+compliance so
     # last-visit is current, then it's ready to plan.
@@ -228,62 +228,81 @@ def run_planning(state, start, length):
 
 
 def main():
+    generate(start_week=29, length=5, cap_per_tech=CAP_PER_TECH_WEEK,
+             forced=FORCE_ASSIGN, seed_workbook=SCAFFOLD, out=OUT)
+
+
+def generate(start_week, length, cap_per_tech, forced, seed_workbook, out):
+    """Full 5-week (or N-week) plan: first week = Dojezd (neglect cleanup),
+    remaining weeks = campaign (full weeks), plus manager overrides."""
+    forced = forced or []
     print("Building base state (Import + Compliance)…")
-    base = build_base()
+    base = build_base(seed_workbook)
 
-    # Manager overrides: pull the forced POS out of the automatic plan first.
-    forced = _force_excluded_posids()
-    if forced:
-        print(f"Manager override: {mark_force_exclude(base, forced)} POS vyňato z automatiky (řízené ručně)")
+    forced_ids = set(str(p) for o in forced for p in o["pos"])
+    if forced_ids:
+        print(f"Manager override: {mark_force_exclude(base, forced_ids)} POS vyňato z automatiky")
 
-    # WEEK 29 = DOJEZD: visit the LONGEST-neglected POS (rank by
-    # weeksSinceLastVisit), NOT the high-PPT ones - those stay fresh for the
-    # campaign weeks. The engine still decides who is eligible (filters) and
-    # routes the chosen POS into days (geo_days); the manager goal here is
-    # "clean up the neglected network", not "grab the strongest".
-    week29_rows = build_week29_cleanup(base, 29)
-    print(f"Week 29 (Dojezd, nejzanedbanější): {len(week29_rows)} návštěv")
+    # First week = DOJEZD: longest-neglected POS (rank by weeksSinceLastVisit),
+    # not the strong ones - those stay fresh for the campaign weeks.
+    week1_rows = build_week29_cleanup(base, start_week, cap_per_tech)
+    print(f"Týden {start_week} (Dojezd, nejzanedbanější): {len(week1_rows)} návštěv")
+    for r in week1_rows:
+        base["MANAGER_PLAN"].append(r)
+    _lock_week(base, start_week)
 
-    # Inject week 29 as a locked week so the campaign run carries it and never
-    # re-plans its POS; the strong POS remain available for weeks 30-33.
-    mp = base["MANAGER_PLAN"]
-    for r in week29_rows:
-        mp.append(r)
-    _lock_week(base, 29)
+    # Remaining weeks = campaign (full weeks; hold-back look-ahead off).
+    # NB: run_planning does state.update(wb.dump()), which REPLACES the
+    # MANAGER_PLAN list object -> always re-fetch base["MANAGER_PLAN"] after it.
+    if length > 1:
+        pipeline._set_control(base, "HOLDBACK_LOOKAHEAD_WEEKS", 0)
+        for o in forced:
+            auto_cap = max(cap_per_tech - len(o["pos"]), 0)
+            set_capacity_override(base, o["technician"], 2026, o["week"], auto_cap)
+            print(f"Kapacita: {o['technician']} t{o['week']} auto {auto_cap} + override {len(o['pos'])} = {auto_cap + len(o['pos'])}")
+        print(f"Plán týdny {start_week + 1}-{start_week + length - 1} (Kampaň)…",
+              run_planning(base, start_week + 1, length - 1))
 
-    # WEEKS 30-33 = KAMPAŇ: campaigns active, but hold-back look-ahead off so
-    # the campaign weeks are FULL (strong/campaign POS get visited now, not
-    # deferred into emptiness). GECO/CORN cadence stays guaranteed.
-    pipeline._set_control(base, "HOLDBACK_LOOKAHEAD_WEEKS", 0)
-    # Leave room for forced overrides: cap the technician's automatic picks that
-    # week so automatic + override stays near normal capacity.
-    for o in FORCE_ASSIGN:
-        auto_cap = max(CAP_PER_TECH_WEEK - len(o["pos"]), 0)
-        set_capacity_override(base, o["technician"], 2026, o["week"], auto_cap)
-        print(f"Kapacita: {o['technician']} t{o['week']} automaticky {auto_cap} + override {len(o['pos'])} = {auto_cap + len(o['pos'])}")
-    print("Planning weeks 30-33 (Kampaň, plné týdny)…", run_planning(base, 30, 4))
-
-    # inject manager overrides (forced POS -> specific technician + week)
-    mp2 = base["MANAGER_PLAN"]
-    for o in FORCE_ASSIGN:
-        frows = build_forced_rows(base, o["pos"], o["technician"], o["week"], o["reason"])
+    # Inject manager overrides (forced POS -> technician + week).
+    for o in forced:
+        frows = build_forced_rows(base, o["pos"], o["technician"], o["week"], o.get("reason", "OVERRIDE"))
         for r in frows:
-            mp2.append(r)
+            base["MANAGER_PLAN"].append(r)
         print(f"Override: {len(frows)} POS → {o['technician']}, týden {o['week']}")
 
-    plan = base["MANAGER_PLAN"]
-    hdr = plan[0]
+    mp = base["MANAGER_PLAN"]
+    hdr = mp[0]
     idx = {n: i for i, n in enumerate(hdr)}
-    rows = [r for r in plan[1:] if r and r[idx["WEEK"]] not in (None, "")]
+    rows = [r for r in mp[1:] if r and r[idx["WEEK"]] not in (None, "")]
     rows.sort(key=lambda r: (str(r[idx["TECHNICIAN"]]), int(r[idx["WEEK"]]),
                              DAY_ORDER.get(str(r[idx["DAY"]]), 9)))
     print(f"Plan rows total: {len(rows)}")
+    write_excel(rows, idx, base, out, start_week, length)
+    print("Wrote", out, "(", round(os.path.getsize(out) / 1e6, 2), "MB )")
 
-    write_excel(rows, idx, base)
-    print("Wrote", OUT, "(", round(os.path.getsize(OUT) / 1e6, 2), "MB )")
+
+def cli():
+    import argparse
+    import json
+    p = argparse.ArgumentParser(description="Generovat tour plán (Excel) přes engine.")
+    p.add_argument("--start-week", type=int, default=29)
+    p.add_argument("--length", type=int, default=5)
+    p.add_argument("--visits-per-tech", type=int, default=CAP_PER_TECH_WEEK)
+    p.add_argument("--workbook", default=SCAFFOLD)
+    p.add_argument("--overrides", default=os.path.join(ROOT, "data", "overrides.json"))
+    p.add_argument("--out", default=OUT)
+    a = p.parse_args()
+    forced = FORCE_ASSIGN
+    if a.overrides and os.path.exists(a.overrides):
+        with open(a.overrides, encoding="utf-8") as f:
+            forced = json.load(f)
+        print(f"Override soubor: {a.overrides} ({len(forced)} pravidel)")
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    generate(a.start_week, a.length, a.visits_per_tech, forced, a.workbook, a.out)
 
 
-def write_excel(rows, idx, state):
+def write_excel(rows, idx, state, out=OUT, start_week=29, length=5):
+    weeks = list(range(start_week, start_week + length))
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "TOUR_PLAN"
@@ -306,19 +325,18 @@ def write_excel(rows, idx, state):
     from collections import Counter
     per_week = Counter(int(r[idx["WEEK"]]) for r in rows)
     per_tech = Counter(str(r[idx["TECHNICIAN"]]) for r in rows)
-    s.append(["Tour plán – týdny 29–33", ""])
+    s.append([f"Tour plán – týdny {weeks[0]}–{weeks[-1]}", ""])
     s["A1"].font = Font(bold=True, size=14)
     s.append(["Celkem naplánováno návštěv", len(rows)])
     s.append(["Počet techniků", len(per_tech)])
     s.append([])
-    s.append(["Strategie", "T29 = Dojezd (nejzanedbanější POS) · T30–33 = Kampaň (silné POS, plné týdny)"])
-    s.append(["", "GECO/CORN cadence garantováno, každý POS max. 1× za 5 týdnů"])
+    s.append(["Strategie", f"T{weeks[0]} = Dojezd (nejzanedbanější POS) · zbytek = Kampaň (silné POS, plné týdny)"])
+    s.append(["", "GECO/CORN cadence garantováno, každý POS max. 1× za horizont"])
     s.append(["Návštěvy po týdnech", ""])
     s.cell(s.max_row, 1).font = Font(bold=True)
-    labels = {29: "Týden 29 (Dojezd – zanedbané)", 30: "Týden 30 (Kampaň)", 31: "Týden 31 (Kampaň)",
-              32: "Týden 32 (Kampaň)", 33: "Týden 33 (Kampaň)"}
-    for w in (29, 30, 31, 32, 33):
-        s.append([labels[w], per_week.get(w, 0)])
+    for w in weeks:
+        tag = "Dojezd – zanedbané" if w == weeks[0] else "Kampaň"
+        s.append([f"Týden {w} ({tag})", per_week.get(w, 0)])
     s.append([])
     s.append(["Návštěvy po technicích", ""])
     s.cell(s.max_row, 1).font = Font(bold=True)
@@ -327,8 +345,8 @@ def write_excel(rows, idx, state):
     s.column_dimensions["A"].width = 34
     s.column_dimensions["B"].width = 14
 
-    wb.save(OUT)
+    wb.save(out)
 
 
 if __name__ == "__main__":
-    main()
+    cli()

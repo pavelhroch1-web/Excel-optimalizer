@@ -1,0 +1,70 @@
+name: Generovat Tour Plán
+
+# Spustí se ručně z GitHub → Actions → "Generovat Tour Plán" → Run workflow.
+# Běží na GitHub runneru (~7 GB RAM), takže se vejde i tam, kde free host padá na OOM.
+# Výsledný Excel se nahraje jako artifact (ke stažení) a volitelně commitne do output/.
+on:
+  workflow_dispatch:
+    inputs:
+      start_week:
+        description: "Počáteční týden (1-53)"
+        required: true
+        default: "29"
+      length:
+        description: "Horizont (počet týdnů)"
+        required: true
+        default: "5"
+      visits_per_tech:
+        description: "Návštěv na technika a týden"
+        required: true
+        default: "40"
+      commit_output:
+        description: "Uložit Excel i do output/ v repu (commit)"
+        type: boolean
+        default: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r tools/requirements-actions.txt
+
+      - name: Generate tour plan
+        run: |
+          mkdir -p output
+          python tools/export_tourplan.py \
+            --start-week "${{ github.event.inputs.start_week }}" \
+            --length "${{ github.event.inputs.length }}" \
+            --visits-per-tech "${{ github.event.inputs.visits_per_tech }}" \
+            --out "output/TOUR_PLAN_tydny_${{ github.event.inputs.start_week }}.xlsx"
+
+      - name: Upload Excel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tour-plan
+          path: output/*.xlsx
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Commit output to repo (optional)
+        if: ${{ github.event.inputs.commit_output == 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add output/*.xlsx
+          if git diff --cached --quiet; then
+            echo "Žádná změna k commitu."
+          else
+            git commit -m "Tour plán: týdny od ${{ github.event.inputs.start_week }} (${{ github.event.inputs.length }} týd.)"
+            git push
+          fi
