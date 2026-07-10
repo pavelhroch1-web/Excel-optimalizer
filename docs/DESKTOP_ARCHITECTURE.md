@@ -82,9 +82,20 @@ Nothing "works" inside a spreadsheet anymore.
   the scaffold snapshot.
 - Later, optionally an Inno Setup installer for a nicer first run.
 
+### Planning Engine reads config from the DB (db_state)
+`db_state.configure(state, mode, start_week, length)` maps the enabled
+`business_rules` + `settings` onto the exact CONTROL keys the engine already
+reads (STANDARD_VISIT_GAP, NEGLECTED_AFTER_WEEKS, HOLDBACK_*, TARGET_VISITS_*,
+GPS_EXTRA_*, CAMPAIGN_*) and applies the strategy mode (dojezd / kampan /
+vyvazeny / cela_sit). The importer syncs those rule params from the imported
+CONTROL, so the DB is the source of truth. **Regression-verified: with default
+config the plan is byte-identical to the pre-DB baseline (5117 rows); modes
+diverge (dojezd 8019 vs kampan 7181).** The engine's algorithm is untouched —
+editing a rule/setting changes planning with no code change.
+
 ## Roadmap
-- **Fáze 0 (hotovo):** portable `.exe`, SQLite datastore, current Planning
-  Engine local, existing UI, immutable publish.
+- **Fáze 0 (hotovo):** portable `.exe`, SQLite datastore, Planning Engine reads
+  config from SQLite (db_state), existing UI, immutable publish.
 - **Fáze 1:** Strategy Advisor, Field Brain, KPI dashboard, horizon simulation.
 - **Fáze 2:** plan vs. reality from SalesApp, real driven-km from visit order,
   route map, efficiency evaluation.

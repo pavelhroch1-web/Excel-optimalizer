@@ -420,12 +420,12 @@ CREATE INDEX IF NOT EXISTS ix_rules_code ON business_rules(code, enabled);
 INSERT OR IGNORE INTO business_rules (code, name, category, enabled, params) VALUES
     ('CADENCE',          'Pravidelná kadence (GECO/CORN/MANDATORY)', 'cadence', 1,
         '{"rules":[{"code":"GECO","match":"category","value":"1GECO","every_weeks":5},{"code":"CORN","match":"market","value":"CORN","every_weeks":4},{"code":"MANDATORY_9PODNIK","once_per_campaign":true}],"dedup_by":"address"}'),
-    ('MIN_GAP',          'Minimální rozestup mezi návštěvami', 'spacing', 1, '{"weeks":6}'),
-    ('NEGLECTED_AFTER',  'Bonus za dlouho nenavštívené POS', 'spacing', 1, '{"weeks":26,"bonus":50000}'),
-    ('HOLDBACK',         'Smart hold-back před kampaní', 'holdback', 1, '{"lookahead_weeks":2,"tolerance":1}'),
-    ('MAX_VISITS_WEEK',  'Maximální počet návštěv na technika/týden', 'capacity', 1, '{"per_week":40,"per_day":8}'),
+    ('MIN_GAP',          'Minimální rozestup mezi návštěvami', 'spacing', 1, '{"weeks":8}'),
+    ('NEGLECTED_AFTER',  'Bonus za dlouho nenavštívené POS', 'spacing', 1, '{"weeks":26}'),
+    ('HOLDBACK',         'Smart hold-back před kampaní', 'holdback', 1, '{"lookahead_weeks":3,"tolerance_a":1,"tolerance_other":3}'),
+    ('MAX_VISITS_WEEK',  'Maximální počet návštěv na technika/den', 'capacity', 1, '{"per_day":8}'),
     ('CAMPAIGN_PRIORITY','Priorita kampaní', 'campaign', 1, '{"source":"campaigns"}'),
-    ('GPS_EXTRA',        'Extra návštěvy podle GPS clusteru', 'capacity', 1, '{"max_extra_visits":5}'),
+    ('GPS_EXTRA',        'Extra návštěvy podle GPS clusteru', 'capacity', 0, '{"max_extra_visits":5}'),
     ('OZ_COVERAGE',      'Nenaplánovat POS pokryté nedávno OZ', 'coverage', 0, '{"skip_if_oz_within_weeks":4}');
 
 -- ---------------------------------------------------------------------------

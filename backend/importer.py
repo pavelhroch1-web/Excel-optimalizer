@@ -226,7 +226,57 @@ def import_workbook(path: str, filename: str | None = None) -> dict:
         result["technicians"] = derive_technicians(conn)
         result["closed_pos"] = conn.execute("SELECT COUNT(*) c FROM closed_pos").fetchone()[0]
         conn.commit()
-        return result
     finally:
         conn.close()
         wb.close()
+    sync_rules_from_config()  # keep business_rules/settings in step with imported CONTROL
+    return result
+
+
+# CONTROL key -> where the DB config that maps to it should be synced, so the
+# DB (source of truth) reflects the real imported CONTROL and db_state's overlay
+# reproduces the baseline plan. (Only knobs the engine actually reads.)
+_CONTROL_TO_RULE = {
+    "STANDARD_VISIT_GAP":          ("MIN_GAP", "weeks", float),
+    "NEGLECTED_AFTER_WEEKS":       ("NEGLECTED_AFTER", "weeks", float),
+    "HOLDBACK_LOOKAHEAD_WEEKS":    ("HOLDBACK", "lookahead_weeks", float),
+    "HOLDBACK_TOLERANCE_A_WEEKS":  ("HOLDBACK", "tolerance_a", float),
+    "HOLDBACK_TOLERANCE_OTHER_WEEKS": ("HOLDBACK", "tolerance_other", float),
+    "TARGET_VISITS_WEEK":          ("MAX_VISITS_WEEK", "per_week", float),
+    "TARGET_VISITS_DAY":           ("MAX_VISITS_WEEK", "per_day", float),
+    "GPS_EXTRA_MAX_VISITS":        ("GPS_EXTRA", "max_extra_visits", float),
+}
+
+
+def sync_rules_from_config() -> None:
+    """Sync business_rules params + planner settings from the imported CONTROL
+    (config table), so the DB is the source of truth and the engine, driven by
+    db_state, reproduces the current behaviour. Idempotent."""
+    import business_rules
+    import settings as settings_mod
+
+    ctrl = {r["key"]: r["value"] for r in db.get("SELECT key, value FROM config")}
+    eff = business_rules.effective()
+    for ckey, (rule, pkey, cast) in _CONTROL_TO_RULE.items():
+        if ckey not in ctrl or ctrl[ckey] in (None, ""):
+            continue
+        try:
+            val = cast(ctrl[ckey])
+        except (ValueError, TypeError):
+            continue
+        val = int(val) if isinstance(val, float) and val.is_integer() else val
+        params = dict(eff.get(rule, {}).get("params", {}))
+        params[pkey] = val
+        business_rules.set_params(rule, params)
+        eff.setdefault(rule, {"params": {}})["params"] = params
+    if "TARGET_VISITS_DAY" in ctrl and ctrl["TARGET_VISITS_DAY"] not in (None, ""):
+        try:
+            settings_mod.set_value("planner", "max_visits_per_day", int(float(ctrl["TARGET_VISITS_DAY"])))
+        except (ValueError, TypeError):
+            pass
+    # GPS extra visits on/off follows the imported CONTROL flag.
+    if "GPS_EXTRA_ENABLED" in ctrl and ctrl["GPS_EXTRA_ENABLED"] not in (None, ""):
+        try:
+            business_rules.set_enabled("GPS_EXTRA", float(ctrl["GPS_EXTRA_ENABLED"]) == 1)
+        except (ValueError, TypeError):
+            pass

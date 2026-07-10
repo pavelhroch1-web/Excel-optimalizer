@@ -1,0 +1,100 @@
+"""Bridge: DB configuration -> the engine's CONTROL knobs.
+
+Priority 2. The Planning Engine stays generic and only READS its CONTROL/
+config sheets. This module maps the DB-configured business_rules + settings
+onto the exact CONTROL keys the engine already reads, and applies the strategy
+mode. No algorithm change: with config synced from the imported CONTROL, the
+overlay reproduces the baseline plan; editing a rule/setting in the DB then
+changes planning with zero code changes.
+
+Mode is config-only (campaign windows on/off), reusing brain.apply_mode.
+"""
+from __future__ import annotations
+
+import brain
+import business_rules
+import settings
+
+# strategy modes exposed to the app (brain has dojezd/kampan/vyvazeny;
+# "cela_sit" = whole-network dojezd: campaigns off, fill by neglect/score).
+MODES = {
+    "dojezd": "Dojezd sítě",
+    "kampan": "Kampaňový režim",
+    "vyvazeny": "Vyvážený režim",
+    "cela_sit": "Celá síť",
+}
+
+
+def _apply_business_rules(state: dict) -> None:
+    """Enabled business rules -> existing engine CONTROL keys."""
+    eff = business_rules.effective()
+
+    def rule(code):
+        r = eff.get(code)
+        return (r["params"] if r and r["enabled"] else None)
+
+    p = rule("MIN_GAP")
+    if p and "weeks" in p:
+        brain._set_control(state, "STANDARD_VISIT_GAP", p["weeks"])
+
+    p = rule("NEGLECTED_AFTER")
+    if p and "weeks" in p:
+        brain._set_control(state, "NEGLECTED_AFTER_WEEKS", p["weeks"])
+
+    hb = rule("HOLDBACK")
+    if hb:
+        brain._set_control(state, "HOLDBACK_LOOKAHEAD_WEEKS", hb.get("lookahead_weeks", 0))
+        if "tolerance_a" in hb:
+            brain._set_control(state, "HOLDBACK_TOLERANCE_A_WEEKS", hb["tolerance_a"])
+        if "tolerance_other" in hb:
+            brain._set_control(state, "HOLDBACK_TOLERANCE_OTHER_WEEKS", hb["tolerance_other"])
+    elif "HOLDBACK" in eff:            # rule present but disabled -> no deferral
+        brain._set_control(state, "HOLDBACK_LOOKAHEAD_WEEKS", 0)
+
+    cap = rule("MAX_VISITS_WEEK")
+    if cap:
+        if "per_week" in cap:          # only if the admin set a flat weekly cap
+            brain._set_control(state, "TARGET_VISITS_WEEK", cap["per_week"])
+        if "per_day" in cap:
+            brain._set_control(state, "TARGET_VISITS_DAY", cap["per_day"])
+
+    gps = rule("GPS_EXTRA")
+    if gps:
+        brain._set_control(state, "GPS_EXTRA_ENABLED", 1)
+        if "max_extra_visits" in gps:
+            brain._set_control(state, "GPS_EXTRA_MAX_VISITS", gps["max_extra_visits"])
+    elif "GPS_EXTRA" in eff:
+        brain._set_control(state, "GPS_EXTRA_ENABLED", 0)
+
+
+def _apply_planner_settings(state: dict) -> None:
+    """Planner settings override overlapping capacity knobs."""
+    pl = settings.effective("planner")
+    if pl.get("max_visits_per_day"):
+        brain._set_control(state, "TARGET_VISITS_DAY", pl["max_visits_per_day"])
+
+
+def configure(state: dict, mode: str, start_week: int, length: int,
+              visits_per_tech_week: float | None = None) -> dict:
+    """Apply all DB config + mode to `state` in place, then set the planning
+    window. Returns mode meta. Precedence: business_rules -> planner settings
+    -> explicit capacity override -> mode."""
+    _apply_business_rules(state)
+    _apply_planner_settings(state)
+    if visits_per_tech_week:
+        brain.apply_capacity(state, visits_per_tech_week)
+    # "cela_sit" behaves like dojezd for campaign windows (whole-network sweep).
+    brain_mode = "dojezd" if mode == "cela_sit" else mode
+    meta = brain.apply_mode(state, brain_mode)
+    brain._set_control(state, "CAMPAIGN_START_WEEK", start_week)
+    brain._set_control(state, "CAMPAIGN_LENGTH", length)
+    return {"mode": mode, "label": MODES.get(mode, meta.get("label", mode))}
+
+
+def default_horizon() -> int:
+    v = settings.get("planner", "planning_horizon_weeks")
+    return int(v) if v else 5
+
+
+def default_mode() -> str:
+    return settings.get("planner", "default_mode") or "vyvazeny"

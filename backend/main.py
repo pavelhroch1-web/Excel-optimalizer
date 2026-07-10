@@ -306,10 +306,17 @@ def draft_generate(body: GenerateRequest):
     path = _require_draft_path()
     try:
         state = state_xlsx.load_state(path)
-        # Field Brain: a strategy mode + capacity only change goals/weights via
-        # config; the Planning Engine algorithm is unchanged.
-        brain_mod.apply_mode(state, body.mode)
-        brain_mod.apply_capacity(state, body.visits_per_tech_week)
+        if LOCAL_MODE:
+            # Desktop: the Planning Engine reads its config from the DB
+            # (business_rules + settings) via db_state; algorithm unchanged.
+            import db_state
+            db_state.configure(state, body.mode, body.start_week, body.length,
+                               body.visits_per_tech_week)
+        else:
+            # Field Brain: a strategy mode + capacity only change goals/weights
+            # via config; the Planning Engine algorithm is unchanged.
+            brain_mod.apply_mode(state, body.mode)
+            brain_mod.apply_capacity(state, body.visits_per_tech_week)
         messages = pipeline.run_planning(state, body.start_week, body.length)
         state_xlsx.save_state(state, path)
         store.save_draft(path, f"Generovat tour plan: tyden {body.start_week}, delka {body.length}, rezim {body.mode}")
@@ -336,8 +343,12 @@ def draft_preflight(body: PreflightRequest):
 
 @app.get("/api/strategy-modes", dependencies=[Depends(require_auth)])
 def strategy_modes():
-    return {"modes": [{"id": k, "label": v["label"], "desc": v["desc"]}
-                      for k, v in brain_mod.STRATEGY_MODES.items()]}
+    modes = [{"id": k, "label": v["label"], "desc": v["desc"]}
+             for k, v in brain_mod.STRATEGY_MODES.items()]
+    if LOCAL_MODE:
+        modes.append({"id": "cela_sit", "label": "Celá síť",
+                      "desc": "Sweep celé sítě podle zanedbanosti a skóre (kampaně vypnuté)."})
+    return {"modes": modes}
 
 
 # --------------------------------------------------------------------------
