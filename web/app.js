@@ -63,6 +63,8 @@ function showApp() {
   loadPlannerModes();
   loadRouteTechnicians();
   loadExclusionCount();
+  loadPriority();
+  loadReassignments();
   loadAlerts();
   loadRactTechnicians();
 }
@@ -1079,7 +1081,9 @@ on("route-actual-form", "submit", async (e) => {
       tile("Zastávek", d.stopCount, "návštěv") +
       tile("Najeto km", d.totalKm, "informativně") +
       tile("Čas na cestě", Math.round(d.travelMin) + " min", "mezi POS") +
-      tile("Čas na POS", Math.round(d.onPosMin) + " min", "celkem") + `</div>`;
+      tile("Čas na POS", Math.round(d.onPosMin) + " min", "celkem") +
+      tile("Odpracováno", d.workHours != null ? d.workHours + " h" : "—",
+           d.workStart && d.workEnd ? `${d.workStart}–${d.workEnd}` : "z časů návštěv") + `</div>`;
     const hasMap = renderRouteMap(d);
     let legsHtml = `<div class="pl-section">Zastávky a přejezdy</div><table class="pd-score-table"><tbody>`;
     d.stops.forEach((s, i) => {
@@ -1188,7 +1192,7 @@ function renderReality(r) {
   const mins = r.technicians.map((t) => t.avgOnPosMinutes).filter((x) => x != null).sort((a, b) => a - b);
   const median = mins.length ? mins[Math.floor(mins.length / 2)] : null;
   let html = `<p class="pd-sub">${r.technicianCount} techniků, týdny ${r.weekFrom ?? "–"}–${r.weekTo ?? "–"}.</p>`;
-  html += `<table class="pd-score-table"><thead><tr><th>Technik</th><th>Návštěv</th><th>POS</th><th>Dní</th><th>/den</th><th>min/POS</th></tr></thead><tbody>`;
+  html += `<table class="pd-score-table"><thead><tr><th>Technik</th><th>Návštěv</th><th>POS</th><th>Dní</th><th>/den</th><th>min/POS</th><th>hod/den</th></tr></thead><tbody>`;
   html += r.technicians.map((t) => {
     // flag unusually long/short on-POS time vs median (>1.6x or <0.5x)
     let cls = "";
@@ -1198,9 +1202,10 @@ function renderReality(r) {
     }
     return `<tr><td>${esc(t.technician)}</td><td>${t.visits}</td><td>${t.uniquePos}</td>` +
       `<td>${t.daysWorked}</td><td>${t.avgVisitsPerDay}</td>` +
-      `<td class="${cls}" style="text-align:right">${t.avgOnPosMinutes ?? "—"}</td></tr>`;
+      `<td class="${cls}" style="text-align:right">${t.avgOnPosMinutes ?? "—"}</td>` +
+      `<td style="text-align:right">${t.avgHoursPerDay != null ? t.avgHoursPerDay + " h" : "—"}</td></tr>`;
   }).join("");
-  html += `</tbody></table><p class="hint">Medián času na POS ≈ ${median ?? "—"} min. Výrazně vyšší hodnoty (červeně) stojí za pozornost.</p>`;
+  html += `</tbody></table><p class="hint">Medián času na POS ≈ ${median ?? "—"} min. „hod/den“ = odhad odpracovaných hodin denně (první příjezd → poslední odjezd, včetně přejezdů). Výrazně vyšší hodnoty (červeně) stojí za pozornost.</p>`;
   return html;
 }
 
@@ -1317,6 +1322,101 @@ on("excl-clear", "click", async () => {
     setResult("excl-result", "Vyřazení zrušena.", "ok");
     document.getElementById("excl-count").textContent = d.count;
   } catch (err) { setResult("excl-result", "Chyba: " + err.message, "err"); }
+});
+
+// ---- OZ campaign prep priority list (FORCE_INCLUDE) -----------------------
+
+async function loadPriority() {
+  const el = document.getElementById("prio-list");
+  const cnt = document.getElementById("prio-count");
+  if (!el) return;
+  try {
+    const r = await apiJson("/api/priority");
+    if (cnt) cnt.textContent = r.count;
+    if (!r.priority.length) { el.innerHTML = ""; return; }
+    el.innerHTML = `<table class="pd-score-table"><thead><tr><th>POS</th><th>Kampaň</th><th></th></tr></thead><tbody>` +
+      r.priority.map((p) =>
+        `<tr><td>${esc(p.pos_id)}</td><td>${esc(p.campaign || "—")}</td>` +
+        `<td style="text-align:right"><button class="ghost prio-del" data-pos="${esc(p.pos_id)}">✕</button></td></tr>`).join("") +
+      `</tbody></table>`;
+    el.querySelectorAll(".prio-del").forEach((b) => b.addEventListener("click", async () => {
+      await apiFetch(`/api/priority/${encodeURIComponent(b.dataset.pos)}`, { method: "DELETE" });
+      loadPriority();
+    }));
+  } catch (e) { /* ignore */ }
+}
+
+on("prio-form", "submit", async (e) => {
+  e.preventDefault();
+  const ids = document.getElementById("prio-ids").value.trim();
+  if (!ids) return;
+  const campaign = document.getElementById("prio-campaign").value.trim();
+  try {
+    const r = await postJson("/api/priority", { pos_ids: ids, campaign });
+    setResult("prio-result", `Přichystáno ${r.added} POS. Celkem prioritních: ${r.count}.`, "ok");
+    document.getElementById("prio-ids").value = "";
+    loadPriority();
+  } catch (err) { setResult("prio-result", "Chyba: " + err.message, "err"); }
+});
+
+on("prio-clear", "click", async () => {
+  if (!confirm("Zrušit celý seznam prioritních POS?")) return;
+  try {
+    await apiFetch("/api/priority/_all", { method: "DELETE" });
+    setResult("prio-result", "Seznam zrušen.", "ok");
+    loadPriority();
+  } catch (err) { setResult("prio-result", "Chyba: " + err.message, "err"); }
+});
+
+// ---- temporary POS reassignment (vacation / sickness cover) ---------------
+
+async function loadReassignments() {
+  const el = document.getElementById("reassign-list");
+  const cnt = document.getElementById("reassign-count");
+  if (!el) return;
+  try {
+    const r = await apiJson("/api/reassignments");
+    if (cnt) cnt.textContent = r.count;
+    if (!r.reassignments.length) { el.innerHTML = ""; return; }
+    el.innerHTML = `<table class="pd-score-table"><thead><tr><th>Co</th><th>→ Na koho</th><th>Důvod</th><th>Platnost</th><th></th></tr></thead><tbody>` +
+      r.reassignments.map((x) => {
+        const what = x.pos_id ? `POS ${esc(x.pos_id)}` : `vše: ${esc(x.from_technician || "?")}`;
+        const span = (x.valid_from || x.valid_to) ? `${x.valid_from || "…"} – ${x.valid_to || "…"}` : "trvale";
+        const badge = x.current ? "" : ` <span class="badge">neaktivní</span>`;
+        return `<tr><td>${what}</td><td>${esc(x.to_technician)}</td><td>${esc(x.reason || "—")}</td>` +
+          `<td>${span}${badge}</td>` +
+          `<td style="text-align:right"><button class="ghost reassign-del" data-id="${x.id}">✕</button></td></tr>`;
+      }).join("") + `</tbody></table>`;
+    el.querySelectorAll(".reassign-del").forEach((b) => b.addEventListener("click", async () => {
+      await apiFetch(`/api/reassignments/${b.dataset.id}`, { method: "DELETE" });
+      loadReassignments();
+    }));
+  } catch (e) { /* ignore */ }
+}
+
+on("reassign-form", "submit", async (e) => {
+  e.preventDefault();
+  const to = document.getElementById("reassign-to").value.trim();
+  if (!to) { setResult("reassign-result", "Zadej, na koho POS přehodit.", "err"); return; }
+  const body = {
+    from_technician: document.getElementById("reassign-from").value.trim() || null,
+    pos_ids: document.getElementById("reassign-pos").value.trim(),
+    to_technician: to,
+    reason: document.getElementById("reassign-reason").value,
+    valid_from: document.getElementById("reassign-vf").value || null,
+    valid_to: document.getElementById("reassign-vt").value || null,
+  };
+  if (!body.from_technician && !body.pos_ids) {
+    setResult("reassign-result", "Vyplň „Od koho“ nebo „čísla POS“.", "err"); return;
+  }
+  try {
+    const r = await postJson("/api/reassignments", body);
+    if (!r.ok) { setResult("reassign-result", r.error || "Chyba.", "err"); return; }
+    setResult("reassign-result", `Přehozeno (${r.added}). Projeví se při dalším generování plánu.`, "ok");
+    document.getElementById("reassign-pos").value = "";
+    document.getElementById("reassign-from").value = "";
+    loadReassignments();
+  } catch (err) { setResult("reassign-result", "Chyba: " + err.message, "err"); }
 });
 
 // ---- route planner (long-term per-technician plan) ------------------------

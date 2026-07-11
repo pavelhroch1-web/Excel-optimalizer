@@ -85,12 +85,20 @@ def technician_route(technician: str, date_from: str | None = None,
                 legs.append({"fromSeq": prev["seq"], "toSeq": i + 1,
                              "km": leg_km, "travelMin": tmin})
             stops.append(stop); prev = stop
+        starts = [_dt(s["started"]) for s in stops if _dt(s["started"])]
+        ends = [_dt(s["finished"]) for s in stops if _dt(s["finished"])]
+        work_start = min(starts) if starts else None
+        work_end = max(ends) if ends else None
+        work_min = _minutes(work_start, work_end)
         out_days.append({
             "date": day, "stops": stops, "legs": legs,
             "stopCount": len(stops),
             "totalKm": round(total_km, 1),
             "travelMin": round(travel_min, 1),
             "onPosMin": round(onpos_min, 1),
+            "workStart": work_start.strftime("%H:%M") if work_start else None,
+            "workEnd": work_end.strftime("%H:%M") if work_end else None,
+            "workHours": round(work_min / 60.0, 1) if work_min else None,
         })
     return {"technician": technician, "days": out_days,
             "totalKm": round(sum(d["totalKm"] for d in out_days), 1),

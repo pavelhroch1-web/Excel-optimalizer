@@ -1173,6 +1173,7 @@ function main(workbook: ExcelScript.Workbook) {
           !used.includes(p) &&
           !(
             !p.mandatoryRuleId &&
+            !p.forceInclude && // manual FORCE_INCLUDE = highest priority, never held back (like mandatory)
             shouldHoldBack(p.classification, p.weeksSinceLastVisit, p.deadlineWeeks, activityPlanWindows, week, HOLDBACK_CONFIG)
           )
       );

@@ -746,6 +746,94 @@ if LOCAL_MODE:
             db.run("DELETE FROM pos_exclusions WHERE pos_id=?", (pos_id,))
         return {"ok": True, "count": db.get("SELECT COUNT(*) AS c FROM pos_exclusions")[0]["c"]}
 
+    # Temporary POS reassignment (dovolená/nemoc/výpověď) + manual per-POS
+    # override. Whole-technician cover (from_technician) or specific POS list.
+    # valid_from/valid_to give it a window; after valid_to it auto-returns
+    # (the engine simply stops applying it). No SalesForce data is changed.
+    class ReassignRequest(BaseModel):
+        from_technician: str | None = None
+        pos_ids: str | list = ""
+        to_technician: str = ""
+        reason: str | None = None
+        valid_from: str | None = None
+        valid_to: str | None = None
+
+    @app.get("/api/reassignments", dependencies=[Depends(require_auth)])
+    def list_reassignments():
+        rows = db.get("SELECT id, from_technician, pos_id, to_technician, reason, "
+                      "valid_from, valid_to, active, created_at FROM pos_reassignments "
+                      "WHERE active=1 ORDER BY created_at DESC")
+        today = __import__("datetime").date.today().isoformat()
+        out = []
+        for r in rows:
+            d = dict(r)
+            vf, vt = d.get("valid_from"), d.get("valid_to")
+            d["current"] = (not vf or vf <= today) and (not vt or vt >= today)
+            out.append(d)
+        return {"reassignments": out, "count": len(out)}
+
+    @app.post("/api/reassignments", dependencies=[Depends(require_auth)])
+    def add_reassignment(body: ReassignRequest):
+        if not body.to_technician:
+            return {"ok": False, "error": "to_technician required"}
+        raw = body.pos_ids if isinstance(body.pos_ids, list) else _re.split(r"[\s,;]+", str(body.pos_ids))
+        ids = [str(x).strip() for x in raw if str(x).strip()]
+        n = 0
+        if body.from_technician and not ids:
+            db.run("INSERT INTO pos_reassignments (from_technician, to_technician, reason, "
+                   "valid_from, valid_to) VALUES (?, ?, ?, ?, ?)",
+                   (body.from_technician, body.to_technician, body.reason,
+                    body.valid_from, body.valid_to))
+            n = 1
+        else:
+            for pid in ids:
+                db.run("INSERT INTO pos_reassignments (from_technician, pos_id, to_technician, "
+                       "reason, valid_from, valid_to) VALUES (?, ?, ?, ?, ?, ?)",
+                       (body.from_technician, pid, body.to_technician, body.reason,
+                        body.valid_from, body.valid_to))
+                n += 1
+        return {"ok": True, "added": n}
+
+    @app.delete("/api/reassignments/{rid}", dependencies=[Depends(require_auth)])
+    def delete_reassignment(rid: str):
+        if rid == "_all":
+            db.run("UPDATE pos_reassignments SET active=0")
+        else:
+            db.run("UPDATE pos_reassignments SET active=0 WHERE id=?", (rid,))
+        return {"ok": True}
+
+    # OZ campaign prep list: upload POS numbers to be prepared for an upcoming OZ
+    # campaign -> planned with top priority (FORCE_INCLUDE).
+    class PriorityRequest(BaseModel):
+        pos_ids: str | list = ""
+        campaign: str | None = None
+        reason: str | None = None
+
+    @app.get("/api/priority", dependencies=[Depends(require_auth)])
+    def list_priority():
+        rows = db.get("SELECT pos_id, campaign, reason, created_at FROM pos_priority "
+                      "WHERE active=1 ORDER BY campaign, pos_id")
+        return {"priority": [dict(r) for r in rows], "count": len(rows)}
+
+    @app.post("/api/priority", dependencies=[Depends(require_auth)])
+    def add_priority(body: PriorityRequest):
+        raw = body.pos_ids if isinstance(body.pos_ids, list) else _re.split(r"[\s,;]+", str(body.pos_ids))
+        ids = [str(x).strip() for x in raw if str(x).strip()]
+        for pid in ids:
+            db.run("INSERT INTO pos_priority (pos_id, campaign, reason, active) VALUES (?, ?, ?, 1) "
+                   "ON CONFLICT(pos_id) DO UPDATE SET campaign=excluded.campaign, "
+                   "reason=excluded.reason, active=1", (pid, body.campaign, body.reason))
+        return {"ok": True, "added": len(ids),
+                "count": db.get("SELECT COUNT(*) AS c FROM pos_priority WHERE active=1")[0]["c"]}
+
+    @app.delete("/api/priority/{pos_id}", dependencies=[Depends(require_auth)])
+    def delete_priority(pos_id: str):
+        if pos_id == "_all":
+            db.run("DELETE FROM pos_priority")
+        else:
+            db.run("DELETE FROM pos_priority WHERE pos_id=?", (pos_id,))
+        return {"ok": True, "count": db.get("SELECT COUNT(*) AS c FROM pos_priority WHERE active=1")[0]["c"]}
+
     # Campaigns: editable in-app (target_visits = campaign goal; Excel ODHAD is
     # often empty, and the app is the source of truth).
     class CampaignUpdate(BaseModel):

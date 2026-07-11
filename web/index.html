@@ -6,8 +6,8 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<link rel="stylesheet" href="styles.css?v=18">
-<script src="config.js?v=18"></script>
+<link rel="stylesheet" href="styles.css?v=19">
+<script src="config.js?v=19"></script>
 </head>
 <body>
 
@@ -25,7 +25,7 @@
 
 <div id="app-screen" class="screen hidden">
   <header>
-    <h1>Field Force Optimizer <span class="ver">v18</span></h1>
+    <h1>Field Force Optimizer <span class="ver">v19</span></h1>
     <button id="logout" class="ghost">Odhlásit</button>
   </header>
 
@@ -121,6 +121,35 @@
         <button type="button" id="excl-clear" class="ghost danger">Zrušit všechna vyřazení</button>
       </form>
       <p id="excl-result" class="result"></p>
+    </div>
+
+    <div class="pl-whatif">
+      <div class="pl-section">Přichystat POS pro kampaň OZ (nejvyšší priorita) <span id="prio-count" class="badge">0</span></div>
+      <p class="hint" style="margin:0 0 8px">Nahraj čísla POS, které technici mají „přichystat“ před kampaní OZ. Dostanou nejvyšší prioritu (FORCE_INCLUDE) – engine jim garantuje místo v plánu, i kdyby jinak nevyšly na řadu. OZ zůstávají jen informační vrstvou.</p>
+      <form id="prio-form" class="row">
+        <input type="text" id="prio-ids" placeholder="čísla POS, např. 71001302 71001303" style="flex:1;min-width:220px">
+        <input type="text" id="prio-campaign" placeholder="kampaň (např. OZ Vánoce 2026)" style="flex:1;min-width:180px">
+        <button type="submit" class="ghost">Přichystat</button>
+        <button type="button" id="prio-clear" class="ghost danger">Zrušit vše</button>
+      </form>
+      <div id="prio-list"></div>
+      <p id="prio-result" class="result"></p>
+    </div>
+
+    <div class="pl-whatif">
+      <div class="pl-section">Dočasně přehodit POS (dovolená / nemoc / výpověď) <span id="reassign-count" class="badge">0</span></div>
+      <p class="hint" style="margin:0 0 8px">Převeď POS jednoho technika na jiného (zástup) nebo přetáhni konkrétní POS jako override – bez zásahu do dat v SalesForce. Vyplň „Od koho“ pro celý objem technika, nebo „Čísla POS“ pro konkrétní POS. S platností od–do se přiřazení po termínu automaticky vrátí.</p>
+      <form id="reassign-form" class="row">
+        <label>Od koho (celý technik)<input type="text" id="reassign-from" placeholder="jméno technika"></label>
+        <label>nebo čísla POS<input type="text" id="reassign-pos" placeholder="71001302, …"></label>
+        <label>Na koho<input type="text" id="reassign-to" placeholder="zastupující technik"></label>
+        <label>Důvod<select id="reassign-reason"><option>dovolená</option><option>nemoc</option><option>výpověď</option><option>override</option></select></label>
+        <label>Od<input type="date" id="reassign-vf"></label>
+        <label>Do<input type="date" id="reassign-vt"></label>
+        <button type="submit" class="ghost">Přehodit</button>
+      </form>
+      <div id="reassign-list"></div>
+      <p id="reassign-result" class="result"></p>
     </div>
   </section>
 
@@ -414,6 +443,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=18"></script>
+<script src="app.js?v=19"></script>
 </body>
 </html>

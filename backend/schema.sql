@@ -298,6 +298,33 @@ CREATE TABLE IF NOT EXISTS pos_exclusions (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Temporary POS reassignment (e.g. a technician on vacation -> cover by another).
+-- from_technician set = move ALL that technician's POS; pos_id set = one POS.
+-- db_state applies it as managerOverrideTechnician before planning; clearing
+-- the row restores the original assignment. No data is overwritten.
+CREATE TABLE IF NOT EXISTS pos_reassignments (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_technician TEXT,             -- cover whole technician's POS (vacation)
+    pos_id          TEXT,             -- or a single POS (manual override)
+    to_technician   TEXT NOT NULL,
+    reason          TEXT,             -- dovolena / nemoc / vypoved / override
+    valid_from      TEXT,             -- YYYY-MM-DD (NULL = immediately)
+    valid_to        TEXT,             -- YYYY-MM-DD (NULL = until removed; auto-return after)
+    active          INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- POS the technician must "prepare" for an upcoming OZ campaign. Uploaded as a
+-- list; the planner gives them top priority (FORCE_INCLUDE guarantees a slot,
+-- bypassing filters and the min-gap penalty). Informational campaign label.
+CREATE TABLE IF NOT EXISTS pos_priority (
+    pos_id          TEXT PRIMARY KEY,
+    campaign        TEXT,             -- e.g. "OZ Vánoce 2026"
+    reason          TEXT,
+    active          INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- ---------------------------------------------------------------------------
 -- BUSINESS OBJECTIVES (Field Brain plans GOALS, not just visits)
 --

@@ -586,6 +586,7 @@ def run(
                 if id(p) not in used_ids
                 and not (
                     not p.mandatoryRuleId
+                    and not p.forceInclude  # manual FORCE_INCLUDE = highest priority, never held back (like mandatory)
                     and should_hold_back(
                         p.classification, p.weeksSinceLastVisit, p.deadlineWeeks, activity_plan_windows, week, HOLDBACK_CONFIG
                     )

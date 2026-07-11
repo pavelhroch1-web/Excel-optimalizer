@@ -19,6 +19,20 @@ import datetime
 import db
 
 
+def _dt(s):
+    if not s:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(str(s))
+    except ValueError:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                return datetime.datetime.strptime(str(s), fmt)
+            except ValueError:
+                continue
+    return None
+
+
 def _iso_week(date_str) -> int | None:
     if not date_str:
         return None
@@ -104,8 +118,9 @@ def reality(week_from: int | None = None, week_to: int | None = None) -> dict:
     technician configuration."""
     tech_ok = {r["name"] for r in db.get(
         "SELECT name FROM technicians WHERE role='TECHNIK' AND active=1")}
-    rows = db.get("SELECT technician, pos_id, visitor_role, visit_date, real_duration "
-                  "FROM salesapp_visits WHERE technician IS NOT NULL AND visit_date IS NOT NULL")
+    rows = db.get("SELECT technician, pos_id, visitor_role, visit_date, real_duration, "
+                  "started_at, finished_at FROM salesapp_visits "
+                  "WHERE technician IS NOT NULL AND visit_date IS NOT NULL")
     per: dict = {}
     for r in rows:
         wk = _iso_week(r["visit_date"])
@@ -114,11 +129,17 @@ def reality(week_from: int | None = None, week_to: int | None = None) -> dict:
         if r["technician"] not in tech_ok:
             continue
         d = per.setdefault(r["technician"], {"technician": r["technician"], "visits": 0,
-                                             "posSet": set(), "days": set(), "durSum": 0.0, "durN": 0})
+                                             "posSet": set(), "days": {}, "durSum": 0.0, "durN": 0})
         d["visits"] += 1
         if r["pos_id"]:
             d["posSet"].add(str(r["pos_id"]))
-        d["days"].add(str(r["visit_date"])[:10])
+        day = str(r["visit_date"])[:10]
+        span = d["days"].setdefault(day, [None, None])  # [min_start, max_finish]
+        st, fin = _dt(r["started_at"]), _dt(r["finished_at"])
+        if st and (span[0] is None or st < span[0]):
+            span[0] = st
+        if fin and (span[1] is None or fin > span[1]):
+            span[1] = fin
         if r["real_duration"] not in (None, ""):
             try:
                 d["durSum"] += float(r["real_duration"]); d["durN"] += 1
@@ -126,11 +147,14 @@ def reality(week_from: int | None = None, week_to: int | None = None) -> dict:
                 pass
     out = []
     for d in per.values():
+        day_hours = [(s[1] - s[0]).total_seconds() / 3600.0
+                     for s in d["days"].values() if s[0] and s[1]]
         out.append({
             "technician": d["technician"], "visits": d["visits"],
             "uniquePos": len(d["posSet"]), "daysWorked": len(d["days"]),
             "avgVisitsPerDay": round(d["visits"] / max(len(d["days"]), 1), 1),
             "avgOnPosMinutes": round(60 * d["durSum"] / d["durN"], 1) if d["durN"] else None,
+            "avgHoursPerDay": round(sum(day_hours) / len(day_hours), 1) if day_hours else None,
         })
     out.sort(key=lambda x: -x["visits"])
     return {"weekFrom": week_from, "weekTo": week_to,

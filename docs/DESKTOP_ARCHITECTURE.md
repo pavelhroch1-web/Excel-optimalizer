@@ -93,6 +93,26 @@ config the plan is byte-identical to the pre-DB baseline (5117 rows); modes
 diverge (dojezd 8019 vs kampan 7181).** The engine's algorithm is untouched —
 editing a rule/setting changes planning with no code change.
 
+`configure()` also overlays three manager decision layers onto POS_MASTER, each
+data-driven (a DB table) and each mapping onto a flag the engine already reads:
+- **`pos_exclusions` → BLACKLIST** — hard-excluded POS are never planned.
+- **`pos_priority` → `managerOverrideType=FORCE_INCLUDE`** — the "OZ campaign
+  prep" list: guaranteed a slot, highest priority. FORCE_INCLUDE bypasses the
+  planning filters, the min-gap penalty, and (see below) Smart Hold-back, and
+  sorts to the front of the weekly queue — the same guarantee `mandatory`
+  (CORN/GECO/CORE) POS get. Never flips a POS the manager has FORCE_EXCLUDE'd.
+- **`pos_reassignments` → `managerOverrideTechnician`** — temporary vacation/
+  sickness cover (whole technician's POS, or a specific POS list) with an
+  optional `valid_from`/`valid_to` window; after `valid_to` the reassignment
+  simply stops applying (auto-return), no cleanup job needed.
+
+**FORCE_INCLUDE + Smart Hold-back:** the hold-back exclusion in both engines
+(`planning_engine.py`, `office-scripts/PlanningEngine.ts`) now exempts
+`forceInclude` POS exactly as it already exempts `mandatoryRuleId` POS. This is
+inert on defaults (no POS is force-included unless a manager explicitly adds it
+to the priority list), so the byte-identical baseline above is preserved; it
+only ever changes the plan for POS the manager marked as priority.
+
 ## Platform vision (north star) — the full lifecycle
 
 Not just a route generator: a decision & control platform for planning,
