@@ -1191,6 +1191,18 @@ if LOCAL_MODE:
     def insights_list(days_back: int = 90):
         return insights.insights(days_back)
 
+    # Cause analysis for one technician: WHY they are inefficient + the biggest
+    # improvement opportunity (scattered area / bad ordering / few POS/day /
+    # single-purpose / isolated visits / short field time), each vs peers.
+    import diagnostics  # noqa: E402
+
+    @app.get("/api/insights/diagnose", dependencies=[Depends(require_auth)])
+    def insights_diagnose(technician: str, days_back: int = 90):
+        d = diagnostics.diagnose(technician, days_back)
+        if d is None:
+            raise HTTPException(status_code=404, detail="Pro technika nejsou data trasy")
+        return d
+
     # Settings platform: configure planner/optimization/dashboard/report/map/
     # scoring from the app. Definitions drive a generic admin UI; values override.
     import settings as _settings  # noqa: E402

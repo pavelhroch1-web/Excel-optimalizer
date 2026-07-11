@@ -270,6 +270,11 @@ def import_workbook(path: str, filename: str | None = None) -> dict:
         result["metrics_week"] = history.capture_metrics("import", ev[0]["id"] if ev else None)
     except Exception:  # noqa: BLE001 - never fail an import on a metrics snapshot
         pass
+    try:
+        import diagnostics
+        diagnostics.invalidate_cache()  # fresh data -> recompute peer baselines
+    except Exception:  # noqa: BLE001
+        pass
     return result
 
 

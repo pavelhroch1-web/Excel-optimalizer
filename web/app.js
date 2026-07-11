@@ -2361,11 +2361,11 @@ function renderInsightsBlock(data) {
     const why = (f.why || []).slice(0, 3).map((w) =>
       `<span class="ins-why"><b>${esc(w.label || w.metric)}</b> ${_fmtNum(w.value)}` +
       `${w.peerMedian != null ? ` <span class="ins-vs">vs. medián ${_fmtNum(w.peerMedian)}</span>` : ""}</span>`).join("");
-    return `<div class="ins-row sev-${esc(f.severity)}" ${f.entityId ? `data-tech="${esc(f.entityId)}" role="button" tabindex="0"` : ""}>
+    return `<div class="ins-row sev-${esc(f.severity)}" ${f.entityId ? `data-diagnose="${esc(f.entityId)}" role="button" tabindex="0"` : ""}>
       <div class="ins-sev">${esc(_SEV_LABEL[f.severity] || f.severity)}</div>
       <div class="ins-body"><div class="ins-head">${esc(f.headline)}</div>
         <div class="ins-whys">${why}</div></div>
-      ${f.entityId ? `<div class="ins-go">Rozebrat →</div>` : ""}</div>`;
+      ${f.entityId ? `<div class="ins-go">Příčina →</div>` : ""}</div>`;
   }).join("");
   return `<section class="ins-block">
     <div class="ins-h">${ico("flame")} Co bys přehlédl <span class="pd-chip">${fs.length} nálezů</span>
@@ -2520,11 +2520,54 @@ document.getElementById("op-brief") && document.getElementById("op-brief").addEv
   if (refresh) { loadCockpitBrief(); return; }
   const lead = e.target.closest(".brief-lead[data-nav]");
   if (lead) { showView(lead.dataset.nav); return; }
+  const diagEl = e.target.closest("[data-diagnose]");
+  if (diagEl) { openDiagnosis(diagEl.dataset.diagnose); return; }
   const techEl = e.target.closest("[data-tech]");
   if (techEl) { openTechnicianAnalytics(techEl.dataset.tech); return; }
   const runEl = e.target.closest("[data-run]");
   if (runEl) { openPlannerRun(runEl.dataset.run); return; }
 });
+
+// cause panel: WHY a technician is inefficient + biggest opportunity
+async function openDiagnosis(name) {
+  const overlay = document.getElementById("pos-detail-overlay");
+  const bodyEl = document.getElementById("pd-body");
+  document.getElementById("pd-title").textContent = "Rozbor příčin · " + name;
+  bodyEl.innerHTML = "<p class='pd-sub'>Analyzuji trasy a porovnávám s ostatními techniky…</p>";
+  overlay.classList.remove("hidden");
+  try {
+    const d = await apiJson("/api/insights/diagnose?technician=" + encodeURIComponent(name));
+    const causes = (d.causes || []).map((c, i) =>
+      `<div class="cause-row ${i === 0 ? "top" : ""}">
+         <div class="cause-rank">${i + 1}</div>
+         <div class="cause-body"><div class="cause-label">${esc(c.label)}
+           <span class="cause-z">z ${c.z > 0 ? "+" : ""}${c.z}</span></div>
+           <div class="cause-note">${esc(c.note)}</div></div></div>`).join("");
+    const opp = d.opportunity ? `<div class="cause-opp">${ico("target")}<div>
+        <div class="co-h">Největší prostor ke zlepšení</div>
+        <div class="co-t">${esc(d.opportunity.note)}</div></div></div>` : "";
+    const p = d.profile || {};
+    bodyEl.innerHTML =
+      `<div class="cause-summary">${esc(d.summary)}</div>
+       ${opp}
+       <div class="pd-section">Příčiny (seřazené podle síly odchylky)</div>
+       ${causes || "<p class='pd-sub'>Bez výrazné příčiny.</p>"}
+       <div class="pd-section">Profil práce (${p.days || 0} dní)</div>
+       <div class="score-bars">
+         ${_dgKv("POS / den", p.posPerDay)}
+         ${_dgKv("Ø přejezd (km)", p.avgLegKm)}
+         ${_dgKv("Trasa vs. optimum", p.orderingRatio != null ? p.orderingRatio + "×" : null)}
+         ${_dgKv("Čas v terénu (h)", p.workHours)}
+         ${_dgKv("Podíl času na cestě", p.travelShare != null ? p.travelShare + "%" : null)}
+         ${_dgKv("Nadbytečné km", p.excessKm)}
+       </div>
+       <p class="pd-sub" style="margin-top:12px">Porovnáno s ostatními techniky nad reálnými návštěvami ze SalesApp. Systém nenavrhuje přesuny — ukazuje příčinu a prostor.</p>`;
+  } catch (e) { bodyEl.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+}
+function _dgKv(label, val) {
+  const shown = val == null ? "—" : (typeof val === "number" ? _fmtNum(val) : val);
+  return `<div class="run-bar"><span class="rb-l">${esc(label)}</span><b class="rb-v">${esc(String(shown))}</b></div>`;
+}
 
 // jump to Analytics focused on one technician (reuses the analytics view)
 function openTechnicianAnalytics(name) {
