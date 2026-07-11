@@ -6,8 +6,8 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<link rel="stylesheet" href="styles.css?v=23">
-<script src="config.js?v=23"></script>
+<link rel="stylesheet" href="styles.css?v=24">
+<script src="config.js?v=24"></script>
 </head>
 <body>
 
@@ -25,7 +25,7 @@
 
 <div id="app-screen" class="screen hidden">
   <header>
-    <h1>Field Force Optimizer <span class="ver">v23</span></h1>
+    <h1>Field Force Optimizer <span class="ver">v24</span></h1>
     <button id="logout" class="ghost">Odhlásit</button>
   </header>
 
@@ -202,6 +202,20 @@
     </form>
     <p id="reality-result" class="result"></p>
     <div id="reality-out"></div>
+  </section>
+
+  <!-- TEAM DASHBOARD: who needs attention, where km/time leaks -->
+  <section class="card">
+    <h2>Dashboard techniků <span class="badge">tým · zatížení · produktivita</span></h2>
+    <p class="hint">Kdo potřebuje pozornost, kdo je přetížený nebo má rezervu, kam utíkají km a čas. Klikni na technika pro detailní analýzu jeho tras.</p>
+    <div class="row">
+      <label>Okno (dní zpět)<input type="number" id="team-days" value="21" min="7" max="120" style="width:90px"></label>
+      <button id="team-load" class="primary">Načíst dashboard</button>
+    </div>
+    <p id="team-result" class="result"></p>
+    <div id="team-tiles"></div>
+    <div id="team-leaks"></div>
+    <div id="team-table"></div>
   </section>
 
   <!-- TECHNICIAN ANALYTICS: interactive route map + metrics + efficiency -->
@@ -485,6 +499,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=23"></script>
+<script src="app.js?v=24"></script>
 </body>
 </html>

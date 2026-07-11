@@ -445,3 +445,12 @@ button.ghost.small { padding: 7px 13px; font-size: 12.5px; margin-left: auto; }
 .finding.st-overdue { border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 4%, var(--panel-2)); }
 .finding.st-overdue .stop-dot { background: var(--bad); }
 .finding .stop-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); margin-top: 5px; flex: none; }
+
+/* team dashboard leaks */
+.leak-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 8px; }
+.leak-col { background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px; }
+.leak-h { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); margin-bottom: 8px; }
+.leak-item { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 0; font-size: 13px; border-bottom: 1px solid var(--border); }
+.leak-item:last-child { border-bottom: 0; }
+.leak-item b { font-variant-numeric: tabular-nums; }
+.tech-link { font-weight: 600; }

@@ -1150,6 +1150,78 @@ function renderFindings(findings) {
     }).join("");
 }
 
+// ---- team dashboard (who needs attention, where km/time leaks) ------------
+
+const _LOAD_META = {
+  over: { label: "přetížený", cls: "st-overdue" },
+  slack: { label: "rezerva", cls: "st-due" },
+  ok: { label: "vyvážený", cls: "st-done" },
+};
+
+function drillToTechnician(tech) {
+  const sel = document.getElementById("ract-tech");
+  if (sel) {
+    if (![...sel.options].some((o) => o.value === tech)) sel.add(new Option(tech, tech));
+    sel.value = tech;
+    loadRactDays();
+  }
+  document.getElementById("route-actual-form").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderTeam(r) {
+  const t = r.team;
+  document.getElementById("team-tiles").innerHTML = `<div class="pl-tiles">` +
+    tile("Návštěv (tým)", t.totalVisits, `za ${t.windowDays} dní`) +
+    tile("Najeto km", t.totalKm, `${t.totalTravelHours} h na cestě`) +
+    tile("Ø čas na POS", t.avgOnPosRatioPct != null ? t.avgOnPosRatioPct + " %" : "—", "poměr na POS vs cesta") +
+    tile("Přetížení", t.overloaded, "techniků nad kapacitou", t.overloaded ? "bad" : "good") +
+    tile("Rezerva", t.slack, "techniků pod kapacitou", t.slack ? "warn" : "") +
+    tile("Po termínu", t.totalOverdue, "zpožděných zastávek", t.totalOverdue ? "bad" : "good") + `</div>`;
+
+  // leaks — where km/time leaks
+  const L = r.leaks || {};
+  const leakRow = (title, items, fmt) => items && items.length
+    ? `<div class="leak-col"><div class="leak-h">${title}</div>` +
+      items.map((x) => `<div class="leak-item"><span class="pos-link tech-link" data-tech="${esc(x.technician)}">${esc(x.technician)}</span>` +
+        `<b>${fmt(x)}</b></div>`).join("") + `</div>` : "";
+  document.getElementById("team-leaks").innerHTML =
+    `<div class="pl-section">Kam utíká čas a km</div><div class="leak-grid">` +
+    leakRow("Nejvíc času na cestě", L.byTravel, (x) => Math.round(x.travelMin) + " min") +
+    leakRow("Nejvíc dlouhých přesunů", L.byLongTransfers, (x) => x.longTransfers + "×") +
+    leakRow("Nejnižší čas na POS", L.byLowOnPos, (x) => (x.onPosRatioPct ?? "—") + " %") +
+    `</div>`;
+
+  // technician table (already sorted by attention)
+  let html = `<div class="pl-section">Technici — seřazeno podle potřeby pozornosti</div>` +
+    `<table class="pd-score-table"><thead><tr><th>Technik</th><th>Návštěv</th><th>Dní</th>` +
+    `<th>km/den</th><th>min/POS</th><th>návšt./h</th><th>čas na POS</th><th>Zatížení</th><th>Po termínu</th></tr></thead><tbody>`;
+  html += r.technicians.map((x) => {
+    const lm = _LOAD_META[x.loadStatus] || {};
+    const attn = x.attention >= 20 ? ' style="background:color-mix(in srgb, var(--bad) 5%, transparent)"' : "";
+    return `<tr${attn}><td><span class="pos-link tech-link" data-tech="${esc(x.technician)}">${esc(x.technician)}</span></td>` +
+      `<td>${x.visits}</td><td>${x.daysWorked}</td><td>${x.kmPerDay ?? "—"}</td>` +
+      `<td>${x.avgOnPosMin ?? "—"}</td><td>${x.visitsPerWorkHour ?? "—"}</td>` +
+      `<td>${x.onPosRatioPct != null ? x.onPosRatioPct + " %" : "—"}</td>` +
+      `<td><span class="chip ${lm.cls || ""}">${lm.label || "—"}${x.loadPct != null ? " · " + x.loadPct + " %" : ""}</span></td>` +
+      `<td>${x.overdue ? `<b style="color:var(--bad)">${x.overdue}</b>` : "0"}</td></tr>`;
+  }).join("") + `</tbody></table>`;
+  document.getElementById("team-table").innerHTML = html;
+
+  document.querySelectorAll("#team-table .tech-link, #team-leaks .tech-link").forEach((el) =>
+    el.addEventListener("click", () => drillToTechnician(el.dataset.tech)));
+}
+
+on("team-load", "click", async () => {
+  const days = document.getElementById("team-days").value || 21;
+  setResult("team-result", "Počítám dashboard týmu…", "");
+  try {
+    const r = await apiJson(`/api/analytics/team?days_back=${days}`);
+    if (!r.technicians.length) { setResult("team-result", r.note || "Žádní aktivní technici.", "err"); return; }
+    renderTeam(r);
+    setResult("team-result", "", "ok");
+  } catch (err) { setResult("team-result", "Chyba: " + err.message, "err"); }
+});
+
 on("ract-tech", "change", loadRactDays);
 
 on("route-actual-form", "submit", async (e) => {

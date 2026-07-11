@@ -982,6 +982,12 @@ if LOCAL_MODE:
     def analytics_trends(technician: str, days_back: int = 90):
         return route_analytics.trends(technician, days_back)
 
+    import team_analytics  # noqa: E402
+
+    @app.get("/api/analytics/team", dependencies=[Depends(require_auth)])
+    def analytics_team(days_back: int = 21):
+        return team_analytics.overview(days_back)
+
     import planner_unserved  # noqa: E402
 
     @app.post("/api/planner/unserved", dependencies=[Depends(require_auth)])
