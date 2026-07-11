@@ -262,6 +262,14 @@ def import_workbook(path: str, filename: str | None = None) -> dict:
         conn.close()
         wb.close()
     sync_rules_from_config()  # keep business_rules/settings in step with imported CONTROL
+    # Long-term memory: snapshot network + per-technician KPIs after each import,
+    # tagged with this import as provenance. Non-blocking.
+    try:
+        import history
+        ev = db.get("SELECT id FROM events WHERE kind='import' ORDER BY id DESC LIMIT 1")
+        result["metrics_week"] = history.capture_metrics("import", ev[0]["id"] if ev else None)
+    except Exception:  # noqa: BLE001 - never fail an import on a metrics snapshot
+        pass
     return result
 
 

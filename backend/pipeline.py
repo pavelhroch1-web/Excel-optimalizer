@@ -228,14 +228,21 @@ def run_import_compliance(state: dict[str, list[list]]) -> dict:
     return {"import": import_msg, "compliance": compliance_msg}
 
 
-def run_planning(state: dict[str, list[list]], start_week: int, length: int) -> dict:
+def run_planning(state: dict[str, list[list]], start_week: int, length: int,
+                 candidates_out: list | None = None,
+                 rejected_out: list | None = None) -> dict:
     """Runs the Planning Engine over already-imported state (the Generate
     step). The window is set exactly the way the Excel does it
-    (CONTROL!CAMPAIGN_START_WEEK / CAMPAIGN_LENGTH)."""
+    (CONTROL!CAMPAIGN_START_WEEK / CAMPAIGN_LENGTH).
+
+    candidates_out/rejected_out are the engine's OPTIONAL observability hooks -
+    when passed, the same run records its candidate scoring + rejection reasons
+    (no second engine run), which the long-term memory uses to store the run's
+    assessment, unserved analysis and score distribution."""
     _set_control(state, "CAMPAIGN_START_WEEK", start_week)
     _set_control(state, "CAMPAIGN_LENGTH", length)
     wb = MockWorkbook(state)
-    planning_msg = planning_engine.run(wb)
+    planning_msg = planning_engine.run(wb, candidates_out=candidates_out, rejected_out=rejected_out)
     state.update(wb.dump())
     return {"planning": planning_msg}
 

@@ -423,20 +423,69 @@ CREATE INDEX IF NOT EXISTS ix_visitobj ON visit_objectives(visit_id);
 -- field_brain). Dashboards & Reporting write and read here, so new KPIs need
 -- no new tables - just a new metric_key.
 -- ---------------------------------------------------------------------------
+-- Metric CATALOG: the semantics of every metric as DATA, so predictions,
+-- alerts, benchmarking and AI can reason about a metric (unit, good direction,
+-- which entities it applies to) without hardcoding anything. New metric = a new
+-- row here + rows in `metrics`; never a schema change.
+CREATE TABLE IF NOT EXISTS metric_definitions (
+    metric_key   TEXT PRIMARY KEY,
+    label        TEXT,
+    description  TEXT,
+    unit         TEXT,                        -- km | h | % | count | CZK | ratio
+    entity_types TEXT,                        -- JSON array: ['technician','network','pos','campaign']
+    direction    TEXT DEFAULT 'neutral',      -- higher_better | lower_better | neutral
+    category     TEXT,                        -- productivity | coverage | quality | value | decision
+    active       INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS metrics (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     entity_type TEXT NOT NULL,               -- technician | oz | region | pos | campaign | network | field_brain
     entity_id   TEXT,                        -- name/id of the entity (NULL for network-wide)
     metric_key  TEXT NOT NULL,               -- e.g. plan_fulfilment_pct, km_actual, risk_score
-    year        INTEGER,
+    period_type TEXT,                         -- day | week | month | quarter | year | asof
+    period_key  TEXT,                         -- '2026-07-08' | '2026-W30' | '2026-07' | '2026-Q3' | '2026'
+    dims        TEXT,                         -- JSON facets: {"region":"Praha","partner":"IDT"}
+    source_kind TEXT,                         -- import | publish | planner_run (provenance)
+    source_id   INTEGER,                      -- id of the event/run that produced this value
+    year        INTEGER,                      -- kept for back-compat / fast week queries
     week        INTEGER,
-    period      TEXT,                         -- optional label: 'W29-2026', 'campaign:VANOCE'
+    period      TEXT,                         -- legacy label
     value_num   REAL,
     value_text  TEXT,
     computed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_metrics_e ON metrics(entity_type, entity_id, metric_key);
-CREATE INDEX IF NOT EXISTS ix_metrics_p ON metrics(year, week);
+CREATE INDEX IF NOT EXISTS ix_metrics_p ON metrics(period_type, period_key);
+CREATE INDEX IF NOT EXISTS ix_metrics_src ON metrics(source_kind, source_id);
+
+-- Seed the metric catalog with the vocabulary the analytics modules already
+-- produce (idempotent; extend anytime with a new row).
+INSERT OR IGNORE INTO metric_definitions (metric_key, label, unit, entity_types, direction, category) VALUES
+    -- network
+    ('total_visits','Návštěvy celkem','count','["network"]','higher_better','coverage'),
+    ('total_km','Kilometry celkem','km','["network","technician"]','lower_better','productivity'),
+    ('coverage_overdue','POS po termínu','count','["network","technician"]','lower_better','coverage'),
+    ('avg_on_pos_ratio','Podíl času na POS','%','["network","technician"]','higher_better','quality'),
+    -- technician work style
+    ('visits','Návštěvy','count','["technician"]','higher_better','productivity'),
+    ('km_per_day','Km za den','km','["technician"]','lower_better','productivity'),
+    ('avg_work_hours','Odpracované hodiny (prům.)','h','["technician"]','neutral','productivity'),
+    ('travel_min','Čas na cestě','min','["technician"]','lower_better','productivity'),
+    ('on_pos_min','Čas na POS','min','["technician"]','neutral','productivity'),
+    ('on_pos_ratio','Podíl času na POS','%','["technician"]','higher_better','quality'),
+    ('visits_per_work_hour','Návštěv/hodinu','ratio','["technician"]','higher_better','productivity'),
+    ('long_transfers','Dlouhé přejezdy','count','["technician"]','lower_better','quality'),
+    ('load_pct','Vytížení kapacity','%','["technician"]','neutral','productivity'),
+    ('plan_fulfilment_pct','Plnění plánu','%','["technician","network"]','higher_better','quality'),
+    ('attention','Skóre pozornosti (odchylky)','count','["technician"]','lower_better','quality'),
+    -- POS
+    ('ppt','PPT (obchodní hodnota)','CZK','["pos"]','higher_better','value'),
+    ('weeks_since_visit','Týdnů od návštěvy','count','["pos"]','lower_better','coverage'),
+    -- planner decision
+    ('planned','Naplánováno','count','["planner_run"]','neutral','decision'),
+    ('unserved','Neobslouženo','count','["planner_run"]','lower_better','decision'),
+    ('score_median','Medián business score','count','["planner_run"]','neutral','decision');
 
 -- ---------------------------------------------------------------------------
 -- GENERIC events / audit log: any module can append without a schema change.

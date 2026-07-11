@@ -319,7 +319,12 @@ def draft_generate(body: GenerateRequest):
             # via config; the Planning Engine algorithm is unchanged.
             brain_mod.apply_mode(state, body.mode)
             brain_mod.apply_capacity(state, body.visits_per_tech_week)
-        messages = pipeline.run_planning(state, body.start_week, body.length)
+        # Capture the engine's candidate scoring + rejections in the SAME run
+        # (no re-run) so the memory can store this decision's assessment.
+        cands_out: list = [] if LOCAL_MODE else None
+        rej_out: list = [] if LOCAL_MODE else None
+        messages = pipeline.run_planning(state, body.start_week, body.length,
+                                         candidates_out=cands_out, rejected_out=rej_out)
         state_xlsx.save_state(state, path)
         store.save_draft(path, f"Generovat tour plan: tyden {body.start_week}, delka {body.length}, rezim {body.mode}")
         if _local_after_generate:
@@ -328,13 +333,19 @@ def draft_generate(body: GenerateRequest):
             route_planner.materialize_draft_plans(state)
         summary = pipeline._summarize(state, body.start_week, body.length)
         if LOCAL_MODE:
-            # Long-term memory: record this run (inputs + config fingerprint +
-            # result) append-only, so the decision can be explained/compared later.
+            # Long-term memory: record this run append-only with its inputs, the
+            # config fingerprint that produced it, and its full assessment
+            # (planned / unserved by reason / score distribution) - so the
+            # decision can be replayed and compared later.
             try:
                 import history
-                history.record_planner_run(
+                assessment = history.run_assessment_from_candidates(cands_out or [], rej_out)
+                assessment.update({k: summary.get(k) for k in summary if k not in assessment})
+                run_id = history.record_planner_run(
                     "generate", body.mode, body.start_week, body.length,
-                    body.visits_per_tech_week, result=summary)
+                    body.visits_per_tech_week, result=assessment)
+                summary["run_id"] = run_id
+                summary["assessment"] = assessment
             except Exception:  # noqa: BLE001 - never block planning on memory write
                 pass
         return {"messages": messages, "summary": summary}

@@ -80,6 +80,12 @@ def init_db() -> None:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(cadence_overrides)")}
         if "priority" not in cols:
             conn.execute("ALTER TABLE cadence_overrides ADD COLUMN priority INTEGER")
+        mcols = {r[1] for r in conn.execute("PRAGMA table_info(metrics)")}
+        for col, decl in (("period_type", "TEXT"), ("period_key", "TEXT"),
+                          ("dims", "TEXT"), ("source_kind", "TEXT"),
+                          ("source_id", "INTEGER")):
+            if col not in mcols:
+                conn.execute(f"ALTER TABLE metrics ADD COLUMN {col} {decl}")
         conn.commit()
     finally:
         conn.close()
