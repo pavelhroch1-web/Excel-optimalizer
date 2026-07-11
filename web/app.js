@@ -663,34 +663,59 @@ on("pos-detail-overlay", "click", (e) => {
 });
 
 const _ROLE_LABEL = { TECHNIK: "Technik", OZ: "OZ", ADMIN: "Admin", MANAGER: "Manažer" };
+const _TONE_CLS = { good: "st-done", warn: "st-due", bad: "st-overdue", info: "st-upcoming" };
+const _DUE_CHIP = { overdue: ["Po termínu", "st-overdue"], dueSoon: ["Brzy splatné", "st-due"], ok: ["V cadenci", "st-done"], none: ["Bez tvrdé cadence", "st-upcoming"] };
 
-function renderPosHistory(s) {
-  let html = `<div class="pl-tiles">` +
-    tile("Návštěv celkem", s.totalVisitCount ?? 0, "všechny role") +
-    tile("Technik", s.technicianVisitCount ?? 0, "návštěv") +
-    tile("OZ", s.ozVisitCount ?? 0, "návštěv (informativně)") + `</div>`;
-  const lv = (v, lbl) => v
-    ? `<div class="pd-lastvisit"><span class="pd-lv-l">${lbl}</span><b>${esc(String(v.visit_date).slice(0, 10))}</b>` +
-      `<span class="pd-lv-s">${esc(v.technician || "")}${v.purpose ? " · " + esc(v.purpose) : ""}</span></div>`
-    : `<div class="pd-lastvisit"><span class="pd-lv-l">${lbl}</span><span class="pd-lv-s">nikdy</span></div>`;
-  html += `<div class="pd-lv-row">${lv(s.lastTechnicianVisit, "Poslední návštěva technika")}${lv(s.lastOzVisit, "Poslední návštěva OZ")}</div>`;
-  const rv = s.recentVisits || [];
-  if (rv.length) {
-    html += `<div class="pd-section">Historie návštěv (posledních ${rv.length})</div>` +
-      `<table class="pd-score-table"><thead><tr><th>Datum</th><th>Role</th><th>Kdo</th><th>Účel</th><th>Trvání</th></tr></thead><tbody>` +
-      rv.map((v) => {
-        let dur = "—";
-        if (v.started_at && v.finished_at) {
-          const m = Math.round((new Date(v.finished_at.replace(" ", "T")) - new Date(v.started_at.replace(" ", "T"))) / 60000);
-          if (m > 0 && m < 1440) dur = m + " min";
-        }
-        return `<tr><td>${esc(String(v.visit_date).slice(0, 10))}</td>` +
-          `<td>${esc(_ROLE_LABEL[v.visitor_role] || v.visitor_role || "—")}</td>` +
-          `<td>${esc(v.technician || "—")}</td><td>${esc(v.purpose || "—")}</td><td>${dur}</td></tr>`;
-      }).join("") + `</tbody></table>`;
-  } else {
-    html += `<p class="pd-sub">Žádné zaznamenané návštěvy ze SalesApp.</p>`;
+function _visitRows(rv) {
+  if (!rv || !rv.length) return `<p class="pd-sub">Žádné zaznamenané návštěvy ze SalesApp.</p>`;
+  return `<table class="pd-score-table"><thead><tr><th>Datum</th><th>Role</th><th>Kdo</th><th>Účel</th><th>Trvání</th></tr></thead><tbody>` +
+    rv.map((v) => {
+      let dur = "—";
+      if (v.started_at && v.finished_at) {
+        const m = Math.round((new Date(String(v.finished_at).replace(" ", "T")) - new Date(String(v.started_at).replace(" ", "T"))) / 60000);
+        if (m > 0 && m < 1440) dur = m + " min";
+      }
+      return `<tr><td>${esc(String(v.visit_date).slice(0, 10))}</td>` +
+        `<td>${esc(_ROLE_LABEL[v.visitor_role] || v.visitor_role || "—")}</td>` +
+        `<td>${esc(v.technician || "—")}</td><td>${esc(v.purpose || "—")}</td><td>${dur}</td></tr>`;
+    }).join("") + `</tbody></table>`;
+}
+
+// The smart POS card: attributes, cadence recommended vs actual, tech/OZ
+// frequency, deviation, next-due, trend, recommendation, history.
+function renderPosCard(c) {
+  const chips = [c.segment && `segment ${c.segment}`, c.market, c.terminalType, c.ppt != null && `PPT ${c.ppt}`,
+    c.area, c.overrideType].filter(Boolean);
+  let html = `<div class="pd-chips">` + chips.map((s) => `<span class="pd-chip">${esc(s)}</span>`).join("") + `</div>`;
+  html += `<p class="pd-sub">${esc(c.address || "")}${c.technician ? " · technik " + esc(c.technician) : ""}</p>`;
+
+  // system recommendation
+  const rec = c.recommendation || {};
+  html += `<div class="finding ${_TONE_CLS[rec.tone] || ""}"><span class="stop-dot"></span><span>${esc(rec.text || "")}</span></div>`;
+
+  // cadence health
+  const dc = _DUE_CHIP[c.dueStatus] || ["", ""];
+  html += `<div class="pd-section">Cadence – doporučeno vs. skutečně</div><div class="pl-tiles">` +
+    tile("Doporučená", c.recommendedCadenceWeeks != null ? c.recommendedCadenceWeeks + " t." : "—", c.cadenceRule || "bez GECO/CORN") +
+    tile("Skutečná", c.actualCadenceWeeks != null ? c.actualCadenceWeeks + " t." : "—", "průměr mezi návštěvami") +
+    tile("Odchylka", c.cadenceDeviationWeeks != null ? (c.cadenceDeviationWeeks > 0 ? "+" : "") + c.cadenceDeviationWeeks + " t." : "—",
+      c.cadenceDeviationWeeks != null ? (c.cadenceDeviationWeeks > 0 ? "řidčeji, než PPT" : "častěji, než PPT") : "",
+      c.cadenceDeviationWeeks > 1.5 ? "bad" : (c.cadenceDeviationWeeks < -1.5 ? "warn" : "")) +
+    tile("Další návštěva", c.daysRemaining != null ? _cd(c.daysRemaining) : "—", dc[0],
+      c.dueStatus === "overdue" ? "bad" : (c.dueStatus === "dueSoon" ? "warn" : "")) + `</div>`;
+
+  // technician vs OZ frequency
+  html += `<div class="pd-section">Četnost návštěv</div><div class="pl-tiles">` +
+    tile("Technik", c.technicianVisits ?? 0, c.lastTechnicianVisit ? "naposledy " + String(c.lastTechnicianVisit).slice(0, 10) : "nikdy") +
+    tile("OZ", c.ozVisits ?? 0, c.lastOzVisit ? "naposledy " + String(c.lastOzVisit).slice(0, 10) : "nikdy") + `</div>`;
+
+  // trend
+  if ((c.trend || []).length >= 2) {
+    html += `<div class="pd-section">Trend návštěv technika (měsíčně)</div>` +
+      `<div class="pd-trend">${_spark(c.trend.map((t) => t.visits), "#0F7C77", 260, 40)}</div>`;
   }
+  // map link (open the day/route on the map for this POS's technician)
+  html += `<div class="pd-section">Historie návštěv (posledních ${(c.recentVisits || []).length})</div>` + _visitRows(c.recentVisits);
   return html;
 }
 
@@ -700,25 +725,21 @@ async function openPosDetail(posId, week) {
   document.getElementById("pd-title").textContent = "POS " + posId;
   bodyEl.innerHTML = "<p class='pd-sub'>Načítám…</p>";
   overlay.classList.remove("hidden");
-  let html = "";
-  // Engine diagnostic (only when opened with a planning week context).
+  let head = "";
+  // Engine "proč vybráno / nevybráno" (only with a planning week context).
   if (week) {
     try {
       const d = await apiJson("/api/draft/pos/" + encodeURIComponent(posId) + "?week=" + week);
-      if (d.found) {
-        document.getElementById("pd-title").textContent = "POS " + d.pos + " · " + (d.nazev || "");
-        html += renderPosDetail(d, week);
-      }
-    } catch (e) { /* fall back to history-only */ }
+      if (d.found) head += `<div class="pd-section">Rozhodnutí Planning Engine (týden ${week})</div>` + renderPosDetail(d, week);
+    } catch (e) { /* fall back to card only */ }
   }
-  // Visit history (always available — last visit, who, when, purpose).
   try {
-    const s = await apiJson("/api/pos/" + encodeURIComponent(posId) + "/visits");
-    html += (html ? `<div class="pd-section" style="margin-top:20px">Historie ze SalesApp</div>` : "") + renderPosHistory(s);
+    const c = await apiJson("/api/pos/" + encodeURIComponent(posId) + "/card");
+    document.getElementById("pd-title").textContent = "POS " + posId + (c.name ? " · " + c.name : "");
+    bodyEl.innerHTML = renderPosCard(c) + (head ? `<div class="pd-section" style="margin-top:22px">Plánování</div>` + head : "");
   } catch (err) {
-    if (!html) html = `<p class="result err">Chyba: ${esc(err.message)}</p>`;
+    bodyEl.innerHTML = head || `<p class="result err">Chyba: ${esc(err.message)}</p>`;
   }
-  bodyEl.innerHTML = html;
 }
 
 function renderPosDetail(d, week) {

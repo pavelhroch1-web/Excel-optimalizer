@@ -872,6 +872,13 @@ if LOCAL_MODE:
         """Informational: who visited this POS (technician vs OZ), when, what."""
         return pos_insights.pos_visit_summary(pos_id)
 
+    @app.get("/api/pos/{pos_id}/card", dependencies=[Depends(require_auth)])
+    def pos_card(pos_id: str):
+        """Full POS card for the TourPlan controller: attributes, tech/OZ
+        frequency, recommended vs actual cadence, deviation, trend, next-due,
+        recommendation."""
+        return pos_insights.pos_card(pos_id)
+
     # Living published TourPlan (main working screen) + cadence countdown.
     import live_plan  # noqa: E402
 
