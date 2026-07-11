@@ -93,6 +93,70 @@ config the plan is byte-identical to the pre-DB baseline (5117 rows); modes
 diverge (dojezd 8019 vs kampan 7181).** The engine's algorithm is untouched —
 editing a rule/setting changes planning with no code change.
 
+## Platform vision (north star) — the full lifecycle
+
+Not just a route generator: a decision & control platform for planning,
+publishing, tracking and evaluating field work. Lifecycle:
+
+**Import → Generate scenario → Check → Publish TourPlan → Track reality →
+Evaluate → Re-plan.**
+
+- **Published TourPlan = the active plan / source of truth** until a new one is
+  generated and published. Immutable (DB triggers). New SalesApp only writes
+  reality against it, never edits it.
+- **Automatic import**: drop an Excel (or a watched folder); the system detects
+  the file type (POS Master / SalesApp / Activity Plan), imports it, and
+  recomputes the affected metrics. No manual mapping.
+- **Automatic planner**: set capacity (35/40/45 POS per technician-week); the
+  config-driven engine selects the best POS by all rules (PPT, cadence, CORE,
+  campaigns, geography, history, hold-back, blacklist) and splits them across
+  technicians and days. The manager reviews and handles exceptions only.
+- **Predictions & simulations**: POS served, weeks to cover the network, effect
+  of capacity/technician-count changes, when capacity runs out, when POS start
+  falling out of cadence, campaign impact (e.g. Vánoce priority shifts).
+- **Plan vs. reality (from SalesApp)**: which POS were actually visited, when,
+  in the right cadence interval, time since last visit, next due; time spent per
+  POS, visit order, driven km, travel time, on-POS time, extra visits, deviations
+  from the published plan.
+- **Long-term history** (months/years): per technician and per POS, trends over
+  time, period comparison. Not just current state.
+- **Automatic anomaly alerts** — the system surfaces what deserves attention,
+  the manager doesn't hunt for it: a technician driving far fewer km than peers,
+  unusually long on-POS time, many extra visits, chronically under plan, POS
+  repeatedly unserved, behaviour that differs markedly from other technicians.
+- **Real route map**: visit order is known (SalesApp start/finish times), so the
+  actual driven route is drawn on a map (OSM + Leaflet; OSRM/GraphHopper later),
+  with km and travel time.
+- **Vacation-aware catch-up**: a technician with 0 visits in a period (vacation)
+  leaves their POS un-served → those POS accrue neglect and the engine promotes
+  them as priority catch-up in the next plan (already the engine's neglect
+  behaviour; will be made explicit).
+
+### The data model already supports this (additively)
+- reality + order + times: `salesapp_visits` (started_at/finished_at, pos_id,
+  technician, purpose); linkage Store UID → terminal_id → posId.
+- route/km/efficiency: `route_metrics` (per technician-day; plan vs reality).
+- any KPI over time (trends, history, period comparison): generic `metrics`.
+- alerts/audit: generic `events`; immutable plans: `snapshots` +
+  `published_plans` (+ triggers). New modules add rows/queries, not schema.
+
+### Additional SalesApp tracking worth adding (proposed)
+The SalesApp export also carries fields we don't use yet:
+- **Scheduled vs Real duration** → on-POS time efficiency (planned vs actual).
+- **Gap between one visit's finish and the next visit's start** → real travel
+  time between POS (no routing engine needed).
+- **Visit State** (completed / cancelled) → completion rate.
+- **Visit purpose mix** (the many "Účel návštevy" columns) → what was actually
+  done per POS/technician (supply, campaign launch, lottery pickup, small
+  terminal, other), and compliance flags (responsible-gaming card, training
+  certificate check, "no-betting" notice photographed).
+- **First/last visit time of day, days worked, idle days** → working patterns,
+  vacation detection.
+- **GPS distance of the visit vs the POS location** → data-quality / suspicious
+  visits (visited far from the POS).
+- **Repeat visits to the same POS within a short window** → inefficiency.
+- **Weekend / after-hours visits**, **chain/partner coverage**, **region mix**.
+
 ## Campaign coverage — definitions from the product owner
 - **Target (how many)** = the Activity Plan **ODHAD** (`ODHAD_NAVSTEV_ZA_KAMPAN`).
   It is often empty in the Excel, so the app owns it: `campaigns.target_visits`
