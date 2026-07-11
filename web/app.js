@@ -1520,6 +1520,8 @@ function renderLive() {
     (a.week - z.week) || ((a.daysUntil ?? 9999) - (z.daysUntil ?? 9999)));
   renderStops(vis);
 
+  // corrections banner (edit & regenerate loop)
+  renderFixBanner();
   // due panel (independent of week; respects tech + its own status pills)
   renderDuePanel();
 }
@@ -1538,13 +1540,18 @@ function renderStops(vis) {
     html += `<div class="day-head"><span>T${wk}${pd ? " · " + esc(pd) : ""}</span><span class="day-n">${rows.length} zastávek</span></div>`;
     html += `<div class="stop-list">` + rows.map((s) => {
       const st = _LIVE_STATUS[s.status] || { label: s.status, cls: "" };
+      const pos = esc(s.pos || "");
       return `<div class="stop-row ${st.cls}">` +
         `<span class="stop-dot"></span>` +
-        `<span class="stop-pos pos-link" data-pos="${esc(s.pos || "")}">${esc(s.name || s.pos || "")}</span>` +
+        `<span class="stop-pos pos-link" data-pos="${pos}">${esc(s.name || s.pos || "")}</span>` +
         `<span class="stop-city">${esc(s.city || "")}</span>` +
         `<span class="stop-tech">${esc(s.technician || "—")}</span>` +
         `<span class="stop-cd">${_cd(s.daysUntil)}</span>` +
         `<span class="chip ${st.cls}">${st.label}</span>` +
+        `<span class="stop-acts">` +
+          `<button class="stop-act" data-act="excl" data-pos="${pos}" title="Vyřadit POS z plánu">✕</button>` +
+          `<button class="stop-act" data-act="move" data-pos="${pos}" data-tech="${esc(s.technician || "")}" title="Přehodit na jiného technika">→</button>` +
+        `</span>` +
         `</div>`;
     }).join("") + `</div>`;
   });
@@ -1579,6 +1586,74 @@ function renderDuePanel() {
   _bindPosLinks("#due-out");
 }
 
+// --- edit & regenerate: fix errors from the plan, then re-plan + publish ---
+function renderFixBanner() {
+  const el = document.getElementById("fix-banner");
+  if (!el) return;
+  const n = (_live.fixes && (_live.fixes.excl + _live.fixes.reassign)) || 0;
+  if (!n) { el.style.display = "none"; return; }
+  el.style.display = "";
+  el.innerHTML =
+    `<div class="fb-txt"><b>${n}</b> ${n === 1 ? "oprava připravena" : "oprav připraveno"} ` +
+    `(${_live.fixes.excl} vyřazení, ${_live.fixes.reassign} přehození). ` +
+    `Publikovaný plán je referenční — oprav se projeví po přegenerování a publikaci nové verze.</div>` +
+    `<div class="fb-acts">` +
+    `<button class="btn-primary" data-fix="regen">Přegenerovat plán</button>` +
+    `<button class="btn-ghost" data-fix="publish">Publikovat</button>` +
+    `<button class="btn-ghost" data-fix="show">Zobrazit opravy</button>` +
+    `</div>`;
+}
+
+async function loadFixes() {
+  try {
+    const [e, r] = await Promise.all([apiJson("/api/exclusions"), apiJson("/api/reassignments")]);
+    _live.fixes = { excl: e.count || 0, reassign: r.count || 0 };
+  } catch (_) { _live.fixes = { excl: 0, reassign: 0 }; }
+}
+
+// inline stop actions + banner actions (event delegation)
+document.addEventListener("click", async (e) => {
+  const act = e.target.closest(".stop-act");
+  if (act) {
+    const pos = act.dataset.pos;
+    if (act.dataset.act === "excl") {
+      if (!confirm(`Vyřadit POS ${pos} z plánování? Projeví se po přegenerování.`)) return;
+      await postJson("/api/exclusions", { pos_ids: pos, reason: "oprava z plánu" });
+    } else if (act.dataset.act === "move") {
+      const to = prompt(`Přehodit POS ${pos} na kterého technika?`, "");
+      if (!to) return;
+      await postJson("/api/reassignments", { pos_ids: pos, to_technician: to, reason: "oprava z plánu" });
+    }
+    await loadFixes(); renderFixBanner();
+    if (typeof loadExclusionCount === "function") loadExclusionCount();
+    if (typeof loadReassignments === "function") loadReassignments();
+    return;
+  }
+  const fb = e.target.closest("#fix-banner [data-fix]");
+  if (fb) {
+    if (fb.dataset.fix === "show") {
+      document.getElementById("excl-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else if (fb.dataset.fix === "regen") {
+      const wk = parseInt(document.getElementById("planner-week")?.value || document.getElementById("start-week")?.value, 10);
+      const len = parseInt(document.getElementById("planner-length")?.value || "5", 10);
+      if (!wk) { alert("Zadej počáteční týden v sekci Planner a spusť generování tam."); return; }
+      fb.disabled = true; fb.textContent = "Generuji…";
+      try {
+        await postJson("/api/draft/generate", { start_week: wk, length: len });
+        alert("Plán přegenerován s opravami. Zkontroluj a publikuj novou verzi (tlačítko Publikovat).");
+      } catch (err) {
+        alert("Přegenerování vyžaduje aktivní draft. Nahraj data v sekci Planner (krok 1) a vygeneruj tam. (" + err.message + ")");
+      } finally { fb.disabled = false; fb.textContent = "Přegenerovat plán"; }
+    } else if (fb.dataset.fix === "publish") {
+      if (!confirm("Publikovat novou immutable verzi plánu?")) return;
+      try {
+        await postJson("/api/publish", { message: "Publikace po opravách" });
+        await loadLive();
+      } catch (err) { alert("Publikace selhala: " + err.message); }
+    }
+  }
+});
+
 // --- data load (once) + technician dropdown ---
 async function loadLive() {
   const el = document.getElementById("live-board");
@@ -1590,6 +1665,7 @@ async function loadLive() {
       apiJson("/api/live/next-due"),
     ]);
     _live.board = b; _live.due = d;
+    await loadFixes();
     // default week = current if present else all
     if (b.published && b.weeks && b.weeks.includes(b.currentWeek)) _live.week = b.currentWeek;
     // technician dropdown from active technicians
