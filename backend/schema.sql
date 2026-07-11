@@ -334,7 +334,25 @@ CREATE TABLE IF NOT EXISTS cadence_overrides (
     min_gap_weeks      REAL,
     max_interval_weeks REAL,
     active             INTEGER,
+    priority           INTEGER,
     updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Planning-model configurator overlay. One editable cell of a config sheet
+-- (TERMINAL_RULES / MARKET_RULES / CATEGORY_RULES / ACTIVITY_PLAN) is stored
+-- as (sheet, match_key, col) -> value. db_state overlays these onto the
+-- engine's config sheets before planning, exactly like cadence_overrides,
+-- so the whole planning model (which terminals/markets/categories/activities
+-- are active, category rule, activity priority/window) is configurable from
+-- the UI with no code change and no workbook write. Adding a new terminal
+-- type / activity / market is data, not development.
+CREATE TABLE IF NOT EXISTS model_overrides (
+    sheet      TEXT NOT NULL,
+    match_key  TEXT NOT NULL,
+    col        TEXT NOT NULL,
+    value      TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (sheet, match_key, col)
 );
 
 -- ---------------------------------------------------------------------------

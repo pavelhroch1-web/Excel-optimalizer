@@ -1036,6 +1036,7 @@ if LOCAL_MODE:
         min_gap_weeks: float | None = None
         max_interval_weeks: float | None = None
         active: bool | None = None
+        priority: int | None = None
 
     @app.get("/api/cadence", dependencies=[Depends(require_auth)])
     def cadence_list():
@@ -1043,12 +1044,39 @@ if LOCAL_MODE:
 
     @app.put("/api/cadence/{rule_id}", dependencies=[Depends(require_auth)])
     def cadence_update(rule_id: str, body: CadenceUpdate):
-        cadence_config.set_override(rule_id, body.min_gap_weeks, body.max_interval_weeks, body.active)
+        cadence_config.set_override(rule_id, body.min_gap_weeks, body.max_interval_weeks,
+                                    body.active, body.priority)
         return {"ok": True}
 
     @app.delete("/api/cadence/{rule_id}", dependencies=[Depends(require_auth)])
     def cadence_reset(rule_id: str):
         cadence_config.reset(rule_id)
+        return {"ok": True}
+
+    # Planning-model configurator: terminals / partners / categories /
+    # activities as editable sections (checkboxes / choices), overlaid onto
+    # the engine's config sheets before planning. Same pattern as cadence.
+    import model_config  # noqa: E402
+
+    class ModelUpdate(BaseModel):
+        col: str
+        value: object
+
+    @app.get("/api/model", dependencies=[Depends(require_auth)])
+    def model_list():
+        return {"sections": model_config.sections()}
+
+    @app.put("/api/model/{section}/{match_key:path}", dependencies=[Depends(require_auth)])
+    def model_update(section: str, match_key: str, body: ModelUpdate):
+        try:
+            model_config.set_override(section, match_key, body.col, body.value)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"ok": True}
+
+    @app.delete("/api/model/{section}/{match_key:path}", dependencies=[Depends(require_auth)])
+    def model_reset(section: str, match_key: str, col: str | None = None):
+        model_config.reset(section, match_key, col)
         return {"ok": True}
 
     # Settings platform: configure planner/optimization/dashboard/report/map/

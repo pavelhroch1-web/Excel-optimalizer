@@ -75,6 +75,11 @@ def init_db() -> None:
     conn = connect()
     try:
         conn.executescript(_schema_sql())
+        # Lightweight additive migrations (CREATE TABLE IF NOT EXISTS can't add
+        # a column to a table that already exists on an older DB).
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(cadence_overrides)")}
+        if "priority" not in cols:
+            conn.execute("ALTER TABLE cadence_overrides ADD COLUMN priority INTEGER")
         conn.commit()
     finally:
         conn.close()

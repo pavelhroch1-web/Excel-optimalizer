@@ -69,20 +69,24 @@ def list_rules() -> list[dict]:
                 eff["maxIntervalWeeks"] = o["max_interval_weeks"]
             if o["active"] is not None:
                 eff["active"] = "YES" if o["active"] else "NO"
+            if o["priority"] is not None:
+                eff["priority"] = o["priority"]
         out.append(eff)
     return out
 
 
-def set_override(rule_id: str, min_gap_weeks=None, max_interval_weeks=None, active=None) -> None:
+def set_override(rule_id: str, min_gap_weeks=None, max_interval_weeks=None,
+                 active=None, priority=None) -> None:
     db.run(
-        "INSERT INTO cadence_overrides (rule_id, min_gap_weeks, max_interval_weeks, active, updated_at) "
-        "VALUES (?, ?, ?, ?, datetime('now')) "
+        "INSERT INTO cadence_overrides (rule_id, min_gap_weeks, max_interval_weeks, active, priority, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, datetime('now')) "
         "ON CONFLICT(rule_id) DO UPDATE SET "
         "min_gap_weeks=COALESCE(excluded.min_gap_weeks, cadence_overrides.min_gap_weeks), "
         "max_interval_weeks=COALESCE(excluded.max_interval_weeks, cadence_overrides.max_interval_weeks), "
-        "active=COALESCE(excluded.active, cadence_overrides.active), updated_at=datetime('now')",
+        "active=COALESCE(excluded.active, cadence_overrides.active), "
+        "priority=COALESCE(excluded.priority, cadence_overrides.priority), updated_at=datetime('now')",
         (rule_id, min_gap_weeks, max_interval_weeks,
-         (1 if active else 0) if active is not None else None))
+         (1 if active else 0) if active is not None else None, priority))
 
 
 def reset(rule_id: str) -> None:
@@ -100,6 +104,7 @@ def apply_to_state(state: dict) -> int:
         return 0
     h = {str(n): i for i, n in enumerate(sheet[0])}
     ri, mg, mx, ac = h.get("ruleId"), h.get("minGapWeeks"), h.get("maxIntervalWeeks"), h.get("active")
+    pr = h.get("priority")
     if ri is None:
         return 0
     n = 0
@@ -114,5 +119,7 @@ def apply_to_state(state: dict) -> int:
             row[mx] = o["max_interval_weeks"]
         if ac is not None and o["active"] is not None:
             row[ac] = "YES" if o["active"] else "NO"
+        if pr is not None and o["priority"] is not None:
+            row[pr] = o["priority"]
         n += 1
     return n

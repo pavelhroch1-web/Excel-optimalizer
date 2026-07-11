@@ -1413,6 +1413,7 @@ function postJsonPut(path, body) {
 }
 
 on("tech-refresh", "click", loadTechnicians);
+on("model-refresh", "click", loadModel);
 on("tech-filter", "change", loadTechnicians);
 
 // ---- configuration: business rules + settings (config-driven, no code) -----
@@ -1534,6 +1535,69 @@ async function loadCadence() {
     el.querySelectorAll(".cad-min").forEach((i) => i.addEventListener("change", () => put(i.dataset.id, { min_gap_weeks: i.value === "" ? null : parseFloat(i.value) })));
     el.querySelectorAll(".cad-max").forEach((i) => i.addEventListener("change", () => put(i.dataset.id, { max_interval_weeks: i.value === "" ? null : parseFloat(i.value) })));
   } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+}
+
+// Planning-model configurator: terminals / partners / categories / activities.
+// Sections are declared by the backend (model_config.SECTIONS); the UI renders
+// checkboxes / choices / numbers generically, so a new section or field needs
+// no frontend change. Edits overlay onto the engine's config sheets at plan time.
+const _MODEL_ICON = { terminals: "grid", partners: "user", categories: "target", activities: "flame" };
+
+async function loadModel() {
+  const el = document.getElementById("model-out");
+  if (!el) return;
+  el.innerHTML = `<p class="pd-sub">Načítám…</p>`;
+  try {
+    const sections = (await apiJson("/api/model")).sections;
+    if (!sections.length) { el.innerHTML = `<p class="pd-sub">Žádná konfigurace (nejdřív nahraj data).</p>`; return; }
+    el.innerHTML = sections.map((s) => {
+      const boolFields = s.fields.filter((f) => f.type === "bool");
+      const isChecklist = s.fields.length === 1 && boolFields.length === 1;
+      const rows = s.rows.map((r) => _modelRow(s, r, isChecklist)).join("");
+      return `<div class="model-sec">` +
+        `<div class="model-sec-h">${ico(_MODEL_ICON[s.id] || "gear")}<div>` +
+        `<div class="model-sec-n">${esc(s.label)} <span class="pd-chip">${s.rows.length}</span></div>` +
+        `<div class="model-sec-d">${esc(s.help || "")}</div></div></div>` +
+        (isChecklist ? `<div class="model-chks">${rows}</div>` : `<div class="model-rows">${rows}</div>`) +
+        `</div>`;
+    }).join("");
+    _wireModel(el);
+  } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+}
+
+function _modelRow(sec, r, isChecklist) {
+  if (isChecklist) {
+    const f = sec.fields[0], on = r[f.col] === true;
+    return `<label class="model-chk ${on ? "" : "off"}">` +
+      `<input type="checkbox" class="model-bool" data-sec="${esc(sec.id)}" data-key="${esc(r.key)}" data-col="${esc(f.col)}" ${on ? "checked" : ""}>` +
+      `<span></span><b>${esc(r.label)}</b>${r[f.col + "_overridden"] ? '<i class="pd-chip">upraveno</i>' : ""}</label>`;
+  }
+  const anyOv = sec.fields.some((f) => r[f.col + "_overridden"]);
+  const ctrls = sec.fields.map((f) => _modelField(sec, r, f)).join("");
+  return `<div class="model-row"><div class="model-row-t">${esc(r.label)}` +
+    `${anyOv ? ' <span class="pd-chip">upraveno</span>' : ""}</div><div class="model-row-c">${ctrls}</div></div>`;
+}
+
+function _modelField(sec, r, f) {
+  const attrs = `data-sec="${esc(sec.id)}" data-key="${esc(r.key)}" data-col="${esc(f.col)}"`;
+  if (f.type === "bool") {
+    return `<label class="model-tog" title="${esc(f.label)}"><em>${esc(f.label)}</em>` +
+      `<span class="cfg-switch"><input type="checkbox" class="model-bool" ${attrs} ${r[f.col] === true ? "checked" : ""}><span></span></span></label>`;
+  }
+  if (f.type === "choice") {
+    const opts = f.choices.map((c) => `<option ${String(r[f.col]) === c ? "selected" : ""}>${esc(c)}</option>`).join("");
+    return `<label class="cfg-param model-f">${esc(f.label)}<select class="model-choice" ${attrs}>${opts}</select></label>`;
+  }
+  return `<label class="cfg-param model-f">${esc(f.label)}<input type="number" step="1" class="model-num" ${attrs} value="${r[f.col] ?? ""}"></label>`;
+}
+
+function _wireModel(el) {
+  const put = (d, value) => apiJson(`/api/model/${encodeURIComponent(d.sec)}/${encodeURIComponent(d.key)}`,
+    { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ col: d.col, value }) })
+    .then(() => { _cfgToast(); loadModel(); });
+  el.querySelectorAll(".model-bool").forEach((cb) => cb.addEventListener("change", () => put(cb.dataset, cb.checked)));
+  el.querySelectorAll(".model-choice").forEach((s) => s.addEventListener("change", () => put(s.dataset, s.value)));
+  el.querySelectorAll(".model-num").forEach((i) => i.addEventListener("change", () => put(i.dataset, i.value === "" ? null : parseFloat(i.value))));
 }
 
 // two-level config: Plánovací model vs Pokročilé nastavení enginu
@@ -2385,6 +2449,7 @@ function showView(name) {
     if (name === "settings") {
       _initCfgLevels && _initCfgLevels();
       loadCadence && loadCadence();
+      loadModel && loadModel();
       loadTechnicians && loadTechnicians();
       loadBusinessRules && loadBusinessRules();
       loadSettingsTabs && loadSettingsTabs();
