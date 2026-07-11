@@ -1183,6 +1183,14 @@ if LOCAL_MODE:
     def memory_config_diff(run_a: int, run_b: int):
         return memory.config_diff(run_a, run_b)
 
+    # Insight layer: anomaly / inefficiency / opportunity discovery over the
+    # SalesApp truth. Shows what the manager wouldn't notice, with a "why".
+    import insights  # noqa: E402
+
+    @app.get("/api/insights", dependencies=[Depends(require_auth)])
+    def insights_list(days_back: int = 90):
+        return insights.insights(days_back)
+
     # Settings platform: configure planner/optimization/dashboard/report/map/
     # scoring from the app. Definitions drive a generic admin UI; values override.
     import settings as _settings  # noqa: E402
