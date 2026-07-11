@@ -2479,6 +2479,10 @@ function _fmtNum(v) {
   const n = Number(v);
   return Math.abs(n) >= 1000 ? n.toLocaleString("cs-CZ", { maximumFractionDigits: 0 }) : (Math.round(n * 10) / 10);
 }
+function _fmtHM(minutes) {
+  const m = Math.round(minutes || 0);
+  return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
+}
 function _trendArrow(tr, inv) {
   if (!tr || tr.changePct == null) return { cls: "flat", html: "vs. minule —" };
   const up = tr.changePct > 0;
@@ -2546,9 +2550,8 @@ async function openDiagnosis(name) {
     const exs = (d.opportunity && d.opportunity.examples) || [];
     const exHtml = exs.length ? `<div class="combo-ex"><div class="combo-ex-h">Příklady promarněného spojení</div>` +
       exs.slice(0, 4).map((x) =>
-        `<div class="combo-ex-row"><span class="ce-pos">POS ${esc(x.otherPos)}</span>
-          <span class="ce-mid">${esc((x.otherPurpose || "").replace("Technik - ", ""))} · ${x.apartKm} km od visibility POS ${esc(x.visibilityPos)}</span>
-          <span class="ce-wk">${esc(x.week)}</span></div>`).join("") + `</div>` : "";
+        `<div class="combo-ex-row"><span class="ce-txt">${esc(x.sentence || "")}</span>
+          <span class="ce-wk">~${Math.round(x.km)} km · ~${Math.round(x.minutes)} min</span></div>`).join("") + `</div>` : "";
     const opp = d.opportunity ? `<div class="cause-opp">${ico("target")}<div>
         <div class="co-h">Největší prostor ke zlepšení</div>
         <div class="co-t">${esc(d.opportunity.note)}</div>${exHtml}</div></div>` : "";
@@ -2561,11 +2564,12 @@ async function openDiagnosis(name) {
        <div class="pd-section">Profil práce (${p.days || 0} dní)</div>
        <div class="score-bars">
          ${_dgKv("POS / den", p.posPerDay)}
-         ${_dgKv("Ø přejezd (km)", p.avgLegKm)}
-         ${_dgKv("Trasa vs. optimum", p.orderingRatio != null ? p.orderingRatio + "×" : null)}
-         ${_dgKv("Čas v terénu (h)", p.workHours)}
+         ${_dgKv("Čas na cestě (skut.)", p.travelHoursActual != null ? p.travelHoursActual + " h" : null)}
+         ${_dgKv("Čas na POS (skut.)", p.onPosHoursActual != null ? p.onPosHoursActual + " h" : null)}
          ${_dgKv("Podíl času na cestě", p.travelShare != null ? p.travelShare + "%" : null)}
-         ${_dgKv("Nadbytečné km", p.excessKm)}
+         ${_dgKv("Trasa vs. optimum", p.orderingRatio != null ? p.orderingRatio + "×" : null)}
+         ${_dgKv("Zbytečné km", p.excessKm)}
+         ${_dgKv("Ušetřit optim. pořadím", (p.excessKm ? Math.round(p.excessKm) + " km" : "—") + (p.savedMinOrdering ? " · " + _fmtHM(p.savedMinOrdering) : ""))}
        </div>
        <p class="pd-sub" style="margin-top:12px">Porovnáno s ostatními techniky nad reálnými návštěvami ze SalesApp. Systém nenavrhuje přesuny — ukazuje příčinu a prostor.</p>`;
   } catch (e) { bodyEl.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }

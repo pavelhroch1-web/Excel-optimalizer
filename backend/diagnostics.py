@@ -22,6 +22,7 @@ import statistics
 
 import db
 import route_actual
+import travel_model
 from desktop_client.engines.core_logic import GeoPoint, compute_optimal_route_km, distance_km
 
 _ISOLATED_KM = 15.0          # a stop this far from all same-day stops is "isolated"
@@ -56,13 +57,18 @@ def route_profile(name: str, days_back: int = 90) -> dict | None:
     days = [d for d in data.get("days", []) if d.get("stops")]
     if not days:
         return None
+    import travel_model
     pos_counts, spans, travel_shares, leg_kms = [], [], [], []
     tot_actual = tot_optimal = 0.0
+    tot_travel_min = tot_onpos_min = 0.0
+    tot_opt_travel_min = tot_act_model_min = 0.0
     isolated_days = geo_days = 0
     for d in days:
         pos_counts.append(len(d["stops"]))
         spans.append(d.get("workHours"))
         tr, op = d.get("travelMin") or 0, d.get("onPosMin") or 0
+        tot_travel_min += tr
+        tot_onpos_min += op
         if tr + op > 0:
             travel_shares.append(100 * tr / (tr + op))
         pts = [GeoPoint(s["lat"], s["lon"]) for s in d["stops"]
@@ -72,16 +78,27 @@ def route_profile(name: str, days_back: int = 90) -> dict | None:
                 leg_kms.append(lg["km"])
         if len(pts) >= 2:
             geo_days += 1
-            actual = sum(distance_km(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y)
-                         for i in range(len(pts) - 1))
+            actual_legs = [distance_km(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y)
+                           for i in range(len(pts) - 1)]
+            actual = sum(actual_legs)
             optimal = compute_optimal_route_km(pts)
             tot_actual += actual
             tot_optimal += optimal
+            # travel TIME, modelled consistently for actual vs optimal ordering,
+            # so the difference isolates the effect of the order alone.
+            opt_order = _nn_order(pts)
+            opt_legs = [distance_km(pts[opt_order[i]].x, pts[opt_order[i]].y,
+                                    pts[opt_order[i + 1]].x, pts[opt_order[i + 1]].y)
+                        for i in range(len(opt_order) - 1)]
+            tot_act_model_min += travel_model.minutes_for_legs(actual_legs)
+            tot_opt_travel_min += travel_model.minutes_for_legs(opt_legs)
             for i, a in enumerate(pts):
                 nn = min((distance_km(a.x, a.y, b.x, b.y) for j, b in enumerate(pts) if j != i), default=0)
                 if nn > _ISOLATED_KM:
                     isolated_days += 1
                     break
+    excess_km = round(tot_actual - tot_optimal, 1) if tot_optimal else None
+    saved_min = round(tot_act_model_min - tot_opt_travel_min) if tot_opt_travel_min else None
     return {
         "technician": name, "days": len(days),
         "posPerDay": _mean(pos_counts),
@@ -89,10 +106,53 @@ def route_profile(name: str, days_back: int = 90) -> dict | None:
         "workHours": _mean(spans),
         "travelShare": _mean(travel_shares),
         "orderingRatio": round(tot_actual / tot_optimal, 2) if tot_optimal else None,
-        "excessKm": round(tot_actual - tot_optimal, 1) if tot_optimal else None,
+        "excessKm": excess_km, "savedMinOrdering": saved_min,
         "actualKm": round(tot_actual, 1), "optimalKm": round(tot_optimal, 1),
+        "travelHoursActual": round(tot_travel_min / 60.0, 1),
+        "onPosHoursActual": round(tot_onpos_min / 60.0, 1),
         "isolatedRate": round(isolated_days / geo_days, 2) if geo_days else None,
     }
+
+
+def _fmt_hm(minutes) -> str:
+    m = int(round(minutes or 0))
+    return f"{m//60} h {m%60} min" if m >= 60 else f"{m} min"
+
+
+_CZ_DAYS = ["v pondělí", "v úterý", "ve středu", "ve čtvrtek", "v pátek", "v sobotu", "v neděli"]
+
+
+def _weekday_cz(date_str) -> str:
+    import datetime
+    try:
+        return _CZ_DAYS[datetime.date.fromisoformat(str(date_str)[:10]).weekday()]
+    except (ValueError, TypeError):
+        return ""
+
+
+def _purpose_short(p: str) -> str:
+    p = (p or "").replace("Technik - ", "")
+    if "zásobování" in p.lower():
+        return "zásobování"
+    if "ostatní" in p.lower():
+        return "ostatní úkony"
+    if "kontrola" in p.lower():
+        return "kontrolu"
+    if "los" in p.lower():
+        return "materiály (losy)"
+    return p.split(";")[0].strip().lower() or "jiný účel"
+
+
+def _nn_order(pts) -> list:
+    """Nearest-neighbour visit order (for a consistent optimal-time estimate)."""
+    remaining = list(range(len(pts)))
+    order = [remaining.pop(0)]
+    while remaining:
+        last = pts[order[-1]]
+        nxt = min(remaining, key=lambda i: distance_km(last.x, last.y, pts[i].x, pts[i].y))
+        order.append(nxt)
+        remaining.remove(nxt)
+    return order
 
 
 def _single_purpose_pct(name: str) -> float | None:
@@ -188,10 +248,11 @@ def diagnose(name: str, days_back: int = 90) -> dict | None:
                                f"oblasti — potenciál ~{combo['savedKm']} km, ~{combo['savedMin']} min a "
                                f"{combo['savedTrips']} jízd za období.", "examples": combo["examples"]}
     elif me.get("excessKm") and me["excessKm"] > 0 and me.get("orderingRatio", 1) > 1.15:
-        wk = me["days"] / 5.0 if me["days"] else 1
-        opportunity = {"type": "ordering", "km": me["excessKm"],
-                       "note": f"Lepší pořadí návštěv by ušetřilo ~{me['excessKm']} km "
-                               f"za období (~{round(me['excessKm']/wk,0):.0f} km/týden)."}
+        mins = me.get("savedMinOrdering") or 0
+        opportunity = {"type": "ordering", "km": me["excessKm"], "min": mins,
+                       "note": f"Kdyby byly stejné návštěvy seřazené optimálně, ušetřilo by se "
+                               f"přibližně {me['excessKm']} km"
+                               + (f" a {_fmt_hm(mins)}" if mins else "") + " za období."}
     elif causes and causes[0]["factor"] == "singlePurposePct":
         opportunity = {"type": "combine",
                        "note": "Spojení jednoúčelových návštěv do společných cest sníží počet přejezdů."}
@@ -254,15 +315,21 @@ def combination_analysis(days_back: int = 90) -> dict:
                     detour = distance_km(s["gx"], s["gy"], near["gx"], near["gy"])
                 sk = min(2 * detour, 80.0)
                 saved_km += sk
+                area = s["city"] or "stejné oblasti"
+                sentence = (f"Do {'oblasti ' + area if s['city'] else area} se jelo "
+                            f"{_weekday_cz(near['d'])} kvůli kampani (visibilita) a "
+                            f"{_weekday_cz(s['d'])} znovu kvůli {_purpose_short(s['pu'])}. "
+                            f"Obě návštěvy šly pravděpodobně spojit.")
                 missed.append({"week": wk, "otherPos": s["pos"], "otherPurpose": s["pu"],
                                "visibilityPos": near["pos"], "city": s["city"],
-                               "km": round(sk, 1),
-                               "apartKm": round(distance_km(s["gx"], s["gy"], near["gx"], near["gy"]), 1)})
+                               "km": round(sk, 1), "minutes": travel_model.estimate_minutes(sk),
+                               "apartKm": round(distance_km(s["gx"], s["gy"], near["gx"], near["gy"]), 1),
+                               "sentence": sentence})
         if missed:
             trips = len({(m["week"], m["otherPos"]) for m in missed})
             out[tech] = {"missedPairs": len(missed), "savedTrips": trips,
                          "savedKm": round(saved_km, 1),
-                         "savedMin": round(60 * saved_km / _AVG_SPEED_KMH),
+                         "savedMin": round(sum(m["minutes"] for m in missed)),
                          "examples": sorted(missed, key=lambda m: -m["km"])[:5]}
     _combo_cache[days_back] = out
     return out
