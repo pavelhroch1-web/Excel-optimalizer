@@ -1072,14 +1072,28 @@ function renderAnalyticsMap(res) {
   const L2 = res.layers;
   const bounds = [];
 
-  // visited route: numbered markers + line
+  // visited route: numbered markers + line. Each stop popup shows the incoming
+  // transfer from the previous stop (first POS = start of day) and flags an
+  // unnecessarily long/slow hop.
+  const legByTo = {};
+  (res.legs || []).forEach((l) => { legByTo[l.toSeq] = l; });
   const vg = L.layerGroup();
   const pts = [];
   res.stops.forEach((s) => {
     if (s.lat == null || s.lon == null) return;
     pts.push([s.lat, s.lon]); bounds.push([s.lat, s.lon]);
+    const leg = legByTo[s.seq];
+    let hop;
+    if (!leg) hop = `<span style="color:var(--text-3)">začátek dne</span>`;
+    else {
+      const long = (leg.km != null && leg.km > 30) || (leg.travelMin != null && leg.travelMin > 60);
+      hop = `přejezd z #${leg.fromSeq}: <b>${leg.km ?? "—"} km · ${leg.travelMin ?? "—"} min</b>` +
+        (long ? ` <span style="color:var(--bad);font-weight:600">⚠ dlouhý přesun</span>` : "");
+    }
     L.marker([s.lat, s.lon]).addTo(vg)
-      .bindPopup(`#${s.seq} <b>${esc(s.name || s.pos || "")}</b><br>${esc(s.city || "")}<br>${s.started ? String(s.started).slice(-8) : ""} · ${s.onPosMin ?? "—"} min na POS`)
+      .bindPopup(`#${s.seq} <b>${esc(s.name || s.pos || "")}</b><br>${esc(s.city || "")}<br>` +
+        `${s.started ? String(s.started).slice(-8) : ""} · ${s.onPosMin ?? "—"} min na POS<br>${hop}` +
+        `<br><span class="pos-link" data-pos="${esc(s.pos || "")}">detail POS →</span>`)
       .bindTooltip(String(s.seq), { permanent: true, direction: "center", className: "ract-num" });
   });
   if (pts.length) L.polyline(pts, { color: _LAYER_META.visited.color, weight: 3, opacity: 0.75 }).addTo(vg);
@@ -1338,21 +1352,43 @@ on("tech-filter", "change", loadTechnicians);
 
 const _TYPE_LABEL = { workbook: "kompletní workbook", salesapp: "SalesApp", pos_master: "POS Master", activity_plan: "Activity Plan", unknown: "neznámý" };
 
-on("auto-import-form", "submit", async (e) => {
-  e.preventDefault();
-  const f = document.getElementById("auto-file").files[0];
-  if (!f) { setResult("auto-import-result", "Vyber soubor.", "err"); return; }
-  setResult("auto-import-result", "Zpracovávám…", "");
+async function importFile(f) {
+  if (!f) return;
+  const dz = document.getElementById("drop-zone");
+  dz && dz.classList.add("busy");
+  setResult("auto-import-result", `Zpracovávám ${f.name}…`, "");
+  document.getElementById("import-summary").innerHTML = "";
   try {
     const fd = new FormData(); fd.append("file", f);
     const res = await apiFetch("/api/import/auto", { method: "POST", body: fd });
     const r = await res.json();
-    if (r.detected === "unknown") { setResult("auto-import-result", r.error || "Nerozpoznaný typ.", "err"); return; }
-    const counts = Object.entries(r.counts || {}).map(([k, v]) => `${k}: ${v}`).join(", ");
-    setResult("auto-import-result", `Rozpoznáno: ${_TYPE_LABEL[r.detected] || r.detected}. ${counts}.`, "ok");
-    loadAlerts(); loadStatus && loadStatus();
+    if (r.detected === "unknown") { setResult("auto-import-result", r.error || "Nerozpoznaný typ souboru.", "err"); return; }
+    const counts = Object.entries(r.counts || {});
+    setResult("auto-import-result", "", "ok");
+    document.getElementById("import-summary").innerHTML =
+      `<div class="import-ok">${ico("check")}<div><div class="io-h">Naimportováno: ${esc(_TYPE_LABEL[r.detected] || r.detected)}</div>` +
+      `<div class="io-s">${esc(f.name)} · ${counts.map(([k, v]) => `${k}: ${v}`).join(" · ") || "hotovo"}</div></div></div>` +
+      `<div class="pl-tiles" style="margin-top:12px">` +
+      counts.map(([k, v]) => tile(k, v, "záznamů")).join("") + `</div>` +
+      `<p class="hint" style="margin-top:12px">Metriky, upozornění i cockpit se přepočítaly. Přejdi na <a href="#" class="nav-link" data-nav="dashboard">Přehled</a>.</p>`;
+    loadAlerts(); (typeof loadStatus === "function") && loadStatus();
+    (typeof loadLive === "function") && loadLive();
+    document.querySelectorAll("#import-summary .nav-link").forEach((el) =>
+      el.addEventListener("click", (e) => { e.preventDefault(); showView(el.dataset.nav); }));
   } catch (err) { setResult("auto-import-result", "Chyba: " + err.message, "err"); }
-});
+  finally { dz && dz.classList.remove("busy"); }
+}
+
+function _initDropZone() {
+  const dz = document.getElementById("drop-zone");
+  const inp = document.getElementById("auto-file");
+  if (!dz || !inp) return;
+  dz.addEventListener("click", () => inp.click());
+  inp.addEventListener("change", () => { if (inp.files[0]) importFile(inp.files[0]); inp.value = ""; });
+  ["dragenter", "dragover"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("over"); }));
+  dz.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) importFile(f); });
+}
 
 function renderAlerts(list) {
   if (!list.length) return `<p class="pd-sub">Žádná upozornění. 👍</p>`;
@@ -1644,6 +1680,11 @@ const _ICONS = {
   refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/>',
   target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
   flame: '<path d="M12 2c1 4 5 5 5 9a5 5 0 0 1-10 0c0-2 1-3 1-3 1 2 2 2 2 2 0-3-2-4 2-8z"/>',
+  grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  upload: '<path d="M12 16V4m0 0 4 4m-4-4L8 8"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
+  route: '<circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h6a4 4 0 0 0 0-8H9a4 4 0 0 1 0-8h5"/>',
+  chart: '<path d="M3 3v18h18"/><path d="M7 15l3-4 3 2 4-6"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15H4.5a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 6 9.4a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 11 4.6h.5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 2.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v.5a2 2 0 1 1 0 4z"/>',
 };
 function ico(name, cls) {
   return `<svg class="ico ${cls || ""}" viewBox="0 0 24 24" width="20" height="20" fill="none" ` +
@@ -2119,4 +2160,32 @@ async function boot() {
   if (getToken()) showApp();
   else showLogin();
 }
+
+// ---- navigation shell -----------------------------------------------------
+const _NAV_TITLES = { dashboard: "Přehled", import: "Import dat", tourplan: "TourPlan", analytics: "Analytika", settings: "Nastavení" };
+let _navReady = {};
+
+function showView(name) {
+  document.querySelectorAll(".view").forEach((v) => v.classList.toggle("hidden", v.dataset.view !== name));
+  document.querySelectorAll(".side-item").forEach((b) => b.classList.toggle("active", b.dataset.nav === name));
+  const tb = document.getElementById("tb-title"); if (tb) tb.textContent = _NAV_TITLES[name] || name;
+  // lazy first-load per view (data already cached afterwards)
+  if (!_navReady[name]) {
+    _navReady[name] = true;
+    if (name === "settings" && typeof loadTechnicians === "function") loadTechnicians();
+    if (name === "analytics" && typeof loadRactTechnicians === "function") loadRactTechnicians();
+    if (name === "tourplan" && typeof loadStrategyModes === "function") { loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); }
+  }
+  window.scrollTo(0, 0);
+}
+
+function _initNav() {
+  document.querySelectorAll(".side-item").forEach((b) =>
+    b.addEventListener("click", () => showView(b.dataset.nav)));
+  document.querySelectorAll(".si-ico[data-ico]").forEach((el) => el.innerHTML = ico(el.dataset.ico));
+  const dz = document.getElementById("dz-ico"); if (dz) dz.innerHTML = ico("upload");
+  _initDropZone();
+}
+_initNav();
+
 boot();

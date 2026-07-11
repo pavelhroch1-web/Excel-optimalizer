@@ -6,8 +6,8 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<link rel="stylesheet" href="styles.css?v=24">
-<script src="config.js?v=24"></script>
+<link rel="stylesheet" href="styles.css?v=25">
+<script src="config.js?v=25"></script>
 </head>
 <body>
 
@@ -23,469 +23,464 @@
   </div>
 </div>
 
-<div id="app-screen" class="screen hidden">
-  <header>
-    <h1>Field Force Optimizer <span class="ver">v24</span></h1>
-    <button id="logout" class="ghost">Odhlásit</button>
-  </header>
+<div id="app-screen" class="app-shell hidden">
+  <!-- SIDEBAR NAVIGATION -->
+  <aside class="sidebar">
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v25</span></div>
+    <nav class="side-nav">
+      <button class="side-item active" data-nav="dashboard"><span class="si-ico" data-ico="grid"></span> Přehled</button>
+      <button class="side-item" data-nav="import"><span class="si-ico" data-ico="upload"></span> Import dat</button>
+      <button class="side-item" data-nav="tourplan"><span class="si-ico" data-ico="route"></span> TourPlan</button>
+      <button class="side-item" data-nav="analytics"><span class="si-ico" data-ico="chart"></span> Analytika</button>
+      <button class="side-item" data-nav="settings"><span class="si-ico" data-ico="gear"></span> Nastavení</button>
+    </nav>
+    <div class="side-foot"><button id="logout" class="btn-ghost">Odhlásit</button></div>
+  </aside>
 
-  <section class="strip" id="status-strip">
-    <div class="gauge">
-      <div class="label">Publikováno do týdne</div>
-      <div class="value" id="last-published">—</div>
-    </div>
-    <div class="gauge">
-      <div class="label">Publikovaných verzí</div>
-      <div class="value" id="version-count">—</div>
-    </div>
-    <div class="gauge">
-      <div class="label">Draft</div>
-      <div class="value" id="draft-state">—</div>
-    </div>
-  </section>
-
-  <!-- LIVE TOURPLAN: the main daily working cockpit -->
-  <section class="cockpit">
-    <div class="ck-bar">
-      <div class="ck-title">Živý TourPlan <span class="live-meta" id="live-meta"></span></div>
+  <main class="app-main">
+    <!-- TOPBAR: section title + global POS search + live status -->
+    <header class="topbar">
+      <div class="tb-title" id="tb-title">Přehled</div>
       <div class="ck-search">
         <span class="ck-search-ico" id="ck-search-ico"></span>
         <input id="pos-search" type="text" autocomplete="off" spellcheck="false"
                placeholder="Hledat POS – číslo, název nebo město…">
         <div id="pos-search-results" class="ck-results" style="display:none"></div>
       </div>
-      <button id="live-refresh" class="btn-ghost ck-refresh" title="Obnovit">Obnovit</button>
-    </div>
-
-    <div id="live-headline" class="ck-headline"></div>
-    <div id="live-hero" class="ck-kpis"></div>
-    <div id="live-insights" class="ck-insights"></div>
-    <div id="fix-banner" class="fix-banner" style="display:none"></div>
-
-    <div class="ck-work card">
-      <div class="live-filters" id="live-filters">
-        <div class="fbar" id="week-filter"></div>
-        <div class="fbar" id="status-filter"></div>
-        <label class="fsel">Technik <select id="live-tech"><option value="">všichni</option></select></label>
-        <button id="live-refresh2" class="ghost small hidden">↻</button>
+      <div class="tb-status" id="status-strip">
+        <div class="tb-stat"><span class="tb-l">Publikováno</span><span class="tb-v" id="last-published">—</span></div>
+        <div class="tb-stat"><span class="tb-l">Verzí</span><span class="tb-v" id="version-count">—</span></div>
+        <div class="tb-stat"><span class="tb-l">Draft</span><span class="tb-v" id="draft-state">—</span></div>
       </div>
-      <div id="live-board"></div>
+    </header>
+
+    <!-- ==================== VIEW: PŘEHLED (dashboard cockpit) ==================== -->
+    <div class="view" data-view="dashboard">
+      <section class="cockpit">
+        <div class="ck-bar">
+          <div class="ck-title">Živý TourPlan <span class="live-meta" id="live-meta"></span></div>
+          <button id="live-refresh" class="btn-ghost ck-refresh" title="Obnovit">Obnovit</button>
+        </div>
+        <div id="live-headline" class="ck-headline"></div>
+        <div id="live-hero" class="ck-kpis"></div>
+        <div id="live-insights" class="ck-insights"></div>
+        <div id="fix-banner" class="fix-banner" style="display:none"></div>
+
+        <div class="ck-work card">
+          <div class="live-filters" id="live-filters">
+            <div class="fbar" id="week-filter"></div>
+            <div class="fbar" id="status-filter"></div>
+            <label class="fsel">Technik <select id="live-tech"><option value="">všichni</option></select></label>
+            <button id="live-refresh2" class="ghost small hidden">↻</button>
+          </div>
+          <div id="live-board"></div>
+        </div>
+
+        <div class="ck-work card">
+          <h2>Odpočet do další návštěvy <span class="badge">cadence GECO/CORN</span></h2>
+          <p class="hint">Nejdřív nejnaléhavější – nikdy nenavštívené a nejvíc po termínu. Návštěva OZ i technika se počítá jako pokrytí.</p>
+          <div class="fbar" id="due-filter"></div>
+          <div id="due-out"></div>
+        </div>
+        <p id="live-result" class="result"></p>
+      </section>
     </div>
 
-    <div class="ck-work card">
-      <h2>Odpočet do další návštěvy <span class="badge">cadence GECO/CORN</span></h2>
-      <p class="hint">Nejdřív nejnaléhavější – nikdy nenavštívené a nejvíc po termínu. Návštěva OZ i technika se počítá jako pokrytí.</p>
-      <div class="fbar" id="due-filter"></div>
-      <div id="due-out"></div>
-    </div>
-    <p id="live-result" class="result"></p>
-  </section>
-
-  <!-- AUTOMATIC IMPORT: drop a file, the system detects & processes it -->
-  <section class="card">
-    <h2>Automatický import <span class="badge">rozpozná sám</span></h2>
-    <p class="hint">Nahraj Excel – systém sám pozná, jestli je to POS Master, SalesApp nebo Activity Plan, zpracuje ho a přepočítá metriky i upozornění. Žádné ruční nastavování.</p>
-    <form id="auto-import-form" class="row">
-      <input type="file" id="auto-file" accept=".xlsx">
-      <button type="submit" class="primary">Nahrát a zpracovat</button>
-    </form>
-    <p id="auto-import-result" class="result"></p>
-  </section>
-
-  <!-- ALERTS: the system surfaces anomalies itself -->
-  <section class="card">
-    <h2>Upozornění <span class="badge" id="alerts-count">0</span></h2>
-    <p class="hint">Systém sám hlásí odchylky (dlouho/krátko na POS, málo aktivní technik, dlouhodobě neobsloužené POS…). Přepočítá se po každém importu SalesApp.</p>
-    <div class="row"><button id="alerts-refresh" class="ghost">Přepočítat upozornění</button></div>
-    <div id="alerts-out"></div>
-  </section>
-
-  <!-- TECHNICIAN CONFIG: roles + active; metrics count only active TECHNIK -->
-  <section class="card">
-    <h2>Technici <span class="badge">konfigurace</span></h2>
-    <p class="hint">Role a aktivita. Metriky (realita, upozornění) se počítají <strong>jen nad aktivními techniky</strong> (role Technik). Pravidlo 3xx = OZ; ručně kohokoli přepíšeš a nastavení přežije import.</p>
-    <div class="row">
-      <button id="tech-refresh" class="ghost">Načíst techniky</button>
-      <label>Filtr role
-        <select id="tech-filter"><option value="">vše</option><option>TECHNIK</option><option>OZ</option><option>ADMIN</option><option>MANAGER</option></select>
-      </label>
-    </div>
-    <div id="tech-out"></div>
-  </section>
-
-  <!-- PLANNER: decision-support work tool -->
-  <section class="card planner-card">
-    <h2>Planner <span class="badge">Rozhodovací nástroj</span></h2>
-    <p class="hint">Engine automaticky vybere nejlepší POS podle pravidel a kapacity. Ty jen zkontroluješ: <strong>je pokrytí v pořádku</strong> a <strong>co zůstalo neobslouženo a proč</strong>. Technik = kapacita (např. 40 POS/týden). Vše se řídí konfigurací a Business Rules.</p>
-    <form id="planner-form" class="row">
-      <label>Strategie<select id="planner-mode"></select></label>
-      <label>Počáteční týden<input type="number" id="planner-week" min="1" max="53" required></label>
-      <label>Horizont (týdnů)<input type="number" id="planner-length" min="1" max="12" value="5"></label>
-      <label>Návštěv/technik/týden<input type="number" id="planner-visits" min="1" value="40"></label>
-      <label>Techniků (nepovinné)<input type="number" id="planner-techs" min="1" placeholder="auto"></label>
-      <button type="submit" id="planner-btn" class="primary">Vyhodnotit scénář</button>
-    </form>
-    <p id="planner-result" class="result"></p>
-    <div id="planner-out"></div>
-
-    <div class="pl-whatif">
-      <div class="pl-section">Predikce kapacit — kolik POS a za jak dlouho pokryjeme síť</div>
-      <p class="hint" style="margin:0 0 8px">Spustí engine pro víc kapacit a ukáže, kolik POS se obslouží a za kolik týdnů se pokryje celá síť. Bere strategii/týden/horizont z formuláře nahoře. (Počítá se ~1–2 min.)</p>
-      <form id="sweep-form" class="row">
-        <label>Kapacity POS/technik/týden<input type="text" id="sweep-caps" value="35, 40, 45" style="width:140px"></label>
-        <button type="submit" class="ghost">Spočítat predikci</button>
-      </form>
-      <p id="sweep-result" class="result"></p>
-      <div id="sweep-out"></div>
-    </div>
-
-    <div class="pl-whatif hidden" id="planner-whatif-wrap">
-      <div class="pl-section">Co kdyby…</div>
-      <form id="planner-whatif-form" class="row">
-        <label>Návštěv/technik/týden<input type="number" id="whatif-visits" min="1"></label>
-        <label>Techniků<input type="number" id="whatif-techs" min="1" placeholder="stejně"></label>
-        <button type="submit" class="ghost">Porovnat se scénářem</button>
-      </form>
-      <div id="planner-compare"></div>
-    </div>
-
-    <div class="pl-whatif">
-      <div class="pl-section">Vyřadit POS z plánování (natvrdo) <span id="excl-count" class="badge">0</span></div>
-      <p class="hint" style="margin:0 0 8px">Zadej čísla POS (oddělená čárkou, mezerou nebo na řádky). Tyto POS se nikdy nenaplánují – engine je odmítne. Platí pro všechny scénáře i generování.</p>
-      <form id="excl-form" class="row">
-        <input type="text" id="excl-ids" placeholder="např. 71001302, 71001303" style="flex:1;min-width:220px">
-        <button type="submit" class="ghost">Vyřadit</button>
-        <button type="button" id="excl-clear" class="ghost danger">Zrušit všechna vyřazení</button>
-      </form>
-      <p id="excl-result" class="result"></p>
-    </div>
-
-    <div class="pl-whatif">
-      <div class="pl-section">Přichystat POS pro kampaň OZ (nejvyšší priorita) <span id="prio-count" class="badge">0</span></div>
-      <p class="hint" style="margin:0 0 8px">Nahraj čísla POS, které technici mají „přichystat“ před kampaní OZ. Dostanou nejvyšší prioritu (FORCE_INCLUDE) – engine jim garantuje místo v plánu, i kdyby jinak nevyšly na řadu. OZ zůstávají jen informační vrstvou.</p>
-      <form id="prio-form" class="row">
-        <input type="text" id="prio-ids" placeholder="čísla POS, např. 71001302 71001303" style="flex:1;min-width:220px">
-        <input type="text" id="prio-campaign" placeholder="kampaň (např. OZ Vánoce 2026)" style="flex:1;min-width:180px">
-        <button type="submit" class="ghost">Přichystat</button>
-        <button type="button" id="prio-clear" class="ghost danger">Zrušit vše</button>
-      </form>
-      <div id="prio-list"></div>
-      <p id="prio-result" class="result"></p>
-    </div>
-
-    <div class="pl-whatif">
-      <div class="pl-section">Dočasně přehodit POS (dovolená / nemoc / výpověď) <span id="reassign-count" class="badge">0</span></div>
-      <p class="hint" style="margin:0 0 8px">Převeď POS jednoho technika na jiného (zástup) nebo přetáhni konkrétní POS jako override – bez zásahu do dat v SalesForce. Vyplň „Od koho“ pro celý objem technika, nebo „Čísla POS“ pro konkrétní POS. S platností od–do se přiřazení po termínu automaticky vrátí.</p>
-      <form id="reassign-form" class="row">
-        <label>Od koho (celý technik)<input type="text" id="reassign-from" placeholder="jméno technika"></label>
-        <label>nebo čísla POS<input type="text" id="reassign-pos" placeholder="71001302, …"></label>
-        <label>Na koho<input type="text" id="reassign-to" placeholder="zastupující technik"></label>
-        <label>Důvod<select id="reassign-reason"><option>dovolená</option><option>nemoc</option><option>výpověď</option><option>override</option></select></label>
-        <label>Od<input type="date" id="reassign-vf"></label>
-        <label>Do<input type="date" id="reassign-vt"></label>
-        <button type="submit" class="ghost">Přehodit</button>
-      </form>
-      <div id="reassign-list"></div>
-      <p id="reassign-result" class="result"></p>
-    </div>
-  </section>
-
-  <!-- PLAN VS REALITY: tracking / evaluation from SalesApp -->
-  <section class="card planner-card">
-    <h2>Plán vs. realita <span class="badge">SalesApp</span></h2>
-    <p class="hint">Porovnání publikovaného TourPlanu se skutečnými návštěvami (splněno / neobslouženo / mimořádné) a reálná aktivita techniků (návštěvy, dny, čas na POS). Zadej rozsah týdnů.</p>
-    <form id="reality-form" class="row">
-      <label>Od týdne<input type="number" id="reality-wf" min="1" max="53" value="5"></label>
-      <label>Do týdne<input type="number" id="reality-wt" min="1" max="53" value="28"></label>
-      <button type="submit" class="primary">Realita techniků</button>
-      <button type="button" id="fulfil-btn" class="ghost">Plán vs. realita</button>
-    </form>
-    <p id="reality-result" class="result"></p>
-    <div id="reality-out"></div>
-  </section>
-
-  <!-- TEAM DASHBOARD: who needs attention, where km/time leaks -->
-  <section class="card">
-    <h2>Dashboard techniků <span class="badge">tým · zatížení · produktivita</span></h2>
-    <p class="hint">Kdo potřebuje pozornost, kdo je přetížený nebo má rezervu, kam utíkají km a čas. Klikni na technika pro detailní analýzu jeho tras.</p>
-    <div class="row">
-      <label>Okno (dní zpět)<input type="number" id="team-days" value="21" min="7" max="120" style="width:90px"></label>
-      <button id="team-load" class="primary">Načíst dashboard</button>
-    </div>
-    <p id="team-result" class="result"></p>
-    <div id="team-tiles"></div>
-    <div id="team-leaks"></div>
-    <div id="team-table"></div>
-  </section>
-
-  <!-- TECHNICIAN ANALYTICS: interactive route map + metrics + efficiency -->
-  <section class="card">
-    <h2>Analýza techniků <span class="badge">SalesApp · mapa · efektivita</span></h2>
-    <p class="hint">Kompletní rozbor dne technika ze SalesApp: skutečná trasa a pořadí návštěv, najeté km a přejezdy z mapových podkladů, čas na cestě i na POS, produktivita a vrstvy nad mapou (plán, navštíveno, projeto-ale-nenavštíveno, příležitosti v okolí). Systém sám hlásí dlouhé přesuny a nevyužité příležitosti.</p>
-    <form id="route-actual-form" class="row">
-      <label>Technik<select id="ract-tech"></select></label>
-      <label>Den<select id="ract-day"></select></label>
-      <label>Okolí trasy (km)<input type="number" id="ract-radius" value="2" min="0.5" max="10" step="0.5" style="width:90px"></label>
-      <button type="submit" class="primary">Analyzovat den</button>
-      <button type="button" id="ract-trends-btn" class="ghost">Dlouhodobé trendy</button>
-    </form>
-    <p id="ract-result" class="result"></p>
-    <div id="ract-totals"></div>
-    <div id="ract-findings"></div>
-    <div id="ract-layers" class="ract-layers" style="display:none"></div>
-    <div id="ract-map" style="height:460px;border-radius:12px;overflow:hidden;margin:10px 0;display:none"></div>
-    <div id="ract-legs"></div>
-    <div id="ract-trends"></div>
-  </section>
-
-  <!-- CLOUD GENERATE: heavy plan on GitHub Actions (no OOM here) -->
-  <section class="card brain-card">
-    <h2>Vygenerovat plán (cloud) <span class="badge">GitHub výpočet</span></h2>
-    <p class="hint">Jedno tlačítko: plán na víc týdnů se spočítá na GitHub serveru (dost paměti), pak si stáhneš Excel. Bere síť z posledního snapshotu, engine se nemění. Nemusíš nikam do Actions.</p>
-    <form id="cloud-form" class="row">
-      <label>Počáteční týden<input type="number" id="cloud-week" min="1" max="53" value="29" required></label>
-      <label>Horizont (týdnů)<input type="number" id="cloud-length" min="1" max="8" value="5"></label>
-      <label>Návštěv/technik/týden<input type="number" id="cloud-visits" min="1" value="40"></label>
-      <button type="submit" id="cloud-btn" class="primary">Spustit výpočet na GitHubu</button>
-    </form>
-    <p id="cloud-result" class="result"></p>
-    <div class="row" id="cloud-download-row" style="display:none">
-      <button id="cloud-download-btn" class="primary">Stáhnout Excel</button>
-      <a id="cloud-run-link" class="ghost" href="#" target="_blank" rel="noopener" style="display:none">Zobrazit běh na GitHubu</a>
-    </div>
-  </section>
-
-  <!-- 1) UPLOAD -->
-  <section class="card">
-    <h2>1 · Nahrát exporty</h2>
-    <p class="hint">Nahraj čerstvé exporty. Draft vždy naváže na poslední publikovaný snapshot – publikovaný plán se nikdy nezmění.</p>
-    <form id="upload-form">
-      <label class="filelabel">SalesApp exporty (týdenní, můžeš vybrat víc)
-        <input type="file" id="salesapp-files" accept=".xlsx" multiple>
-      </label>
-      <label class="filelabel">POS export (nepovinné – když nenahraješ, síť se vezme z posledního snapshotu)
-        <input type="file" id="pos-export" accept=".xlsx">
-      </label>
-      <button type="submit" id="upload-btn" class="primary">Nahrát a vytvořit Draft</button>
-    </form>
-    <p id="upload-result" class="result"></p>
-  </section>
-
-  <!-- 2) PLANNING FILTERS (constrain the Planning Engine input set) -->
-  <section class="card">
-    <h2>2 · Plánovací filtry</h2>
-    <p class="hint">Stejná pravidla jako v Excelu. <strong>Neomezují jen zobrazení – omezují vstupní množinu Planning Engine</strong>, takže se tour plán generuje jen z vybraných POS. Ulož je před krokem „Generovat". (Uložení je možné až po nahrání exportů – pravidla se ukládají do aktuálního Draftu.)</p>
-
-    <div class="rules-block">
-      <h3>Druh terminálu</h3>
-      <div id="rules-terminal" class="toggle-list"></div>
-    </div>
-
-    <div class="rules-block">
-      <h3>Partner / obchodní síť</h3>
-      <div id="rules-market" class="toggle-list"></div>
-    </div>
-
-    <div class="rules-block">
-      <h3>Kategorie (pravidlo)</h3>
-      <div id="rules-category" class="dropdown-list"></div>
-    </div>
-
-    <div class="rules-block">
-      <h3>Kampaně</h3>
-      <div id="rules-campaigns-wrap">
-        <table id="rules-campaigns-table">
-          <thead>
-            <tr><th>Typ</th><th>Kampaň</th><th>Od týdne</th><th>Do týdne</th><th>Priorita</th><th>Override gap</th></tr>
-          </thead>
-          <tbody id="rules-campaigns-body"></tbody>
-        </table>
+    <!-- ==================== VIEW: IMPORT ==================== -->
+    <div class="view hidden" data-view="import">
+      <div class="view-head">
+        <h1>Import dat ze SalesApp</h1>
+        <p>Přetáhni Excel nebo vyber soubor. Systém sám pozná typ (SalesApp, POS Master, Activity Plan, kompletní workbook), zpracuje ho a přepočítá všechny metriky. Žádné ruční nastavování.</p>
       </div>
+
+      <section class="card">
+        <div id="drop-zone" class="drop-zone">
+          <div class="dz-ico" id="dz-ico"></div>
+          <div class="dz-big">Přetáhni sem Excel</div>
+          <div class="dz-sub">nebo klikni a vyber soubor · rozpozná se automaticky</div>
+          <input type="file" id="auto-file" accept=".xlsx" hidden>
+        </div>
+        <p id="auto-import-result" class="result"></p>
+        <div id="import-summary"></div>
+      </section>
+
+      <section class="card">
+        <h2>Upozornění <span class="badge" id="alerts-count">0</span></h2>
+        <p class="hint">Systém sám hlásí odchylky (dlouho/krátko na POS, málo aktivní technik, dlouhodobě neobsloužené POS…). Přepočítá se po každém importu SalesApp.</p>
+        <div class="row"><button id="alerts-refresh" class="ghost">Přepočítat upozornění</button></div>
+        <div id="alerts-out"></div>
+      </section>
     </div>
 
-    <div class="row">
-      <button id="reload-rules-btn" class="ghost">Načíst pravidla</button>
-      <button id="save-rules-btn" class="primary">Uložit pravidla</button>
+    <!-- ==================== VIEW: TOURPLAN (config + generate + publish) ==================== -->
+    <div class="view hidden" data-view="tourplan">
+      <div class="view-head">
+        <h1>TourPlan – konfigurace a generování</h1>
+        <p>Nastav pravidla a strategii, vygeneruj plán, zkontroluj kandidáty a publikuj immutable verzi. Engine vybírá POS podle pravidel a kapacity; ty jen kontroluješ a řešíš výjimky.</p>
+      </div>
+
+      <!-- 1) UPLOAD -->
+      <section class="card">
+        <h2>1 · Nahrát exporty</h2>
+        <p class="hint">Nahraj čerstvé exporty. Draft vždy naváže na poslední publikovaný snapshot – publikovaný plán se nikdy nezmění.</p>
+        <form id="upload-form">
+          <label class="filelabel">SalesApp exporty (týdenní, můžeš vybrat víc)
+            <input type="file" id="salesapp-files" accept=".xlsx" multiple>
+          </label>
+          <label class="filelabel">POS export (nepovinné – když nenahraješ, síť se vezme z posledního snapshotu)
+            <input type="file" id="pos-export" accept=".xlsx">
+          </label>
+          <button type="submit" id="upload-btn" class="primary">Nahrát a vytvořit Draft</button>
+        </form>
+        <p id="upload-result" class="result"></p>
+      </section>
+
+      <!-- 2) PLANNING FILTERS -->
+      <section class="card">
+        <h2>2 · Plánovací filtry <span class="badge">terminály · partneři · kategorie · kampaně</span></h2>
+        <p class="hint">Stejná pravidla jako v Excelu. <strong>Neomezují jen zobrazení – omezují vstupní množinu Planning Engine</strong>, takže se tour plán generuje jen z vybraných POS. Ulož je před krokem „Generovat".</p>
+        <div class="rules-block"><h3>Druh terminálu (malý / střední / velký)</h3><div id="rules-terminal" class="toggle-list"></div></div>
+        <div class="rules-block"><h3>Partner / obchodní síť</h3><div id="rules-market" class="toggle-list"></div></div>
+        <div class="rules-block"><h3>Kategorie (pravidlo)</h3><div id="rules-category" class="dropdown-list"></div></div>
+        <div class="rules-block">
+          <h3>Kampaně</h3>
+          <div id="rules-campaigns-wrap">
+            <table id="rules-campaigns-table">
+              <thead><tr><th>Typ</th><th>Kampaň</th><th>Od týdne</th><th>Do týdne</th><th>Priorita</th><th>Override gap</th></tr></thead>
+              <tbody id="rules-campaigns-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="row">
+          <button id="reload-rules-btn" class="ghost">Načíst pravidla</button>
+          <button id="save-rules-btn" class="primary">Uložit pravidla</button>
+        </div>
+        <p id="rules-result" class="result"></p>
+      </section>
+
+      <!-- OVERRIDE & EXCEPTIONS (from Planner card) -->
+      <section class="card planner-card">
+        <h2>3 · Override, priority a výjimky <span class="badge">FORCE INCLUDE / EXCLUDE · přehození</span></h2>
+        <p class="hint">Ruční zásahy manažera nad plánem – projeví se při dalším generování, bez zásahu do SalesForce.</p>
+
+        <div class="pl-whatif" style="border-top:0;padding-top:0;margin-top:0">
+          <div class="pl-section">Vyřadit POS z plánování (FORCE EXCLUDE) <span id="excl-count" class="badge">0</span></div>
+          <p class="hint" style="margin:0 0 8px">Tyto POS se nikdy nenaplánují – engine je odmítne. Platí pro všechny scénáře i generování.</p>
+          <form id="excl-form" class="row">
+            <input type="text" id="excl-ids" placeholder="např. 71001302, 71001303" style="flex:1;min-width:220px">
+            <button type="submit" class="ghost">Vyřadit</button>
+            <button type="button" id="excl-clear" class="ghost danger">Zrušit všechna vyřazení</button>
+          </form>
+          <p id="excl-result" class="result"></p>
+        </div>
+
+        <div class="pl-whatif">
+          <div class="pl-section">Přichystat POS pro kampaň OZ (FORCE INCLUDE, nejvyšší priorita) <span id="prio-count" class="badge">0</span></div>
+          <p class="hint" style="margin:0 0 8px">POS, které technici mají „přichystat“ před kampaní OZ. Dostanou garantované místo v plánu. OZ zůstávají jen informační vrstvou.</p>
+          <form id="prio-form" class="row">
+            <input type="text" id="prio-ids" placeholder="čísla POS, např. 71001302 71001303" style="flex:1;min-width:220px">
+            <input type="text" id="prio-campaign" placeholder="kampaň (např. OZ Vánoce 2026)" style="flex:1;min-width:180px">
+            <button type="submit" class="ghost">Přichystat</button>
+            <button type="button" id="prio-clear" class="ghost danger">Zrušit vše</button>
+          </form>
+          <div id="prio-list"></div>
+          <p id="prio-result" class="result"></p>
+        </div>
+
+        <div class="pl-whatif">
+          <div class="pl-section">Dočasně přehodit POS mezi techniky (dovolená / nemoc / výpověď) <span id="reassign-count" class="badge">0</span></div>
+          <p class="hint" style="margin:0 0 8px">Převeď POS jednoho technika na jiného (zástup) nebo přetáhni konkrétní POS jako override. S platností od–do se přiřazení po termínu automaticky vrátí.</p>
+          <form id="reassign-form" class="row">
+            <label>Od koho (celý technik)<input type="text" id="reassign-from" placeholder="jméno technika"></label>
+            <label>nebo čísla POS<input type="text" id="reassign-pos" placeholder="71001302, …"></label>
+            <label>Na koho<input type="text" id="reassign-to" placeholder="zastupující technik"></label>
+            <label>Důvod<select id="reassign-reason"><option>dovolená</option><option>nemoc</option><option>výpověď</option><option>override</option></select></label>
+            <label>Od<input type="date" id="reassign-vf"></label>
+            <label>Do<input type="date" id="reassign-vt"></label>
+            <button type="submit" class="ghost">Přehodit</button>
+          </form>
+          <div id="reassign-list"></div>
+          <p id="reassign-result" class="result"></p>
+        </div>
+      </section>
+
+      <!-- Field Brain: strategy + pre-flight -->
+      <section class="card brain-card">
+        <h2>4 · Strategie a pre-flight <span class="badge">Field Brain</span></h2>
+        <p class="hint">Mozek rozhoduje <strong>co</strong> je cílem, Planning Engine <strong>jak</strong> ho splnit. Vyber strategii a kapacitu, spočítej pokrytí cílů na horizont a teprve pak generuj plán.</p>
+        <form id="brain-form" class="row">
+          <label>Strategie<select id="brain-mode"></select></label>
+          <label>Počáteční týden<input type="number" id="brain-week" min="1" max="53" required></label>
+          <label>Horizont (týdnů)<input type="number" id="brain-length" min="1" max="8" value="5"></label>
+          <label>Návštěv/technik/týden<input type="number" id="brain-visits" min="1" value="40"></label>
+          <label>Techniků (nepovinné)<input type="number" id="brain-techs" min="1" placeholder="auto"></label>
+          <button type="submit" id="brain-btn" class="primary">Spočítat pokrytí (pre-flight)</button>
+        </form>
+        <p id="brain-mode-desc" class="hint"></p>
+        <p id="brain-result" class="result"></p>
+        <div id="brain-scorecard"></div>
+        <div class="row" id="brain-generate-row" style="display:none">
+          <button id="brain-generate-btn" class="primary">Generovat plán v tomto režimu</button>
+        </div>
+      </section>
+
+      <!-- Planner predictions / scenarios -->
+      <section class="card planner-card">
+        <h2>5 · Predikce a scénáře <span class="badge">Rozhodovací nástroj</span></h2>
+        <p class="hint">Vyhodnoť scénář (pokrytí, kapacita, co zůstane neobslouženo a proč) a spočítej predikce kapacit.</p>
+        <form id="planner-form" class="row">
+          <label>Strategie<select id="planner-mode"></select></label>
+          <label>Počáteční týden<input type="number" id="planner-week" min="1" max="53" required></label>
+          <label>Horizont (týdnů)<input type="number" id="planner-length" min="1" max="12" value="5"></label>
+          <label>Návštěv/technik/týden<input type="number" id="planner-visits" min="1" value="40"></label>
+          <label>Techniků (nepovinné)<input type="number" id="planner-techs" min="1" placeholder="auto"></label>
+          <button type="submit" id="planner-btn" class="primary">Vyhodnotit scénář</button>
+        </form>
+        <p id="planner-result" class="result"></p>
+        <div id="planner-out"></div>
+        <div class="pl-whatif">
+          <div class="pl-section">Predikce kapacit — kolik POS a za jak dlouho pokryjeme síť</div>
+          <p class="hint" style="margin:0 0 8px">Spustí engine pro víc kapacit a ukáže, kolik POS se obslouží a za kolik týdnů se pokryje celá síť. (Počítá se ~1–2 min.)</p>
+          <form id="sweep-form" class="row">
+            <label>Kapacity POS/technik/týden<input type="text" id="sweep-caps" value="35, 40, 45" style="width:140px"></label>
+            <button type="submit" class="ghost">Spočítat predikci</button>
+          </form>
+          <p id="sweep-result" class="result"></p>
+          <div id="sweep-out"></div>
+        </div>
+        <div class="pl-whatif hidden" id="planner-whatif-wrap">
+          <div class="pl-section">Co kdyby…</div>
+          <form id="planner-whatif-form" class="row">
+            <label>Návštěv/technik/týden<input type="number" id="whatif-visits" min="1"></label>
+            <label>Techniků<input type="number" id="whatif-techs" min="1" placeholder="stejně"></label>
+            <button type="submit" class="ghost">Porovnat se scénářem</button>
+          </form>
+          <div id="planner-compare"></div>
+        </div>
+      </section>
+
+      <!-- 3) GENERATE -->
+      <section class="card">
+        <h2>6 · Generovat tour plán (ručně)</h2>
+        <form id="generate-form" class="row">
+          <label>Počáteční týden<input type="number" id="start-week" min="1" max="53" required></label>
+          <label>Délka (týdnů)<input type="number" id="length" min="1" max="12" value="1" required></label>
+          <button type="submit" id="generate-btn" class="primary">Generovat</button>
+        </form>
+        <p id="generate-result" class="result"></p>
+      </section>
+
+      <!-- CANDIDATES -->
+      <section class="card">
+        <h2>7 · Kandidáti POS <span class="badge">proč vybráno / nevybráno</span></h2>
+        <p class="hint">Přesně ta data a skóre, ze kterých Planning Engine vybírá. U každého POS: poslední návštěva, týdnů od návštěvy, skóre a vysvětlení výběru.</p>
+        <form id="candidates-form" class="row">
+          <label>Týden<input type="number" id="cand-week" min="1" max="53" required></label>
+          <label>Technik (nepovinné)<input type="text" id="cand-technician" placeholder="např. Myslivec Jan"></label>
+          <button type="submit" id="cand-btn">Zobrazit kandidáty</button>
+        </form>
+        <div class="row" id="cand-filters">
+          <label>Stav
+            <select id="cand-filter-status">
+              <option value="">vše</option><option value="Vybráno">jen vybrané</option>
+              <option value="Nevybráno">jen nevybrané</option><option value="Odloženo">jen odložené</option>
+            </select>
+          </label>
+          <label>Min. týdnů od návštěvy<input type="number" id="cand-filter-weeks" min="0" placeholder="např. 26"></label>
+          <label>Hledat (POS / název)<input type="text" id="cand-filter-text" placeholder="část ID nebo názvu"></label>
+        </div>
+        <p id="cand-result" class="result"></p>
+        <div id="cand-table-wrap">
+          <table id="cand-table">
+            <thead><tr>
+              <th>Stav</th><th>POS</th><th>Název</th><th>Technik</th><th>Kat.</th>
+              <th>Síť</th><th>Klas.</th><th>CORE</th><th>PPT</th>
+              <th>Posl. návštěva</th><th>Týd.</th><th>Skóre</th>
+              <th>PPT b.</th><th>CORE b.</th><th>A b.</th><th>Penal.</th>
+              <th>Zanedbáno</th><th>Urgence</th><th>GPS</th><th>Vysvětlení</th>
+            </tr></thead>
+            <tbody id="cand-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- DRAFT + MANUAL EDITS -->
+      <section class="card">
+        <h2>8 · Návrh a ruční úpravy</h2>
+        <div class="row">
+          <button id="refresh-draft" class="ghost">Zobrazit / obnovit návrh</button>
+          <button id="download-draft-btn" class="ghost">Stáhnout návrh (.xlsx)</button>
+        </div>
+        <div class="rules-block">
+          <h3>Přidat POS ručně</h3>
+          <form id="add-pos-form" class="row">
+            <label>POS ID<input type="text" id="add-pos-id" placeholder="např. 73001577" required></label>
+            <label>Týden<input type="number" id="add-pos-week" required></label>
+            <label>Den
+              <select id="add-pos-day">
+                <option value="MON">Po</option><option value="TUE">Út</option>
+                <option value="WED">St</option><option value="THU">Čt</option><option value="FRI">Pá</option>
+              </select>
+            </label>
+            <label>Technik<input type="text" id="add-pos-technician" placeholder="přesné jméno technika" required></label>
+            <button type="submit">Přidat POS</button>
+          </form>
+          <p id="add-pos-result" class="result"></p>
+        </div>
+        <div id="draft-table-wrap">
+          <table id="draft-table">
+            <thead><tr>
+              <th>Týden</th><th>Den</th><th>POS</th><th>Název</th><th>Technik</th>
+              <th>PPT</th><th>Poslední návštěva</th><th>Týdnů</th>
+              <th>Terminál</th><th>Síť</th><th>Důvod výběru</th><th></th>
+            </tr></thead>
+            <tbody id="draft-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- PUBLISH -->
+      <section class="card publish-card">
+        <h2>9 · Publikovat Tour Plán <span class="badge">immutable</span></h2>
+        <p class="hint">Publikace zmrazí nejnižší draftový týden do nové <strong>immutable verze</strong>. Od té chvíle na ni navazují všechny další běhy. Publikovaný plán už nikdy nezměníš.</p>
+        <form id="publish-form" class="row">
+          <label style="flex:1">Poznámka k verzi (nepovinné)<input type="text" id="publish-message" placeholder="např. Týden 33 – kampaň GECO"></label>
+          <button type="submit" id="publish-btn" class="primary danger">Publikovat Tour Plán</button>
+        </form>
+        <p id="publish-result" class="result"></p>
+      </section>
+
+      <!-- ROUTE PLANNER -->
+      <section class="card brain-card">
+        <h2>Route Planner <span class="badge">plán techniků</span></h2>
+        <p class="hint">Dlouhodobý plán návštěv per technik – které POS a kdy, seskupené do dnů. Pořadí ve dni je na technikovi; km jsou jen informativní ukazatel efektivity.</p>
+        <form id="route-form" class="row">
+          <label>Technik<select id="route-technician"></select></label>
+          <label>Od týdne<input type="number" id="route-week-from" min="1" max="53" placeholder="vše"></label>
+          <label>Do týdne<input type="number" id="route-week-to" min="1" max="53" placeholder="vše"></label>
+          <button type="submit" id="route-btn" class="primary">Zobrazit plán</button>
+        </form>
+        <p id="route-result" class="result"></p>
+        <div id="route-body"></div>
+      </section>
+
+      <!-- HISTORY -->
+      <section class="card">
+        <h2>Historie publikovaných verzí</h2>
+        <div class="row"><button id="refresh-versions" class="ghost">Obnovit historii</button></div>
+        <div id="versions-wrap">
+          <table id="versions-table">
+            <thead><tr><th>Verze</th><th>Týden(y)</th><th>Publikováno</th><th>Poznámka</th><th>Engine</th><th>Plán</th></tr></thead>
+            <tbody id="versions-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- CLOUD GENERATE (legacy option) -->
+      <section class="card brain-card">
+        <h2>Vygenerovat plán v cloudu <span class="badge">GitHub výpočet</span></h2>
+        <p class="hint">Volitelně: plán na víc týdnů se spočítá na GitHub serveru (dost paměti), pak si stáhneš Excel. Bere síť z posledního snapshotu, engine se nemění.</p>
+        <form id="cloud-form" class="row">
+          <label>Počáteční týden<input type="number" id="cloud-week" min="1" max="53" value="29" required></label>
+          <label>Horizont (týdnů)<input type="number" id="cloud-length" min="1" max="8" value="5"></label>
+          <label>Návštěv/technik/týden<input type="number" id="cloud-visits" min="1" value="40"></label>
+          <button type="submit" id="cloud-btn" class="primary">Spustit výpočet na GitHubu</button>
+        </form>
+        <p id="cloud-result" class="result"></p>
+        <div class="row" id="cloud-download-row" style="display:none">
+          <button id="cloud-download-btn" class="primary">Stáhnout Excel</button>
+          <a id="cloud-run-link" class="ghost" href="#" target="_blank" rel="noopener" style="display:none">Zobrazit běh na GitHubu</a>
+        </div>
+      </section>
+
+      <!-- Decision Support: Co kdyby -->
+      <section class="card">
+        <h2>Co kdyby… <span class="badge">Decision Support</span></h2>
+        <p class="hint">Simulace dopadu manažerských páček na počet kandidátů – spočítáno z jednoho běhu stejného Planning Engine.</p>
+        <form id="whatif-form" class="row">
+          <label>Týden<input type="number" id="whatif-week" min="1" max="53"></label>
+          <button type="submit" id="whatif-btn">Spustit analýzu dopadů</button>
+        </form>
+        <p id="whatif-result" class="result"></p>
+        <div id="whatif-body"></div>
+      </section>
     </div>
-    <p id="rules-result" class="result"></p>
-  </section>
 
-  <!-- Field Brain: strategy + pre-flight scorecard -->
-  <section class="card brain-card">
-    <h2>Field Brain <span class="badge">Manažerský mozek</span></h2>
-    <p class="hint">Mozek rozhoduje <strong>co</strong> je cílem, Planning Engine <strong>jak</strong> ho splnit. Vyber strategii a kapacitu, spočítej pokrytí cílů na horizont a teprve pak generuj plán. Engine se nemění.</p>
-    <form id="brain-form" class="row">
-      <label>Strategie
-        <select id="brain-mode"></select>
-      </label>
-      <label>Počáteční týden<input type="number" id="brain-week" min="1" max="53" required></label>
-      <label>Horizont (týdnů)<input type="number" id="brain-length" min="1" max="8" value="5"></label>
-      <label>Návštěv/technik/týden<input type="number" id="brain-visits" min="1" value="40"></label>
-      <label>Techniků (nepovinné)<input type="number" id="brain-techs" min="1" placeholder="auto"></label>
-      <button type="submit" id="brain-btn" class="primary">Spočítat pokrytí (pre-flight)</button>
-    </form>
-    <p id="brain-mode-desc" class="hint"></p>
-    <p id="brain-result" class="result"></p>
-    <div id="brain-scorecard"></div>
-    <div class="row" id="brain-generate-row" style="display:none">
-      <button id="brain-generate-btn" class="primary">Generovat plán v tomto režimu</button>
-    </div>
-  </section>
+    <!-- ==================== VIEW: ANALYTIKA ==================== -->
+    <div class="view hidden" data-view="analytics">
+      <div class="view-head">
+        <h1>Analytika práce techniků</h1>
+        <p>Kdo potřebuje pozornost, kde utíkají km a čas. Klikni na technika pro detail jeho tras, na den pro mapu s vrstvami, na POS pro historii. Vše propojené.</p>
+      </div>
 
-  <!-- 3) GENERATE (jednoduchý jednotýdenní fallback) -->
-  <section class="card">
-    <h2>3 · Generovat tour plán (ručně)</h2>
-    <form id="generate-form" class="row">
-      <label>Počáteční týden
-        <input type="number" id="start-week" min="1" max="53" required>
-      </label>
-      <label>Délka (týdnů)
-        <input type="number" id="length" min="1" max="12" value="1" required>
-      </label>
-      <button type="submit" id="generate-btn" class="primary">Generovat</button>
-    </form>
-    <p id="generate-result" class="result"></p>
-  </section>
+      <!-- TEAM DASHBOARD -->
+      <section class="card">
+        <h2>Dashboard techniků <span class="badge">tým · zatížení · produktivita</span></h2>
+        <p class="hint">Kdo potřebuje pozornost, kdo je přetížený nebo má rezervu, kam utíkají km a čas. Klikni na technika pro detailní analýzu jeho tras.</p>
+        <div class="row">
+          <label>Okno (dní zpět)<input type="number" id="team-days" value="21" min="7" max="120" style="width:90px"></label>
+          <button id="team-load" class="primary">Načíst dashboard</button>
+        </div>
+        <p id="team-result" class="result"></p>
+        <div id="team-tiles"></div>
+        <div id="team-leaks"></div>
+        <div id="team-table"></div>
+      </section>
 
-  <!-- ROUTE PLANNER: long-term per-technician visit plan (review) -->
-  <section class="card brain-card">
-    <h2>Route Planner <span class="badge">Plán techniků</span></h2>
-    <p class="hint">Dlouhodobý plán návštěv per technik – které POS a kdy, seskupené do dnů. Pořadí ve dni je na technikovi; km jsou jen informativní ukazatel efektivity. Nejdřív vygeneruj plán výše.</p>
-    <form id="route-form" class="row">
-      <label>Technik
-        <select id="route-technician"></select>
-      </label>
-      <label>Od týdne<input type="number" id="route-week-from" min="1" max="53" placeholder="vše"></label>
-      <label>Do týdne<input type="number" id="route-week-to" min="1" max="53" placeholder="vše"></label>
-      <button type="submit" id="route-btn" class="primary">Zobrazit plán</button>
-    </form>
-    <p id="route-result" class="result"></p>
-    <div id="route-body"></div>
-  </section>
+      <!-- TECHNICIAN ANALYTICS -->
+      <section class="card">
+        <h2>Analýza techniků <span class="badge">SalesApp · mapa · efektivita</span></h2>
+        <p class="hint">Kompletní rozbor dne technika ze SalesApp: skutečná trasa a pořadí návštěv, najeté km a přejezdy z mapových podkladů, čas na cestě i na POS, produktivita a vrstvy nad mapou (plán, navštíveno, projeto-ale-nenavštíveno, příležitosti v okolí). Systém sám hlásí dlouhé přesuny a nevyužité příležitosti.</p>
+        <form id="route-actual-form" class="row">
+          <label>Technik<select id="ract-tech"></select></label>
+          <label>Den<select id="ract-day"></select></label>
+          <label>Okolí trasy (km)<input type="number" id="ract-radius" value="2" min="0.5" max="10" step="0.5" style="width:90px"></label>
+          <button type="submit" class="primary">Analyzovat den</button>
+          <button type="button" id="ract-trends-btn" class="ghost">Dlouhodobé trendy</button>
+        </form>
+        <p id="ract-result" class="result"></p>
+        <div id="ract-totals"></div>
+        <div id="ract-findings"></div>
+        <div id="ract-layers" class="ract-layers" style="display:none"></div>
+        <div id="ract-map" style="height:460px;border-radius:12px;overflow:hidden;margin:10px 0;display:none"></div>
+        <div id="ract-legs"></div>
+        <div id="ract-trends"></div>
+      </section>
 
-  <!-- 3) CANDIDATES -->
-  <section class="card">
-    <h2>4 · Kandidáti POS</h2>
-    <p class="hint">Přesně ta data a skóre, ze kterých Planning Engine vybírá. Skóre počítá stejný engine jako „Generovat".</p>
-    <form id="candidates-form" class="row">
-      <label>Týden
-        <input type="number" id="cand-week" min="1" max="53" required>
-      </label>
-      <label>Technik (nepovinné)
-        <input type="text" id="cand-technician" placeholder="např. Myslivec Jan">
-      </label>
-      <button type="submit" id="cand-btn">Zobrazit kandidáty</button>
-    </form>
-    <div class="row" id="cand-filters">
-      <label>Stav
-        <select id="cand-filter-status">
-          <option value="">vše</option>
-          <option value="Vybráno">jen vybrané</option>
-          <option value="Nevybráno">jen nevybrané</option>
-          <option value="Odloženo">jen odložené</option>
-        </select>
-      </label>
-      <label>Min. týdnů od návštěvy
-        <input type="number" id="cand-filter-weeks" min="0" placeholder="např. 26">
-      </label>
-      <label>Hledat (POS / název)
-        <input type="text" id="cand-filter-text" placeholder="část ID nebo názvu">
-      </label>
-    </div>
-    <p id="cand-result" class="result"></p>
-    <div id="cand-table-wrap">
-      <table id="cand-table">
-        <thead>
-          <tr>
-            <th>Stav</th><th>POS</th><th>Název</th><th>Technik</th><th>Kat.</th>
-            <th>Síť</th><th>Klas.</th><th>CORE</th><th>PPT</th>
-            <th>Posl. návštěva</th><th>Týd.</th><th>Skóre</th>
-            <th>PPT b.</th><th>CORE b.</th><th>A b.</th><th>Penal.</th>
-            <th>Zanedbáno</th><th>Urgence</th><th>GPS</th><th>Vysvětlení</th>
-          </tr>
-        </thead>
-        <tbody id="cand-body"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- 4) DRAFT + MANUAL EDITS -->
-  <section class="card">
-    <h2>5 · Návrh a ruční úpravy</h2>
-    <div class="row">
-      <button id="refresh-draft" class="ghost">Zobrazit / obnovit návrh</button>
-      <button id="download-draft-btn" class="ghost">Stáhnout návrh (.xlsx)</button>
+      <!-- PLAN VS REALITY -->
+      <section class="card">
+        <h2>Plán vs. realita <span class="badge">SalesApp</span></h2>
+        <p class="hint">Porovnání publikovaného TourPlanu se skutečnými návštěvami (splněno / neobslouženo / mimořádné) a reálná aktivita techniků (návštěvy, dny, čas na POS). Zadej rozsah týdnů.</p>
+        <form id="reality-form" class="row">
+          <label>Od týdne<input type="number" id="reality-wf" min="1" max="53" value="5"></label>
+          <label>Do týdne<input type="number" id="reality-wt" min="1" max="53" value="28"></label>
+          <button type="submit" class="primary">Realita techniků</button>
+          <button type="button" id="fulfil-btn" class="ghost">Plán vs. realita</button>
+        </form>
+        <p id="reality-result" class="result"></p>
+        <div id="reality-out"></div>
+      </section>
     </div>
 
-    <div class="rules-block">
-      <h3>Přidat POS ručně</h3>
-      <form id="add-pos-form" class="row">
-        <label>POS ID<input type="text" id="add-pos-id" placeholder="např. 73001577" required></label>
-        <label>Týden<input type="number" id="add-pos-week" required></label>
-        <label>Den
-          <select id="add-pos-day">
-            <option value="MON">Po</option><option value="TUE">Út</option>
-            <option value="WED">St</option><option value="THU">Čt</option><option value="FRI">Pá</option>
-          </select>
-        </label>
-        <label>Technik<input type="text" id="add-pos-technician" placeholder="přesné jméno technika" required></label>
-        <button type="submit">Přidat POS</button>
-      </form>
-      <p id="add-pos-result" class="result"></p>
+    <!-- ==================== VIEW: NASTAVENÍ ==================== -->
+    <div class="view hidden" data-view="settings">
+      <div class="view-head">
+        <h1>Nastavení</h1>
+        <p>Konfigurace techniků a rolí. Metriky se počítají jen nad aktivními techniky (role Technik).</p>
+      </div>
+      <section class="card">
+        <h2>Technici <span class="badge">role · aktivita · kapacita</span></h2>
+        <p class="hint">Role a aktivita. Metriky (realita, upozornění) se počítají <strong>jen nad aktivními techniky</strong> (role Technik). Pravidlo 3xx = OZ; ručně kohokoli přepíšeš a nastavení přežije import.</p>
+        <div class="row">
+          <button id="tech-refresh" class="ghost">Načíst techniky</button>
+          <label>Filtr role
+            <select id="tech-filter"><option value="">vše</option><option>TECHNIK</option><option>OZ</option><option>ADMIN</option><option>MANAGER</option></select>
+          </label>
+        </div>
+        <div id="tech-out"></div>
+      </section>
     </div>
-
-    <div id="draft-table-wrap">
-      <table id="draft-table">
-        <thead>
-          <tr>
-            <th>Týden</th><th>Den</th><th>POS</th><th>Název</th><th>Technik</th>
-            <th>PPT</th><th>Poslední návštěva</th><th>Týdnů</th>
-            <th>Terminál</th><th>Síť</th><th>Důvod výběru</th><th></th>
-          </tr>
-        </thead>
-        <tbody id="draft-body"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- 5) PUBLISH -->
-  <section class="card publish-card">
-    <h2>6 · Publikovat Tour Plán</h2>
-    <p class="hint">Publikace zmrazí nejnižší draftový týden do nové <strong>immutable verze</strong>. Od té chvíle na ni navazují všechny další běhy. Publikovaný plán už nikdy nezměníš.</p>
-    <form id="publish-form" class="row">
-      <label style="flex:1">Poznámka k verzi (nepovinné)
-        <input type="text" id="publish-message" placeholder="např. Týden 33 – kampaň GECO">
-      </label>
-      <button type="submit" id="publish-btn" class="primary danger">Publikovat Tour Plán</button>
-    </form>
-    <p id="publish-result" class="result"></p>
-  </section>
-
-  <!-- Decision Support: Co kdyby... -->
-  <section class="card">
-    <h2>Co kdyby… <span class="badge">Decision Support</span></h2>
-    <p class="hint">Simulace dopadu manažerských páček na počet kandidátů – spočítáno z jednoho běhu stejného Planning Engine, žádná nová logika.</p>
-    <form id="whatif-form" class="row">
-      <label>Týden<input type="number" id="whatif-week" min="1" max="53"></label>
-      <button type="submit" id="whatif-btn">Spustit analýzu dopadů</button>
-    </form>
-    <p id="whatif-result" class="result"></p>
-    <div id="whatif-body"></div>
-  </section>
-
-  <!-- 6) HISTORY + 7) DOWNLOAD -->
-  <section class="card">
-    <h2>7 · Historie publikovaných verzí</h2>
-    <div class="row"><button id="refresh-versions" class="ghost">Obnovit historii</button></div>
-    <div id="versions-wrap">
-      <table id="versions-table">
-        <thead>
-          <tr><th>Verze</th><th>Týden(y)</th><th>Publikováno</th><th>Poznámka</th><th>Engine</th><th>Plán</th></tr>
-        </thead>
-        <tbody id="versions-body"></tbody>
-      </table>
-    </div>
-  </section>
+  </main>
 </div>
 
 <!-- POS Detail panel (read-only diagnostic; opens on POS click) -->
@@ -499,6 +494,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=24"></script>
+<script src="app.js?v=25"></script>
 </body>
 </html>
