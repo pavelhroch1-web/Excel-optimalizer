@@ -326,7 +326,18 @@ def draft_generate(body: GenerateRequest):
             # Persist the plan into draft_plans for the Route Planner / analytics.
             import route_planner
             route_planner.materialize_draft_plans(state)
-        return {"messages": messages, "summary": pipeline._summarize(state, body.start_week, body.length)}
+        summary = pipeline._summarize(state, body.start_week, body.length)
+        if LOCAL_MODE:
+            # Long-term memory: record this run (inputs + config fingerprint +
+            # result) append-only, so the decision can be explained/compared later.
+            try:
+                import history
+                history.record_planner_run(
+                    "generate", body.mode, body.start_week, body.length,
+                    body.visits_per_tech_week, result=summary)
+            except Exception:  # noqa: BLE001 - never block planning on memory write
+                pass
+        return {"messages": messages, "summary": summary}
     finally:
         os.remove(path)
 
@@ -1118,6 +1129,10 @@ if LOCAL_MODE:
     @app.get("/api/history/metrics", dependencies=[Depends(require_auth)])
     def history_metrics(entity_type: str, metric_key: str, entity_id: str | None = None):
         return {"series": history.metric_series(entity_type, metric_key, entity_id)}
+
+    @app.get("/api/history/planner-runs", dependencies=[Depends(require_auth)])
+    def history_planner_runs(limit: int = 100):
+        return {"runs": history.planner_runs(limit)}
 
     # Settings platform: configure planner/optimization/dashboard/report/map/
     # scoring from the app. Definitions drive a generic admin UI; values override.

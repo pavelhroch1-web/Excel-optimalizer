@@ -633,3 +633,60 @@ BEGIN SELECT RAISE(ABORT, 'snapshot is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS snapshots_no_delete
 BEFORE DELETE ON snapshots
 BEGIN SELECT RAISE(ABORT, 'snapshot is immutable'); END;
+
+-- ---------------------------------------------------------------------------
+-- LONG-TERM MEMORY: every planner run is recorded, append-only, with its
+-- inputs, the config fingerprint that produced it, and its result summary
+-- (planned / unserved / score distribution). So a decision can be explained
+-- and compared over time - "proč tehdy planner rozhodl právě takto". Combined
+-- with metrics (KPI snapshots) and pos_master_history (per-POS evolution),
+-- this is the network's memory the planner can later build on.
+CREATE TABLE IF NOT EXISTS planner_runs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ran_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    kind          TEXT NOT NULL DEFAULT 'generate', -- generate | simulate | advise
+    mode          TEXT,
+    start_week    INTEGER,
+    length        INTEGER,
+    visits_per_tech_week REAL,
+    tech_count    INTEGER,
+    config_fingerprint TEXT,          -- hash of the effective config at run time
+    config_snapshot    TEXT,          -- JSON of the effective config (audit)
+    result        TEXT                 -- JSON: planned, unserved, score summary
+);
+CREATE INDEX IF NOT EXISTS ix_planner_runs_at ON planner_runs(ran_at);
+
+-- The memory is append-only: history is never rewritten or edited. Each
+-- import / publish / planner run / config change adds a NEW row, so time can
+-- always be rewound and periods compared. (Mirrors the published-plan guarantee.)
+CREATE TRIGGER IF NOT EXISTS planner_runs_no_update
+BEFORE UPDATE ON planner_runs
+BEGIN SELECT RAISE(ABORT, 'planner run history is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS planner_runs_no_delete
+BEFORE DELETE ON planner_runs
+BEGIN SELECT RAISE(ABORT, 'planner run history is append-only'); END;
+
+-- Real history events (import / publish / planner_run / config_change) are
+-- append-only. 'alert' events are the ONE exception: they are a transient
+-- recompute (alerts.py rebuilds them), not a historical fact, so they may be
+-- cleared. Everything else is permanent memory.
+CREATE TRIGGER IF NOT EXISTS events_no_update
+BEFORE UPDATE ON events WHEN OLD.kind <> 'alert'
+BEGIN SELECT RAISE(ABORT, 'event log is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS events_no_delete
+BEFORE DELETE ON events WHEN OLD.kind <> 'alert'
+BEGIN SELECT RAISE(ABORT, 'event log is append-only'); END;
+
+CREATE TRIGGER IF NOT EXISTS pos_history_no_update
+BEFORE UPDATE ON pos_master_history
+BEGIN SELECT RAISE(ABORT, 'POS history is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS pos_history_no_delete
+BEFORE DELETE ON pos_master_history
+BEGIN SELECT RAISE(ABORT, 'POS history is append-only'); END;
+
+CREATE TRIGGER IF NOT EXISTS metrics_no_update
+BEFORE UPDATE ON metrics
+BEGIN SELECT RAISE(ABORT, 'metrics history is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS metrics_no_delete
+BEFORE DELETE ON metrics
+BEGIN SELECT RAISE(ABORT, 'metrics history is append-only'); END;

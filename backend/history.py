@@ -124,6 +124,79 @@ def metric_series(entity_type: str, metric_key: str, entity_id: str | None = Non
     return [dict(r) for r in db.get(q, tuple(args))]
 
 
+# ---- planner-run memory (append-only) --------------------------------------
+
+def config_fingerprint() -> tuple[str, dict]:
+    """A canonical snapshot of the EFFECTIVE planning config + a stable hash of
+    it, so every planner run records which configuration produced it. Lets the
+    system later answer 'what changed between these two runs' and attribute a
+    different outcome to a config change vs a data change."""
+    import hashlib
+    snap = {
+        "control": {r["key"]: r["value"] for r in db.get("SELECT key, value FROM config")},
+        "business_rules": [
+            {"code": r["code"], "enabled": r["enabled"], "params": r["params"]}
+            for r in db.get("SELECT code, enabled, params FROM business_rules ORDER BY code, scope, scope_value")],
+        "cadence_overrides": [dict(r) for r in db.get(
+            "SELECT rule_id, min_gap_weeks, max_interval_weeks, active, priority FROM cadence_overrides ORDER BY rule_id")],
+        "model_overrides": [dict(r) for r in db.get(
+            "SELECT sheet, match_key, col, value FROM model_overrides ORDER BY sheet, match_key, col")],
+        "settings": [dict(r) for r in db.get(
+            "SELECT namespace, key, value FROM settings WHERE namespace IN ('engine','scoring','planner','optimization') "
+            "AND scope='global' ORDER BY namespace, key")],
+    }
+    blob = json.dumps(snap, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16], snap
+
+
+def record_planner_run(kind: str, mode: str, start_week: int, length: int,
+                       visits_per_tech_week=None, tech_count=None,
+                       result: dict | None = None, conn=None) -> int:
+    """Append one planner-run record (never updated/deleted). Returns row id."""
+    fp, snap = config_fingerprint()
+    sql = ("INSERT INTO planner_runs (kind, mode, start_week, length, "
+           "visits_per_tech_week, tech_count, config_fingerprint, config_snapshot, result) "
+           "VALUES (?,?,?,?,?,?,?,?,?)")
+    args = (kind, mode, start_week, length, visits_per_tech_week, tech_count, fp,
+            json.dumps(snap, ensure_ascii=False),
+            json.dumps(result, ensure_ascii=False) if result else None)
+    if conn is not None:
+        cur = conn.execute(sql, args)
+    else:
+        import db as _db
+        c = _db.connect()
+        try:
+            cur = c.execute(sql, args)
+            c.commit()
+            rid = cur.lastrowid
+        finally:
+            c.close()
+        log_event("planner_run", "planner", str(rid),
+                  {"kind": kind, "mode": mode, "startWeek": start_week,
+                   "length": length, "configFingerprint": fp,
+                   "planned": (result or {}).get("planned")})
+        return rid
+    log_event("planner_run", "planner", None,
+              {"kind": kind, "mode": mode, "startWeek": start_week,
+               "length": length, "configFingerprint": fp}, conn=conn)
+    return cur.lastrowid
+
+
+def planner_runs(limit: int = 100) -> list[dict]:
+    out = []
+    for r in db.get("SELECT id, ran_at, kind, mode, start_week, length, "
+                    "visits_per_tech_week, tech_count, config_fingerprint, result "
+                    "FROM planner_runs ORDER BY id DESC LIMIT ?", (limit,)):
+        d = dict(r)
+        if d.get("result"):
+            try:
+                d["result"] = json.loads(d["result"])
+            except (ValueError, TypeError):
+                pass
+        out.append(d)
+    return out
+
+
 # ---- helpers ----------------------------------------------------------------
 
 def _norm(v):
