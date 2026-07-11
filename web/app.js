@@ -1415,6 +1415,110 @@ function postJsonPut(path, body) {
 on("tech-refresh", "click", loadTechnicians);
 on("tech-filter", "change", loadTechnicians);
 
+// ---- configuration: business rules + settings (config-driven, no code) -----
+
+// only rules db_state actually applies onto the engine's CONTROL keys — so
+// editing them genuinely changes planning (no dead switches).
+const _WIRED_RULES = ["MIN_GAP", "NEGLECTED_AFTER", "HOLDBACK", "MAX_VISITS_WEEK", "GPS_EXTRA"];
+
+async function loadBusinessRules() {
+  const el = document.getElementById("rules-biz-out");
+  if (!el) return;
+  try {
+    const seen = new Set();
+    const rules = (await apiJson("/api/rules/business")).rules
+      .filter((r) => r.scope === "global" && _WIRED_RULES.includes(r.code))
+      .filter((r) => !seen.has(r.code) && seen.add(r.code));
+    rules.sort((a, z) => _WIRED_RULES.indexOf(a.code) - _WIRED_RULES.indexOf(z.code));
+    if (!rules.length) { el.innerHTML = `<p class="pd-sub">Žádná business pravidla.</p>`; return; }
+    el.innerHTML = rules.map((r) => {
+      const params = r.params || {};
+      const inputs = Object.entries(params).map(([k, v]) =>
+        `<label class="cfg-param">${esc(k)}<input type="number" step="any" class="cfg-rule-param" data-code="${esc(r.code)}" data-key="${esc(k)}" value="${v}"></label>`).join("");
+      return `<div class="cfg-rule ${r.enabled ? "" : "off"}">` +
+        `<div class="cfg-rule-head"><label class="cfg-switch"><input type="checkbox" class="cfg-rule-en" data-code="${esc(r.code)}" ${r.enabled ? "checked" : ""}><span></span></label>` +
+        `<div class="cfg-rule-t"><div class="cfg-rule-n">${esc(r.name || r.code)}</div>` +
+        `<div class="cfg-rule-d">${esc(r.description || "")} <span class="pd-chip">${esc(r.category || "")}</span></div></div></div>` +
+        (inputs ? `<div class="cfg-params">${inputs}</div>` : "") + `</div>`;
+    }).join("");
+    el.querySelectorAll(".cfg-rule-en").forEach((cb) => cb.addEventListener("change", async () => {
+      await apiJson(`/api/rules/business/${encodeURIComponent(cb.dataset.code)}`,
+        { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: cb.checked }) });
+      cb.closest(".cfg-rule").classList.toggle("off", !cb.checked);
+      _cfgToast();
+    }));
+    el.querySelectorAll(".cfg-rule-param").forEach((inp) => inp.addEventListener("change", async () => {
+      // collect all params for this rule so we PUT the full param object
+      const code = inp.dataset.code;
+      const params = {};
+      el.querySelectorAll(`.cfg-rule-param[data-code="${CSS.escape(code)}"]`).forEach((p) => {
+        params[p.dataset.key] = parseFloat(p.value);
+      });
+      await apiJson(`/api/rules/business/${encodeURIComponent(code)}`,
+        { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ params }) });
+      _cfgToast();
+    }));
+  } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+}
+
+const _SET_NS = { planner: "Plánovač", optimization: "Optimalizace", scoring: "Skóre (bonusy/penalizace)", map: "Mapa", dashboard: "Dashboard", report: "Report" };
+let _setNs = "planner";
+
+async function loadSettingsTabs() {
+  const tabs = document.getElementById("settings-tabs");
+  if (!tabs) return;
+  tabs.innerHTML = Object.entries(_SET_NS).map(([ns, lbl]) =>
+    `<button class="pill ${ns === _setNs ? "on" : ""}" data-ns="${ns}">${esc(lbl)}</button>`).join("");
+  tabs.querySelectorAll(".pill").forEach((b) => b.addEventListener("click", () => { _setNs = b.dataset.ns; loadSettingsTabs(); loadSettings(); }));
+  loadSettings();
+}
+
+async function loadSettings() {
+  const el = document.getElementById("settings-out");
+  if (!el) return;
+  try {
+    const r = await apiJson("/api/settings/" + _setNs);
+    const defs = r.definitions || [];
+    if (!defs.length) { el.innerHTML = `<p class="pd-sub">Pro tento okruh nejsou definice.</p>`; return; }
+    const val = (d) => (r.values && r.values[d.key] != null) ? r.values[d.key] : d.default_value;
+    el.innerHTML = `<div class="cfg-grid">` + defs.map((d) => {
+      const v = val(d); let input;
+      if (d.value_type === "bool") {
+        input = `<label class="cfg-switch"><input type="checkbox" class="cfg-set" data-key="${esc(d.key)}" data-type="bool" ${(v === true || v === "true" || v === 1 || v === "1") ? "checked" : ""}><span></span></label>`;
+      } else if (d.value_type === "enum" && Array.isArray(d.options)) {
+        input = `<select class="cfg-set" data-key="${esc(d.key)}" data-type="enum">` +
+          d.options.map((o) => `<option ${String(o) === String(v) ? "selected" : ""}>${esc(o)}</option>`).join("") + `</select>`;
+      } else if (d.value_type === "number") {
+        input = `<input type="number" step="any" class="cfg-set" data-key="${esc(d.key)}" data-type="number" value="${v ?? ""}"${d.min_value != null ? ` min="${d.min_value}"` : ""}${d.max_value != null ? ` max="${d.max_value}"` : ""}>`;
+      } else {
+        input = `<input type="text" class="cfg-set" data-key="${esc(d.key)}" data-type="string" value="${esc(v ?? "")}">`;
+      }
+      return `<div class="cfg-item"><div class="cfg-item-l"><div class="cfg-item-n">${esc(d.label || d.key)}</div>` +
+        (d.description ? `<div class="cfg-item-d">${esc(d.description)}</div>` : "") + `</div>${input}</div>`;
+    }).join("") + `</div>`;
+    el.querySelectorAll(".cfg-set").forEach((inp) => {
+      const ev = inp.type === "checkbox" ? "change" : "change";
+      inp.addEventListener(ev, async () => {
+        let value = inp.dataset.type === "bool" ? inp.checked
+          : inp.dataset.type === "number" ? parseFloat(inp.value) : inp.value;
+        await apiJson(`/api/settings/${_setNs}/${encodeURIComponent(inp.dataset.key)}`,
+          { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value }) });
+        _cfgToast();
+      });
+    });
+  } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+}
+
+let _cfgToastTimer;
+function _cfgToast() {
+  clearTimeout(_cfgToastTimer);
+  let t = document.getElementById("cfg-toast");
+  if (!t) { t = document.createElement("div"); t.id = "cfg-toast"; t.className = "cfg-toast"; document.body.appendChild(t); }
+  t.textContent = "✓ Uloženo – projeví se při dalším generování";
+  t.classList.add("show");
+  _cfgToastTimer = setTimeout(() => t.classList.remove("show"), 1800);
+}
+
 // ---- automatic import + alerts --------------------------------------------
 
 const _TYPE_LABEL = { workbook: "kompletní workbook", salesapp: "SalesApp", pos_master: "POS Master", activity_plan: "Activity Plan", unknown: "neznámý" };
@@ -2239,7 +2343,11 @@ function showView(name) {
   // lazy first-load per view (data already cached afterwards)
   if (!_navReady[name]) {
     _navReady[name] = true;
-    if (name === "settings" && typeof loadTechnicians === "function") loadTechnicians();
+    if (name === "settings") {
+      loadTechnicians && loadTechnicians();
+      loadBusinessRules && loadBusinessRules();
+      loadSettingsTabs && loadSettingsTabs();
+    }
     if (name === "analytics" && typeof loadRactTechnicians === "function") loadRactTechnicians();
     if (name === "tourplan" && typeof loadStrategyModes === "function") { loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); }
   }

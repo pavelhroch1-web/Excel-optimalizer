@@ -6,8 +6,8 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<link rel="stylesheet" href="styles.css?v=27">
-<script src="config.js?v=27"></script>
+<link rel="stylesheet" href="styles.css?v=28">
+<script src="config.js?v=28"></script>
 </head>
 <body>
 
@@ -26,7 +26,7 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v27</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v28</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard"><span class="si-ico" data-ico="grid"></span> Přehled</button>
       <button class="side-item" data-nav="import"><span class="si-ico" data-ico="upload"></span> Import dat</button>
@@ -465,9 +465,23 @@
     <!-- ==================== VIEW: NASTAVENÍ ==================== -->
     <div class="view hidden" data-view="settings">
       <div class="view-head">
-        <h1>Nastavení</h1>
-        <p>Konfigurace techniků a rolí. Metriky se počítají jen nad aktivními techniky (role Technik).</p>
+        <h1>Nastavení – plánovací model</h1>
+        <p>Celý plánovací model se konfiguruje odsud, bez zásahu do kódu. Engine pravidla pouze čte; změny se projeví při dalším generování TourPlanu.</p>
       </div>
+
+      <section class="card">
+        <h2>Business pravidla <span class="badge">odstup · hold-back · kapacita · GPS · zanedbání</span></h2>
+        <p class="hint">Zapni/vypni pravidlo a uprav jeho parametry (minimální odstup mezi návštěvami, hold-back před kampaní, GPS tolerance, max. návštěv/den, bonus za zanedbání). Ukládá se okamžitě.</p>
+        <div id="rules-biz-out"></div>
+      </section>
+
+      <section class="card">
+        <h2>Pokročilá nastavení <span class="badge">planner · optimalizace · skóre · mapa</span></h2>
+        <p class="hint">Parametry plánovače, optimalizace, váhy skóre (bonusy/penalizace), mapy a reportů. Typované položky s výchozími hodnotami – změny se ukládají okamžitě.</p>
+        <div class="fbar" id="settings-tabs"></div>
+        <div id="settings-out"></div>
+      </section>
+
       <section class="card">
         <h2>Technici <span class="badge">role · aktivita · kapacita</span></h2>
         <p class="hint">Role a aktivita. Metriky (realita, upozornění) se počítají <strong>jen nad aktivními techniky</strong> (role Technik). Pravidlo 3xx = OZ; ručně kohokoli přepíšeš a nastavení přežije import.</p>
@@ -494,6 +508,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=27"></script>
+<script src="app.js?v=28"></script>
 </body>
 </html>
