@@ -325,6 +325,18 @@ CREATE TABLE IF NOT EXISTS pos_priority (
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Editable overrides of the business CADENCE rules (CORN=4, CORE=2, GECO=5, ...).
+-- The base rules live in the CADENCE_RULES config sheet; db_state overlays these
+-- onto the engine's CADENCE_RULES before planning, so cadence is editable from
+-- the UI and actually takes effect - no code change.
+CREATE TABLE IF NOT EXISTS cadence_overrides (
+    rule_id            TEXT PRIMARY KEY,
+    min_gap_weeks      REAL,
+    max_interval_weeks REAL,
+    active             INTEGER,
+    updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- ---------------------------------------------------------------------------
 -- BUSINESS OBJECTIVES (Field Brain plans GOALS, not just visits)
 --

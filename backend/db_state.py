@@ -157,6 +157,11 @@ def configure(state: dict, mode: str, start_week: int, length: int,
     _apply_exclusions(state)
     _apply_priority(state)
     _apply_reassignments(state)
+    try:
+        import cadence_config
+        cadence_config.apply_to_state(state)
+    except Exception:  # noqa: BLE001 - never block planning on config overlay
+        pass
     if visits_per_tech_week:
         brain.apply_capacity(state, visits_per_tech_week)
     # "cela_sit" behaves like dojezd for campaign windows (whole-network sweep).

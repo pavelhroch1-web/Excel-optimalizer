@@ -1029,6 +1029,28 @@ if LOCAL_MODE:
             _rules.set_params(code, body.params, body.scope, body.scope_value)
         return {"ok": True, "effective": _rules.effective()}
 
+    # Business cadence rules (CORN/CORE/GECO/segment) - editable + effective.
+    import cadence_config  # noqa: E402
+
+    class CadenceUpdate(BaseModel):
+        min_gap_weeks: float | None = None
+        max_interval_weeks: float | None = None
+        active: bool | None = None
+
+    @app.get("/api/cadence", dependencies=[Depends(require_auth)])
+    def cadence_list():
+        return {"rules": cadence_config.list_rules()}
+
+    @app.put("/api/cadence/{rule_id}", dependencies=[Depends(require_auth)])
+    def cadence_update(rule_id: str, body: CadenceUpdate):
+        cadence_config.set_override(rule_id, body.min_gap_weeks, body.max_interval_weeks, body.active)
+        return {"ok": True}
+
+    @app.delete("/api/cadence/{rule_id}", dependencies=[Depends(require_auth)])
+    def cadence_reset(rule_id: str):
+        cadence_config.reset(rule_id)
+        return {"ok": True}
+
     # Settings platform: configure planner/optimization/dashboard/report/map/
     # scoring from the app. Definitions drive a generic admin UI; values override.
     import settings as _settings  # noqa: E402

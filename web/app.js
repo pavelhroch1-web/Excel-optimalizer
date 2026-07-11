@@ -1509,6 +1509,45 @@ async function loadSettings() {
   } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
 }
 
+async function loadCadence() {
+  const el = document.getElementById("cadence-out");
+  if (!el) return;
+  try {
+    const rules = (await apiJson("/api/cadence")).rules;
+    if (!rules.length) { el.innerHTML = `<p class="pd-sub">Žádná cadence pravidla (nejdřív nahraj data).</p>`; return; }
+    el.innerHTML = rules.map((r) => {
+      const on = String(r.active).toUpperCase() === "YES";
+      const scope = `${r.scope || ""}${r.matchValue ? " = " + r.matchValue : ""}`;
+      const guar = r.guaranteeType && String(r.guaranteeType).startsWith("HARD") ? "garantováno" : "doporučeno";
+      return `<div class="cfg-rule ${on ? "" : "off"}">` +
+        `<div class="cfg-rule-head"><label class="cfg-switch"><input type="checkbox" class="cad-en" data-id="${esc(r.ruleId)}" ${on ? "checked" : ""}><span></span></label>` +
+        `<div class="cfg-rule-t"><div class="cfg-rule-n">${esc(r.ruleId)}${r.overridden ? ' <span class="pd-chip">upraveno</span>' : ""}</div>` +
+        `<div class="cfg-rule-d"><span class="pd-chip">${esc(scope)}</span> <span class="pd-chip">${guar}</span></div></div></div>` +
+        `<div class="cfg-params">` +
+        `<label class="cfg-param">Min. rozestup (t.)<input type="number" step="1" min="0" class="cad-min" data-id="${esc(r.ruleId)}" value="${r.minGapWeeks ?? ""}"></label>` +
+        `<label class="cfg-param">Doporučený interval (t.)<input type="number" step="1" min="0" class="cad-max" data-id="${esc(r.ruleId)}" value="${r.maxIntervalWeeks ?? ""}"></label>` +
+        `</div></div>`;
+    }).join("");
+    const put = (id, body) => apiJson(`/api/cadence/${encodeURIComponent(id)}`,
+      { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(() => { _cfgToast(); loadCadence(); });
+    el.querySelectorAll(".cad-en").forEach((cb) => cb.addEventListener("change", () => put(cb.dataset.id, { active: cb.checked })));
+    el.querySelectorAll(".cad-min").forEach((i) => i.addEventListener("change", () => put(i.dataset.id, { min_gap_weeks: i.value === "" ? null : parseFloat(i.value) })));
+    el.querySelectorAll(".cad-max").forEach((i) => i.addEventListener("change", () => put(i.dataset.id, { max_interval_weeks: i.value === "" ? null : parseFloat(i.value) })));
+  } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+}
+
+// two-level config: Plánovací model vs Pokročilé nastavení enginu
+function _initCfgLevels() {
+  const tabs = document.getElementById("cfg-level-tabs");
+  if (!tabs || tabs.dataset.wired) return;
+  tabs.dataset.wired = "1";
+  tabs.querySelectorAll(".pill").forEach((b) => b.addEventListener("click", () => {
+    tabs.querySelectorAll(".pill").forEach((x) => x.classList.toggle("on", x === b));
+    document.querySelectorAll(".cfg-level-body").forEach((body) =>
+      body.classList.toggle("hidden", body.dataset.level !== b.dataset.level));
+  }));
+}
+
 let _cfgToastTimer;
 function _cfgToast() {
   clearTimeout(_cfgToastTimer);
@@ -2344,6 +2383,8 @@ function showView(name) {
   if (!_navReady[name]) {
     _navReady[name] = true;
     if (name === "settings") {
+      _initCfgLevels && _initCfgLevels();
+      loadCadence && loadCadence();
       loadTechnicians && loadTechnicians();
       loadBusinessRules && loadBusinessRules();
       loadSettingsTabs && loadSettingsTabs();

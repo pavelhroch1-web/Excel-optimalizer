@@ -552,6 +552,8 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
   background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 999px; font-size: 13px; font-weight: 600;
   box-shadow: var(--shadow-3); opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; }
 .cfg-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.cfg-level { margin-bottom: 18px; }
+.cfg-level-body.hidden { display: none; }
 
 @media (max-width: 860px) {
   .sidebar { width: 60px; padding: 14px 8px; }
