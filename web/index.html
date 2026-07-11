@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Field Force Optimizer</title>
-<link rel="stylesheet" href="styles.css?v=13">
-<script src="config.js?v=13"></script>
+<link rel="stylesheet" href="styles.css?v=14">
+<script src="config.js?v=14"></script>
 </head>
 <body>
 
@@ -23,7 +23,7 @@
 
 <div id="app-screen" class="screen hidden">
   <header>
-    <h1>Field Force Optimizer <span class="ver">v13</span></h1>
+    <h1>Field Force Optimizer <span class="ver">v14</span></h1>
     <button id="logout" class="ghost">Odhlásit</button>
   </header>
 
@@ -56,6 +56,17 @@
     </form>
     <p id="planner-result" class="result"></p>
     <div id="planner-out"></div>
+
+    <div class="pl-whatif">
+      <div class="pl-section">Predikce kapacit — kolik POS a za jak dlouho pokryjeme síť</div>
+      <p class="hint" style="margin:0 0 8px">Spustí engine pro víc kapacit a ukáže, kolik POS se obslouží a za kolik týdnů se pokryje celá síť. Bere strategii/týden/horizont z formuláře nahoře. (Počítá se ~1–2 min.)</p>
+      <form id="sweep-form" class="row">
+        <label>Kapacity POS/technik/týden<input type="text" id="sweep-caps" value="35, 40, 45" style="width:140px"></label>
+        <button type="submit" class="ghost">Spočítat predikci</button>
+      </form>
+      <p id="sweep-result" class="result"></p>
+      <div id="sweep-out"></div>
+    </div>
 
     <div class="pl-whatif hidden" id="planner-whatif-wrap">
       <div class="pl-section">Co kdyby…</div>
@@ -340,6 +351,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=13"></script>
+<script src="app.js?v=14"></script>
 </body>
 </html>

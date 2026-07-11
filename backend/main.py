@@ -782,6 +782,22 @@ if LOCAL_MODE:
                                       body.visits_per_tech_week, body.tech_count,
                                       body.clear_neglect_weeks)
 
+    import planner_sweep  # noqa: E402
+
+    class SweepRequest(BaseModel):
+        mode: str = "vyvazeny"
+        start_week: int
+        length: int = 5
+        capacities: list[int] | None = None
+        tech_count: int | None = None
+
+    @app.post("/api/planner/sweep", dependencies=[Depends(require_auth)])
+    def planner_sweep_ep(body: SweepRequest):
+        """Predictions: POS served, network coverage and weeks-to-cover across
+        capacities (e.g. 35/40/45 per technician-week)."""
+        return planner_sweep.sweep(body.mode, body.start_week, body.length,
+                                   body.capacities, body.tech_count)
+
     import planner_unserved  # noqa: E402
 
     @app.post("/api/planner/unserved", dependencies=[Depends(require_auth)])

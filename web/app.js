@@ -1010,6 +1010,47 @@ on("planner-whatif-form", "submit", async (e) => {
   }
 });
 
+// ---- predictions: capacity sweep ------------------------------------------
+
+function renderSweep(s) {
+  let html = `<p class="pd-sub">Servisovatelná síť: <strong>${s.servableNetwork}</strong> POS (projdou pravidly).</p>`;
+  html += `<table class="pd-score-table"><thead><tr>` +
+    `<th>Kapacita/týd</th><th>Obslouženo POS</th><th>% sítě</th><th>Unikát/týd</th><th>Pokrytí sítě</th></tr></thead><tbody>` +
+    s.capacities.map((r) =>
+      `<tr><td><strong>${r.capacityPerTechWeek}</strong></td>` +
+      `<td>${r.uniquePosServed}</td>` +
+      `<td>${r.coveragePctOfNetwork ?? "—"} %</td>` +
+      `<td>${r.uniquePerWeek ?? "—"}</td>` +
+      `<td>~${r.estWeeksToCoverNetwork ?? "—"} týd.</td></tr>`).join("") +
+    `</tbody></table>`;
+  html += `<p class="hint">${esc(s.assumptions)}</p>`;
+  return html;
+}
+
+on("sweep-form", "submit", async (e) => {
+  e.preventDefault();
+  const caps = (document.getElementById("sweep-caps").value || "")
+    .split(/[\s,;]+/).map((x) => parseInt(x, 10)).filter((x) => x > 0);
+  if (!caps.length) { setResult("sweep-result", "Zadej aspoň jednu kapacitu.", "err"); return; }
+  const week = parseInt(document.getElementById("planner-week").value, 10);
+  if (!week) { setResult("sweep-result", "Nahoře zadej počáteční týden.", "err"); return; }
+  const p = {
+    mode: document.getElementById("planner-mode").value,
+    start_week: week,
+    length: parseInt(document.getElementById("planner-length").value, 10) || 5,
+    capacities: caps,
+    tech_count: parseInt(document.getElementById("planner-techs").value, 10) || null,
+  };
+  setResult("sweep-result", `Počítám predikci pro ${caps.length} kapacit… (~${caps.length * 25 + 20} s)`, "");
+  try {
+    const s = await postJson("/api/planner/sweep", p);
+    document.getElementById("sweep-out").innerHTML = renderSweep(s);
+    setResult("sweep-result", "", "ok");
+  } catch (err) {
+    setResult("sweep-result", "Chyba: " + err.message, "err");
+  }
+});
+
 // ---- hard-exclude POS from planning ---------------------------------------
 
 async function loadExclusionCount() {
