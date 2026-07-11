@@ -2341,13 +2341,36 @@ async function loadCockpitBrief() {
   if (!el) return;
   if (!el.dataset.init) { el.dataset.init = "1"; el.innerHTML = `<p class="result">Načítám operační brief…</p>`; }
   try {
-    const [team, runsResp, ...trends] = await Promise.all([
+    const [team, runsResp, insights, ...trends] = await Promise.all([
       apiJson("/api/analytics/team").catch(() => null),
       apiJson("/api/history/planner-runs?limit=1").catch(() => null),
+      apiJson("/api/insights").catch(() => null),
       ...(_BRIEF_KPIS.map((k) => apiJson(`/api/memory/trend?entity_type=${k.et}&metric_key=${k.m}`).catch(() => null))),
     ]);
-    el.innerHTML = renderBrief(team, (runsResp && runsResp.runs && runsResp.runs[0]) || null, trends);
+    el.innerHTML = renderBrief(team, (runsResp && runsResp.runs && runsResp.runs[0]) || null, trends)
+      + renderInsightsBlock(insights);
   } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+}
+
+// "Co bys přehlédl" — ranked anomalies / inefficiencies, each with its why.
+const _SEV_LABEL = { risk: "Vysoká", warn: "Střední", info: "Podnět" };
+function renderInsightsBlock(data) {
+  const fs = (data && data.findings) || [];
+  if (!fs.length) return "";
+  const rows = fs.slice(0, 6).map((f) => {
+    const why = (f.why || []).slice(0, 3).map((w) =>
+      `<span class="ins-why"><b>${esc(w.label || w.metric)}</b> ${_fmtNum(w.value)}` +
+      `${w.peerMedian != null ? ` <span class="ins-vs">vs. medián ${_fmtNum(w.peerMedian)}</span>` : ""}</span>`).join("");
+    return `<div class="ins-row sev-${esc(f.severity)}" ${f.entityId ? `data-tech="${esc(f.entityId)}" role="button" tabindex="0"` : ""}>
+      <div class="ins-sev">${esc(_SEV_LABEL[f.severity] || f.severity)}</div>
+      <div class="ins-body"><div class="ins-head">${esc(f.headline)}</div>
+        <div class="ins-whys">${why}</div></div>
+      ${f.entityId ? `<div class="ins-go">Rozebrat →</div>` : ""}</div>`;
+  }).join("");
+  return `<section class="ins-block">
+    <div class="ins-h">${ico("flame")} Co bys přehlédl <span class="pd-chip">${fs.length} nálezů</span>
+      <span class="ins-sub">anomálie · neefektivita · příležitosti ze SalesApp</span></div>
+    ${rows}</section>`;
 }
 
 function renderBrief(team, lastRun, trends) {
