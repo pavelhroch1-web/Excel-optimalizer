@@ -515,6 +515,16 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .pd-trend { padding: 8px 0; }
 .detail-panel .pl-tiles { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
 .detail-panel .pl-tile { padding: 10px 12px; } .detail-panel .pl-tile .v { font-size: 18px; }
+/* visual score breakdown */
+.score-badge { background: var(--accent); color: #fff; border-radius: 999px; padding: 2px 10px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; margin-left: 6px; }
+.score-bars { display: flex; flex-direction: column; gap: 6px; }
+.sb-row { display: grid; grid-template-columns: minmax(140px, 1.4fr) 1fr auto; gap: 10px; align-items: center; font-size: 13px; }
+.sb-l { color: var(--text-2); }
+.sb-track { height: 8px; background: var(--bg-2); border-radius: 6px; overflow: hidden; }
+.sb-fill { display: block; height: 100%; border-radius: 6px; }
+.sb-fill.pos { background: var(--good); } .sb-fill.neg { background: var(--bad); }
+.sb-v { font-variant-numeric: tabular-nums; font-weight: 700; text-align: right; }
+.sb-v.pos { color: var(--good); } .sb-v.neg { color: var(--bad); }
 
 @media (max-width: 860px) {
   .sidebar { width: 60px; padding: 14px 8px; }

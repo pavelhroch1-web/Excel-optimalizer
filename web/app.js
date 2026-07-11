@@ -796,27 +796,37 @@ function renderPosDetail(d, week) {
     html += `<p class="pd-sub">Žádná aktivní kampaň pro tento týden.</p>`;
   }
 
-  // score breakdown (only for scored candidates)
+  // WHY — visual score breakdown (the engine's own components, which sum
+  // exactly to the score; no new logic here, just made scannable).
   if (d.isCandidate && d.score !== null && d.score !== undefined) {
     const comp = [
-      ["CORE bonus", d.coreBonus],
+      ["PPT (obrat POS)", d.pptComponent],
+      ["CORE (garantováno)", d.coreBonus],
       ["Klasifikace A", d.aBonus],
-      ["PPT složka", d.pptComponent],
-      ["Penalizace min. rozestup", d.gapPenalty],
-      ["Bonus zanedbáno", d.neglectedBonus],
-      ["Základní skóre", d.baseScore],
-      ["Urgence (boost)", d.urgencyBoost],
-      ["GPS shluk (bonus)", d.gpsBonus],
-    ];
-    html += `<div class="pd-section">Rozpad skóre po pravidlech</div>`;
-    html += `<table class="pd-score-table"><tbody>` +
-      comp.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${num(v)}</td></tr>`).join("") +
-      `<tr class="total"><td>Výsledné skóre</td><td>${num(d.score)}</td></tr></tbody></table>`;
+      ["Dlouho nenavštíveno", d.neglectedBonus],
+      ["Blíží se termín cadence", d.urgencyBoost],
+      ["Výhodná trasa (GPS shluk)", d.gpsBonus],
+      ["Nedávno navštíveno (penalizace)", d.gapPenalty],
+    ].filter(([, v]) => v != null && Math.abs(v) > 0.0001)
+     .sort((a, z) => Math.abs(z[1]) - Math.abs(a[1]));
+    const maxAbs = Math.max(1, ...comp.map(([, v]) => Math.abs(v)));
+    html += `<div class="pd-section">Proč toto skóre <span class="score-badge">${num(d.score)}</span></div>`;
+    html += `<div class="score-bars">` + comp.map(([k, v]) => {
+      const pos = v > 0;
+      const w = Math.round(100 * Math.abs(v) / maxAbs);
+      return `<div class="sb-row"><span class="sb-l">${esc(k)}</span>` +
+        `<span class="sb-track"><span class="sb-fill ${pos ? "pos" : "neg"}" style="width:${w}%"></span></span>` +
+        `<span class="sb-v ${pos ? "pos" : "neg"}">${pos ? "+" : ""}${num(v)}</span></div>`;
+    }).join("") + `</div>`;
     if (d.mandatoryRuleId) {
-      html += `<p class="pd-sub">Povinné pravidlo (cadence): <span class="pd-chip">${esc(d.mandatoryRuleId)}</span></p>`;
+      html += `<p class="pd-sub">Povinné pravidlo (cadence): <span class="pd-chip">${esc(d.mandatoryRuleId)}</span> – zařazeno vždy, bez ohledu na skóre.</p>`;
     }
   } else {
-    html += `<div class="pd-section">Skóre</div><p class="pd-sub">POS není kandidát – engine ho vyřadil před bodováním, proto nemá skóre.</p>`;
+    html += `<div class="pd-section">Proč nebyl vybrán</div>`;
+    const reasons = (d.recommendation && d.recommendation.reasons) || [];
+    html += `<div class="pd-rec no"><div class="pd-rec-head">${esc(d.explanation || "Není kandidát")}</div>` +
+      (reasons.length ? `<ul class="pd-rec-list">` + reasons.map((r) => `<li>${esc(r)}</li>`).join("") + `</ul>` : "") +
+      (d.includeLever ? `<div class="pd-rec-lever">Aby se stal kandidátem: ${esc(d.includeLever)}.</div>` : "") + `</div>`;
   }
 
   // visit history
