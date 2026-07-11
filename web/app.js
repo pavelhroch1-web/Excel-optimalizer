@@ -2543,9 +2543,15 @@ async function openDiagnosis(name) {
          <div class="cause-body"><div class="cause-label">${esc(c.label)}
            <span class="cause-z">z ${c.z > 0 ? "+" : ""}${c.z}</span></div>
            <div class="cause-note">${esc(c.note)}</div></div></div>`).join("");
+    const exs = (d.opportunity && d.opportunity.examples) || [];
+    const exHtml = exs.length ? `<div class="combo-ex"><div class="combo-ex-h">Příklady promarněného spojení</div>` +
+      exs.slice(0, 4).map((x) =>
+        `<div class="combo-ex-row"><span class="ce-pos">POS ${esc(x.otherPos)}</span>
+          <span class="ce-mid">${esc((x.otherPurpose || "").replace("Technik - ", ""))} · ${x.apartKm} km od visibility POS ${esc(x.visibilityPos)}</span>
+          <span class="ce-wk">${esc(x.week)}</span></div>`).join("") + `</div>` : "";
     const opp = d.opportunity ? `<div class="cause-opp">${ico("target")}<div>
         <div class="co-h">Největší prostor ke zlepšení</div>
-        <div class="co-t">${esc(d.opportunity.note)}</div></div></div>` : "";
+        <div class="co-t">${esc(d.opportunity.note)}</div>${exHtml}</div></div>` : "";
     const p = d.profile || {};
     bodyEl.innerHTML =
       `<div class="cause-summary">${esc(d.summary)}</div>

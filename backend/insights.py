@@ -166,8 +166,35 @@ def _d_repeated_area_returns(ctx) -> list:
     return out
 
 
+def _d_missed_visibility_combination(ctx) -> list:
+    """Visibility is the business priority; a service-only trip made separately
+    while a visibility visit was nearby the same week is an avoidable second
+    trip. Flags technicians with the most avoidable combining, with the impact
+    estimate — never proposing a specific move."""
+    import diagnostics
+    combos = diagnostics.combination_analysis(ctx["days_back"])
+    if not combos:
+        return []
+    bench = benchmark({t: c["savedKm"] for t, c in combos.items()})
+    out = []
+    for tid, c in combos.items():
+        e = bench.get("entities", {}).get(tid, {}) if not bench.get("insufficient") else {}
+        # flag a strong peer outlier, or simply a materially large absolute loss
+        if e.get("z", 0) >= 1.5 or c["savedKm"] >= 60:
+            out.append(_finding("missed_visibility_combination", tid,
+                "warn" if c["savedKm"] >= 60 else "info",
+                f"{tid} jezdil na ostatní návštěvy zvlášť poblíž visibilitní (náběh kampaně) — "
+                f"potenciál spojit {c['savedTrips']} cest (~{c['savedKm']} km, ~{c['savedMin']} min)",
+                [{"metric": "combinable_km", "label": "ušetřitelné km", "value": c["savedKm"],
+                  "peerMedian": bench.get("median"), "z": e.get("z", 0), "percentile": e.get("percentile")},
+                 {"metric": "combinable_trips", "label": "spojitelné cesty", "value": c["savedTrips"]}],
+                drill={"combination": True}))
+    return out
+
+
 # registry — add a detector here and it flows into insights() automatically.
-DETECTORS = [_d_benchmark_outliers, _d_single_purpose, _d_repeated_area_returns]
+DETECTORS = [_d_benchmark_outliers, _d_missed_visibility_combination,
+             _d_single_purpose, _d_repeated_area_returns]
 
 _SEV_RANK = {"risk": 0, "warn": 1, "info": 2}
 

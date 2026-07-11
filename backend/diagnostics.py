@@ -25,7 +25,22 @@ import route_actual
 from desktop_client.engines.core_logic import GeoPoint, compute_optimal_route_km, distance_km
 
 _ISOLATED_KM = 15.0          # a stop this far from all same-day stops is "isolated"
+_COMBINE_KM = 6.0            # two POS within this are the "same micro-area"
+_AVG_SPEED_KMH = 45.0        # for turning saved km into saved minutes
 _profiles_cache: dict = {}
+_combo_cache: dict = {}
+
+# Visibility is THE primary business purpose — the visit that gets planned into
+# the TourPlan (campaign launch / "Náběh kampaně"). Every other purpose
+# (zásobování, ostatní, kontroly, stahování losů…) is secondary and should
+# ideally ride along with a visibility trip in the same area. (Easily made
+# configurable later — kept as a named constant reflecting the business rule.)
+_VISIBILITY_TOKENS = ("náběh kampaně",)
+
+
+def _is_visibility(purpose: str) -> bool:
+    p = (purpose or "").lower()
+    return any(tok in p for tok in _VISIBILITY_TOKENS)
 
 
 def _mean(xs):
@@ -154,8 +169,25 @@ def diagnose(name: str, days_back: int = 90) -> dict | None:
                            "note": note(v, m)})
     causes.sort(key=lambda c: -c["severity"])
 
+    # Visibility-combination opportunity (business priority): service trips that
+    # could have ridden along with a nearby visibility visit the same week.
+    combo = combination_analysis(days_back).get(name)
+    if combo:
+        causes.append({
+            "factor": "missed_visibility_combination", "label": "Promarněné spojení s visibilitou",
+            "value": combo["savedTrips"], "peerMedian": None, "unit": "cest", "z": 1.5,
+            "severity": 1.5,
+            "note": f"{combo['savedTrips']} nevisibilitních cest mohlo jet společně s visibilitní "
+                    f"návštěvou (náběh kampaně) poblíž (~{combo['savedKm']} km, ~{combo['savedMin']} min navíc)"})
+        causes.sort(key=lambda c: -c["severity"])
+
     opportunity = None
-    if me.get("excessKm") and me["excessKm"] > 0 and me.get("orderingRatio", 1) > 1.15:
+    if combo and combo["savedKm"] >= 20:
+        opportunity = {"type": "visibility_combine", "km": combo["savedKm"], "trips": combo["savedTrips"],
+                       "note": f"Ostatní návštěvy plánovat spolu s visibilitními (náběh kampaně) ve stejné "
+                               f"oblasti — potenciál ~{combo['savedKm']} km, ~{combo['savedMin']} min a "
+                               f"{combo['savedTrips']} jízd za období.", "examples": combo["examples"]}
+    elif me.get("excessKm") and me["excessKm"] > 0 and me.get("orderingRatio", 1) > 1.15:
         wk = me["days"] / 5.0 if me["days"] else 1
         opportunity = {"type": "ordering", "km": me["excessKm"],
                        "note": f"Lepší pořadí návštěv by ušetřilo ~{me['excessKm']} km "
@@ -165,11 +197,77 @@ def diagnose(name: str, days_back: int = 90) -> dict | None:
                        "note": "Spojení jednoúčelových návštěv do společných cest sníží počet přejezdů."}
 
     return {"technician": name, "profile": me, "peerMedians": {k: peer_med(k) for k, *_ in _FACTORS},
-            "causes": causes,
+            "causes": causes, "combination": combo,
             "summary": (f"Hlavní příčina: {causes[0]['label'].lower()} — {causes[0]['note']}."
                         if causes else "Bez výrazné příčiny v rámci sledovaných faktorů."),
             "opportunity": opportunity}
 
 
+def combination_analysis(days_back: int = 90) -> dict:
+    """Missed opportunities to combine trips AROUND visibility visits.
+
+    Visibility (campaign launch) is the business priority and the visit that
+    gets planned. A NON-visibility visit made on a separate day, while the same
+    technician had a visibility visit to a nearby POS in the same week, is an
+    avoidable second trip into that micro-area. We estimate the avoidable detour
+    (km / time / trips) - never proposing a specific move, just quantifying the
+    wasted potential. Computed once over all technicians."""
+    if days_back in _combo_cache:
+        return _combo_cache[days_back]
+    import datetime
+    from collections import defaultdict
+    start = (datetime.date.today() - datetime.timedelta(days=days_back)).isoformat()
+    rows = db.get(
+        "SELECT v.technician t, v.pos_id pos, v.visit_date d, v.purpose pu, "
+        "p.city city, p.gps_x gx, p.gps_y gy, strftime('%Y-%W', v.visit_date) wk "
+        "FROM salesapp_visits v LEFT JOIN pos_master p ON p.pos_id=v.pos_id "
+        "WHERE v.visitor_role='TECHNIK' AND v.visit_date IS NOT NULL "
+        "AND v.purpose IS NOT NULL AND v.purpose<>'' AND v.visit_date>=? "
+        "AND p.gps_x IS NOT NULL", (start,))
+    per = defaultdict(list)
+    for r in rows:
+        per[r["t"]].append(r)
+    out: dict = {}
+    for tech, visits in per.items():
+        byweek = defaultdict(list)
+        for v in visits:
+            byweek[v["wk"]].append(v)
+        missed, saved_km = [], 0.0
+        for wk, vs in byweek.items():
+            vis = [v for v in vs if _is_visibility(v["pu"])]
+            other = [v for v in vs if not _is_visibility(v["pu"])]
+            if not vis or not other:
+                continue
+            for s in other:
+                near = min((V for V in vis if V["d"] != s["d"]),
+                           key=lambda V: distance_km(s["gx"], s["gy"], V["gx"], V["gy"]),
+                           default=None)
+                if not near or distance_km(s["gx"], s["gy"], near["gx"], near["gy"]) > _COMBINE_KM:
+                    continue
+                # detour proxy: how far s sat from the rest of its own day
+                sameday = [o for o in vs if o["d"] == s["d"] and o["pos"] != s["pos"]]
+                if sameday:
+                    cx = sum(o["gx"] for o in sameday) / len(sameday)
+                    cy = sum(o["gy"] for o in sameday) / len(sameday)
+                    detour = distance_km(s["gx"], s["gy"], cx, cy)
+                else:
+                    detour = distance_km(s["gx"], s["gy"], near["gx"], near["gy"])
+                sk = min(2 * detour, 80.0)
+                saved_km += sk
+                missed.append({"week": wk, "otherPos": s["pos"], "otherPurpose": s["pu"],
+                               "visibilityPos": near["pos"], "city": s["city"],
+                               "km": round(sk, 1),
+                               "apartKm": round(distance_km(s["gx"], s["gy"], near["gx"], near["gy"]), 1)})
+        if missed:
+            trips = len({(m["week"], m["otherPos"]) for m in missed})
+            out[tech] = {"missedPairs": len(missed), "savedTrips": trips,
+                         "savedKm": round(saved_km, 1),
+                         "savedMin": round(60 * saved_km / _AVG_SPEED_KMH),
+                         "examples": sorted(missed, key=lambda m: -m["km"])[:5]}
+    _combo_cache[days_back] = out
+    return out
+
+
 def invalidate_cache():
     _profiles_cache.clear()
+    _combo_cache.clear()
