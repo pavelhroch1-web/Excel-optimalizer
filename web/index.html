@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Field Force Optimizer</title>
-<link rel="stylesheet" href="styles.css?v=12">
-<script src="config.js?v=12"></script>
+<link rel="stylesheet" href="styles.css?v=13">
+<script src="config.js?v=13"></script>
 </head>
 <body>
 
@@ -23,7 +23,7 @@
 
 <div id="app-screen" class="screen hidden">
   <header>
-    <h1>Field Force Optimizer <span class="ver">v12</span></h1>
+    <h1>Field Force Optimizer <span class="ver">v13</span></h1>
     <button id="logout" class="ghost">Odhlásit</button>
   </header>
 
@@ -45,7 +45,7 @@
   <!-- PLANNER: decision-support work tool -->
   <section class="card planner-card">
     <h2>Planner <span class="badge">Rozhodovací nástroj</span></h2>
-    <p class="hint">Otevři scénář a během chvíle víš: dává plán obchodní smysl, kde je nejslabší místo, co brzdí růst a co změnit. Vše se řídí konfigurací a Business Rules.</p>
+    <p class="hint">Engine automaticky vybere nejlepší POS podle pravidel a kapacity. Ty jen zkontroluješ: <strong>je pokrytí v pořádku</strong> a <strong>co zůstalo neobslouženo a proč</strong>. Technik = kapacita (např. 40 POS/týden). Vše se řídí konfigurací a Business Rules.</p>
     <form id="planner-form" class="row">
       <label>Strategie<select id="planner-mode"></select></label>
       <label>Počáteční týden<input type="number" id="planner-week" min="1" max="53" required></label>
@@ -340,6 +340,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=12"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>

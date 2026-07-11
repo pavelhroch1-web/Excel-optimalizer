@@ -874,10 +874,14 @@ function renderAdvise(a) {
     html += `<div class="pl-section">Co změnit</div><ul class="pl-recs">` +
       ad.recommendations.map((r) => `<li>${esc(r)}</li>`).join("") + `</ul>`;
   }
-  // workload bars
+  // container for the unserved analysis (filled by loadUnserved)
+  html += `<div id="planner-unserved"><p class="result">Načítám neobsloužené POS…</p></div>`;
+
+  // technician workload + regions = supplementary, collapsed by default
   const techs = (a.perTechnician || []).slice(0, 20);
+  html += `<details style="margin-top:12px"><summary style="cursor:pointer;color:var(--text-dim);font-size:13px">Doplňkové: vytížení techniků & regiony</summary><div style="margin-top:10px">`;
   if (techs.length) {
-    html += `<div class="pl-section">Vytížení techniků (návštěv/týden vs kapacita ${cap.visitsPerTechWeek})</div>`;
+    html += `<div class="pl-section">Vytížení techniků (kapacita ${cap.visitsPerTechWeek}/týden)</div>`;
     html += techs.map((t) => {
       const w = Math.min(100, Math.round((t.utilizationPct || 0)));
       return `<div class="pl-tech ${t.status}"><span class="nm">${esc(t.technician)}</span>` +
@@ -885,13 +889,63 @@ function renderAdvise(a) {
         `<span class="ut">${t.avgPerWeek}/t · ${t.utilizationPct ?? "—"} %</span></div>`;
     }).join("");
   }
-  // region (informational, collapsible)
   if (a.perRegion && a.perRegion.length) {
-    html += `<div class="pl-section">Zátěž regionů (informativně)</div>`;
-    html += `<div style="font-size:13px;color:var(--text-dim)">` +
-      a.perRegion.slice(0, 8).map((r) => `${esc(r.region)}: ${r.visits}`).join(" · ") + `</div>`;
+    html += `<div class="pl-section">Zátěž regionů</div><div style="font-size:13px;color:var(--text-dim)">` +
+      a.perRegion.slice(0, 10).map((r) => `${esc(r.region)}: ${r.visits}`).join(" · ") + `</div>`;
   }
+  html += `</div></details>`;
   return html;
+}
+
+const _UNS_LABEL = {
+  capacity: "Nevešlo do kapacity",
+  holdback: "Odloženo hold-backem (blíží se kampaň)",
+  mingap: "Pod minimálním rozestupem (navštíveno nedávno)",
+};
+
+function renderUnserved(u) {
+  let html = `<div class="pl-section">Co zůstalo neobslouženo a proč <span class="badge">kontrola výběru</span></div>`;
+  html += `<p class="hint" style="margin:0 0 10px">Naplánováno ${u.served} POS. Níže důležité POS, které se nenaplánovaly – seskupené podle důvodu, který dal engine. Nejdůležitější (CORE / cadence / PPT) nahoře.</p>`;
+  const ua = u.unservedActionable;
+  for (const key of ["capacity", "holdback", "mingap"]) {
+    const g = ua[key];
+    if (!g || !g.count) continue;
+    html += `<details ${key === "capacity" ? "open" : ""} style="margin-bottom:8px">` +
+      `<summary style="cursor:pointer;font-size:14px;font-weight:600">${esc(_UNS_LABEL[key])}: ${g.count}` +
+      ` <span style="color:var(--text-dim);font-weight:400">(CORE ${g.core}, cadence ${g.cadenceDue})</span></summary>`;
+    if (g.items.length) {
+      html += `<table class="pd-score-table" style="margin-top:6px"><tbody>` +
+        g.items.map((it) =>
+          `<tr><td><span class="pos-link" data-pos="${esc(it.pos)}">${esc(it.pos)}</span></td>` +
+          `<td>${esc(it.nazev || "")}</td><td>${esc(it.kategorie || "")}</td>` +
+          `<td>${it.core ? "CORE" : ""}${it.cadence ? " " + esc(it.cadence) : ""}</td>` +
+          `<td style="text-align:right">${it.ppt != null ? Math.round(it.ppt).toLocaleString("cs") : ""}</td>` +
+          `<td style="text-align:right">${it.weeksSinceLastVisit ?? "—"} týd.</td></tr>`).join("") +
+        `</tbody></table>`;
+      if (g.count > g.items.length) html += `<p class="hint">…a dalších ${g.count - g.items.length}.</p>`;
+    }
+    html += `</details>`;
+  }
+  if (u.filteredByRule && u.filteredByRule.length) {
+    html += `<div class="pl-section" style="margin-top:10px">Vyřazeno pravidly (záměrně)</div>`;
+    html += `<div style="font-size:13px;color:var(--text-dim)">` +
+      u.filteredByRule.map((f) => `${esc(f.reason)}: ${f.count}`).join(" · ") + `</div>`;
+  }
+  // wire POS links
+  setTimeout(() => document.querySelectorAll("#planner-unserved .pos-link").forEach((el) =>
+    el.addEventListener("click", () => openPosDetail && openPosDetail(el.dataset.pos))), 0);
+  return html;
+}
+
+async function loadUnserved(p) {
+  const el = document.getElementById("planner-unserved");
+  if (!el) return;
+  try {
+    const u = await postJson("/api/planner/unserved", p);
+    el.innerHTML = renderUnserved(u);
+  } catch (e) {
+    el.innerHTML = `<p class="result err">Neobsloužené POS se nepodařilo načíst: ${esc(e.message)}</p>`;
+  }
 }
 
 function renderCompare(base, scen) {
@@ -934,6 +988,7 @@ on("planner-form", "submit", async (e) => {
     setResult("planner-result", "", "ok");
     document.getElementById("planner-whatif-wrap").classList.remove("hidden");
     document.getElementById("whatif-visits").value = p.visits_per_tech_week || 40;
+    loadUnserved(p);   // the control surface: what stays unserved and why
   } catch (err) {
     setResult("planner-result", "Chyba: " + err.message, "err");
   }
