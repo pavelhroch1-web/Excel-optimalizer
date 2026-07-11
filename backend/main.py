@@ -1027,7 +1027,18 @@ if LOCAL_MODE:
             _rules.set_enabled(code, body.enabled, body.scope, body.scope_value)
         if body.params is not None:
             _rules.set_params(code, body.params, body.scope, body.scope_value)
+        _log_config("business_rule", code, body.model_dump(exclude_none=True))
         return {"ok": True, "effective": _rules.effective()}
+
+    # Config-change audit: every planning-model / rule / setting edit becomes an
+    # event, so "historie změn konfigurace" is queryable next to imports/publishes.
+    import history as _history  # noqa: E402
+
+    def _log_config(area: str, key: str, detail: dict) -> None:
+        try:
+            _history.log_event("config_change", area, key, detail)
+        except Exception:  # noqa: BLE001 - never block a config edit on logging
+            pass
 
     # Business cadence rules (CORN/CORE/GECO/segment) - editable + effective.
     import cadence_config  # noqa: E402
@@ -1046,6 +1057,7 @@ if LOCAL_MODE:
     def cadence_update(rule_id: str, body: CadenceUpdate):
         cadence_config.set_override(rule_id, body.min_gap_weeks, body.max_interval_weeks,
                                     body.active, body.priority)
+        _log_config("cadence", rule_id, body.model_dump(exclude_none=True))
         return {"ok": True}
 
     @app.delete("/api/cadence/{rule_id}", dependencies=[Depends(require_auth)])
@@ -1072,6 +1084,7 @@ if LOCAL_MODE:
             model_config.set_override(section, match_key, body.col, body.value)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
+        _log_config("model", f"{section}/{match_key}", {"col": body.col, "value": body.value})
         return {"ok": True}
 
     @app.delete("/api/model/{section}/{match_key:path}", dependencies=[Depends(require_auth)])
@@ -1088,6 +1101,23 @@ if LOCAL_MODE:
     @app.get("/api/engine/inventory", dependencies=[Depends(require_auth)])
     def engine_inventory():
         return {"parameters": engine_config.inventory()}
+
+    # Historical memory: unified activity timeline (import / publish / config
+    # change), per-POS change history (esp. PPT), and KPI trend series. Reads
+    # the substrate that the importer / config setters now populate.
+    import history  # noqa: E402
+
+    @app.get("/api/history/events", dependencies=[Depends(require_auth)])
+    def history_events(kind: str | None = None, limit: int = 200):
+        return {"events": history.events(kind, limit)}
+
+    @app.get("/api/pos/{pos_id}/history", dependencies=[Depends(require_auth)])
+    def pos_change_history(pos_id: str, limit: int = 100):
+        return {"pos": pos_id, "history": history.pos_history(pos_id, limit)}
+
+    @app.get("/api/history/metrics", dependencies=[Depends(require_auth)])
+    def history_metrics(entity_type: str, metric_key: str, entity_id: str | None = None):
+        return {"series": history.metric_series(entity_type, metric_key, entity_id)}
 
     # Settings platform: configure planner/optimization/dashboard/report/map/
     # scoring from the app. Definitions drive a generic admin UI; values override.
@@ -1114,6 +1144,7 @@ if LOCAL_MODE:
     @app.put("/api/settings/{namespace}/{key}", dependencies=[Depends(require_auth)])
     def settings_put(namespace: str, key: str, body: SettingUpdate):
         _settings.set_value(namespace, key, body.value, body.scope, body.scope_value)
+        _log_config("setting", f"{namespace}.{key}", {"value": body.value})
         return {"ok": True, "values": _settings.effective(namespace)}
 
     @app.get("/api/views/{namespace}", dependencies=[Depends(require_auth)])

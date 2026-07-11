@@ -51,17 +51,39 @@ _POS_MAP = {
 }
 
 
-def import_pos_master(conn, ws) -> int:
+def import_pos_master(conn, ws) -> dict:
+    """Import POS master with historical memory: every changed field (esp. PPT,
+    status) is recorded to pos_master_history, and POS absent from this import
+    are marked inactive (not deleted). Returns a diff summary for the UI."""
+    import history
     hidx, it, _ = _rows(ws)
-    n = 0
+    # Preload the tracked fields of every existing POS once, so we can diff
+    # without a SELECT per row (11k+ POS).
+    existing = {str(r["pos_id"]): dict(r) for r in db.get(
+        "SELECT pos_id, ppt, active, technician, terminal_type, classification, "
+        "market, category, name FROM pos_master")}
+    seen: set[str] = set()
+    n = new_pos = changed_pos = ppt_changed = 0
     for row in it:
         pid = _g(row, hidx, "posId")
         if pid is None:
             continue
+        pid = str(pid)
+        seen.add(pid)
         vals = {dst: _g(row, hidx, src) for src, dst in _POS_MAP.items()}
-        vals["pos_id"] = str(pid)
+        vals["pos_id"] = pid
         status = _g(row, hidx, "status")
         vals["active"] = 0 if (status and str(status).upper() in ("CLOSED", "ZAVRENO", "ZAVŘENO")) else 1
+
+        old = existing.get(pid)
+        changes = history.record_pos_changes(conn, pid, old, vals, source="import")
+        if old is None:
+            new_pos += 1
+        elif changes:
+            changed_pos += 1
+            if history._norm(old.get("ppt")) != history._norm(vals.get("ppt")):
+                ppt_changed += 1
+
         fields = ", ".join(vals.keys())
         marks = ", ".join("?" for _ in vals)
         updates = ", ".join(f"{k}=excluded.{k}" for k in vals if k != "pos_id")
@@ -75,9 +97,15 @@ def import_pos_master(conn, ws) -> int:
             conn.execute(
                 "INSERT INTO closed_pos (pos_id, closed_on, reason, source) VALUES (?, ?, ?, 'import') "
                 "ON CONFLICT(pos_id) DO NOTHING",
-                (str(pid), str(csw) if csw is not None else None, "status/closedSince"))
+                (pid, str(csw) if csw is not None else None, "status/closedSince"))
         n += 1
-    return n
+
+    # POS present in the DB but missing from this import -> Inactive (kept).
+    inactivated = history.mark_missing_inactive(conn, seen, source="import")
+    summary = {"total": n, "new": new_pos, "changed": changed_pos,
+               "pptChanged": ppt_changed, "inactivated": inactivated}
+    history.log_event("import", "pos_master", None, summary, conn=conn)
+    return summary
 
 
 def import_salesapp(conn, ws, filename: str | None = None) -> int:
@@ -219,8 +247,10 @@ def import_workbook(path: str, filename: str | None = None) -> dict:
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     conn = db.connect()
     try:
+        pos_summary = import_pos_master(conn, wb["POS_MASTER"]) if "POS_MASTER" in wb.sheetnames else {"total": 0}
         result = {
-            "pos_master": import_pos_master(conn, wb["POS_MASTER"]) if "POS_MASTER" in wb.sheetnames else 0,
+            "pos_master": pos_summary["total"],
+            "pos_diff": pos_summary,
             "salesapp_visits": import_salesapp(conn, wb["SALESAPP_IMPORT"], filename) if "SALESAPP_IMPORT" in wb.sheetnames else 0,
             "campaigns": import_activity_plan(conn, wb["ACTIVITY_PLAN"]) if "ACTIVITY_PLAN" in wb.sheetnames else 0,
             "config": import_config(conn, wb),

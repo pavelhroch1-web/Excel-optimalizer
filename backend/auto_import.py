@@ -70,7 +70,9 @@ def import_file(path: str, filename: str | None = None) -> dict:
         if t == "salesapp":
             counts["salesapp_visits"] = importer.import_salesapp(conn, ws, filename)
         elif t == "pos_master":
-            counts["pos_master"] = importer.import_pos_master(conn, ws)
+            pos_summary = importer.import_pos_master(conn, ws)
+            counts["pos_master"] = pos_summary["total"]
+            counts["pos_diff"] = pos_summary
             counts["technicians"] = importer.derive_technicians(conn)
         elif t == "activity_plan":
             counts["campaigns"] = importer.import_activity_plan(conn, ws)
