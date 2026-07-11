@@ -578,6 +578,19 @@ INSERT OR IGNORE INTO setting_definitions
     ('scoring','neglected_bonus','Bonus za zanedbání','number','50000',0,NULL,NULL,'POS skóre',40),
     ('scoring','min_gap_penalty','Penalizace pod min. rozestup','number','-1000000',NULL,0,NULL,'POS skóre',50),
     ('scoring','technician_score','Vzorec skóre technika (JSON)','json','{"visits":0.4,"km_efficiency":0.3,"campaign_fulfilment":0.3}',NULL,NULL,NULL,'Technik skóre',60),
+    -- engine constants: business tuning that used to be hardcoded engine
+    -- defaults. Defaults here MATCH the engine's own fallbacks exactly, so
+    -- until the manager changes one, the plan is byte-identical to before.
+    -- engine_config overlays only explicitly-overridden values onto CONTROL /
+    -- SCORE_PROFILES / PARETO_GROUPS before planning.
+    ('engine','premium_top_percent','Prémiový podíl POS (Pareto top %)','number','20',1,100,NULL,'Priorita',10),
+    ('engine','geo_cluster_radius_km','Geo-cluster: poloměr (km)','number','3',0,50,NULL,'Trasa / clustering',20),
+    ('engine','geo_cluster_bonus_factor','Geo-cluster: síla bonusu','number','0.01',0,1,NULL,'Trasa / clustering',30),
+    ('engine','geo_cluster_max_bonus','Geo-cluster: strop bonusu','number','5000',0,NULL,NULL,'Trasa / clustering',40),
+    ('engine','urgency_boost_max','Urgence: max. boost před termínem','number','20000',0,NULL,NULL,'Proaktivita',50),
+    ('engine','urgency_ramp_start_ratio','Urgence: od jaké části termínu náběh (0-1)','number','0.5',0,1,NULL,'Proaktivita',60),
+    ('engine','sync_window_weeks','Okno pro změnu kampaně (týdny) – drží prémiové POS','number','1',0,12,NULL,'Activity plán',70),
+    ('engine','gps_extra_radius_meters','GPS extra návštěvy: poloměr (m)','number','300',0,5000,NULL,'GPS extra',80),
     -- dashboard
     ('dashboard','default_kpis','Výchozí KPI','json','["plan_fulfilment_pct","visits","km","route_efficiency","campaign_status"]',NULL,NULL,NULL,'KPI',10),
     ('dashboard','refresh_seconds','Obnovení (s)','number','0',0,3600,NULL,'Obecné',20),

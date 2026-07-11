@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<link rel="stylesheet" href="styles.css?v=30">
+<link rel="stylesheet" href="styles.css?v=31">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -26,7 +26,7 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v30</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v31</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard"><span class="si-ico" data-ico="grid"></span> Přehled</button>
       <button class="side-item" data-nav="import"><span class="si-ico" data-ico="upload"></span> Import dat</button>
@@ -507,6 +507,12 @@
       <!-- LEVEL 2: engine parameters (advanced) -->
       <div class="cfg-level-body hidden" data-level="engine">
         <section class="card">
+          <h2>Inventura parametrů plánovače <span class="badge">co planner používá při rozhodování</span></h2>
+          <p class="hint">Kompletní seznam obchodních konstant a vah, které engine používá, když rozhoduje – včetně výchozí hodnoty, aktuální hodnoty a toho, <strong>co v algoritmu řídí</strong>. Nic není napevno v kódu; každý parametr jde upravit níže. „Upraveno" = liší se od výchozího enginu.</p>
+          <div id="engine-inventory-out"></div>
+        </section>
+
+        <section class="card">
           <h2>Business pravidla enginu <span class="badge">odstup · hold-back · kapacita · GPS · zanedbání</span></h2>
           <p class="hint">Technické parametry algoritmu. Zapni/vypni pravidlo a uprav parametry (minimální odstup, hold-back, GPS tolerance, max. návštěv/den, bonus za zanedbání). Většina uživatelů to nemusí měnit.</p>
           <div id="rules-biz-out"></div>
@@ -535,6 +541,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=30"></script>
+<script src="app.js?v=31"></script>
 </body>
 </html>

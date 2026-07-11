@@ -587,6 +587,23 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .model-tog { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-3); font-weight: 600; }
 .model-tog em { font-style: normal; }
 
+/* engine parameter inventory */
+.inv-grp { margin-top: 16px; }
+.inv-grp:first-child { margin-top: 4px; }
+.inv-grp-h { font-weight: 680; font-size: 13.5px; margin-bottom: 8px; }
+.inv-tbl-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-md); }
+.inv-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.inv-tbl th { text-align: left; font-weight: 640; color: var(--text-3); font-size: 11px; text-transform: uppercase;
+  letter-spacing: .03em; padding: 8px 12px; background: var(--panel-2); border-bottom: 1px solid var(--border); }
+.inv-tbl td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.inv-tbl tr:last-child td { border-bottom: none; }
+.inv-drives { max-width: 34ch; }
+.inv-val { font-weight: 640; white-space: nowrap; }
+.inv-def { color: var(--text-3); white-space: nowrap; }
+.inv-tgt code { font-size: 11px; color: var(--text-3); }
+.inv-changed .inv-val { color: var(--accent); }
+.inv-changed td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+
 @media (max-width: 860px) {
   .sidebar { width: 60px; padding: 14px 8px; }
   .side-logo { justify-content: center; font-size: 0; } .side-logo .side-mark { font-size: 20px; }

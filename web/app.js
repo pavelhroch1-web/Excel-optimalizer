@@ -1462,7 +1462,7 @@ async function loadBusinessRules() {
   } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
 }
 
-const _SET_NS = { planner: "Plánovač", optimization: "Optimalizace", scoring: "Skóre (bonusy/penalizace)", map: "Mapa", dashboard: "Dashboard", report: "Report" };
+const _SET_NS = { planner: "Plánovač", scoring: "Skóre (PPT · bonusy · penalizace)", engine: "Engine konstanty", optimization: "Optimalizace", map: "Mapa", dashboard: "Dashboard", report: "Report" };
 let _setNs = "planner";
 
 async function loadSettingsTabs() {
@@ -1505,6 +1505,7 @@ async function loadSettings() {
         await apiJson(`/api/settings/${_setNs}/${encodeURIComponent(inp.dataset.key)}`,
           { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value }) });
         _cfgToast();
+        if (_setNs === "scoring" || _setNs === "engine") loadEngineInventory && loadEngineInventory();
       });
     });
   } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
@@ -1598,6 +1599,37 @@ function _wireModel(el) {
   el.querySelectorAll(".model-bool").forEach((cb) => cb.addEventListener("change", () => put(cb.dataset, cb.checked)));
   el.querySelectorAll(".model-choice").forEach((s) => s.addEventListener("change", () => put(s.dataset, s.value)));
   el.querySelectorAll(".model-num").forEach((i) => i.addEventListener("change", () => put(i.dataset, i.value === "" ? null : parseFloat(i.value))));
+}
+
+// Inventura parametrů: read-only map of every business constant the planner
+// uses when deciding (default vs effective vs what it drives). Nothing hidden,
+// nothing hardcoded - each row is editable in the settings below.
+const _INV_GROUPS = { scoring: "Skóre POS (na čem stojí výběr)", engine: "Engine konstanty (trasa · urgence · Activity plán)" };
+
+async function loadEngineInventory() {
+  const el = document.getElementById("engine-inventory-out");
+  if (!el) return;
+  el.innerHTML = `<p class="pd-sub">Načítám…</p>`;
+  try {
+    const params = (await apiJson("/api/engine/inventory")).parameters;
+    if (!params.length) { el.innerHTML = `<p class="pd-sub">—</p>`; return; }
+    const byNs = {};
+    params.forEach((p) => (byNs[p.namespace] = byNs[p.namespace] || []).push(p));
+    el.innerHTML = Object.keys(byNs).map((ns) => {
+      const rows = byNs[ns].map((p) => {
+        const changed = p.overridden && String(p.value) !== String(p.default);
+        return `<tr class="${changed ? "inv-changed" : ""}">` +
+          `<td class="inv-drives">${esc(p.drives)}</td>` +
+          `<td class="inv-val">${esc(String(p.value))}${changed ? ` <span class="pd-chip">upraveno</span>` : ""}</td>` +
+          `<td class="inv-def">${esc(String(p.default))}</td>` +
+          `<td class="inv-tgt"><code>${esc(p.target)}</code></td></tr>`;
+      }).join("");
+      return `<div class="inv-grp"><div class="inv-grp-h">${esc(_INV_GROUPS[ns] || ns)}</div>` +
+        `<div class="inv-tbl-wrap"><table class="inv-tbl"><thead><tr>` +
+        `<th>Co řídí</th><th>Aktuálně</th><th>Výchozí</th><th>Cíl v enginu</th></tr></thead>` +
+        `<tbody>${rows}</tbody></table></div></div>`;
+    }).join("");
+  } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
 }
 
 // two-level config: Plánovací model vs Pokročilé nastavení enginu
@@ -2451,6 +2483,7 @@ function showView(name) {
       loadCadence && loadCadence();
       loadModel && loadModel();
       loadTechnicians && loadTechnicians();
+      loadEngineInventory && loadEngineInventory();
       loadBusinessRules && loadBusinessRules();
       loadSettingsTabs && loadSettingsTabs();
     }

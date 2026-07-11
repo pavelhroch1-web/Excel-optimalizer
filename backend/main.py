@@ -1079,6 +1079,16 @@ if LOCAL_MODE:
         model_config.reset(section, match_key, col)
         return {"ok": True}
 
+    # Engine business-parameter inventory: every business constant / score
+    # weight the engine uses when deciding, its default, effective value, and
+    # what part of the algorithm it drives. Read-out for the "Inventura
+    # parametrů" screen so nothing the planner uses is invisible or hardcoded.
+    import engine_config  # noqa: E402
+
+    @app.get("/api/engine/inventory", dependencies=[Depends(require_auth)])
+    def engine_inventory():
+        return {"parameters": engine_config.inventory()}
+
     # Settings platform: configure planner/optimization/dashboard/report/map/
     # scoring from the app. Definitions drive a generic admin UI; values override.
     import settings as _settings  # noqa: E402
