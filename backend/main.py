@@ -668,6 +668,28 @@ if LOCAL_MODE:
     def data_summary():
         return {t: db.get(f"SELECT COUNT(*) AS c FROM {t}")[0]["c"] for t in _DATA_TABLES}
 
+    # Automatic import: drop a file, the system detects its type and processes it.
+    import auto_import  # noqa: E402
+
+    @app.post("/api/import/auto", dependencies=[Depends(require_auth)])
+    async def import_auto(file: UploadFile = File(...)):
+        path, prov = await _save_upload(file)
+        try:
+            return auto_import.import_file(path, prov["filename"])
+        finally:
+            os.remove(path)
+
+    # Automatic anomaly alerts.
+    import alerts as _alerts  # noqa: E402
+
+    @app.get("/api/alerts", dependencies=[Depends(require_auth)])
+    def get_alerts():
+        return {"alerts": _alerts.list_alerts()}
+
+    @app.post("/api/alerts/recompute", dependencies=[Depends(require_auth)])
+    def recompute_alerts():
+        return {"ok": True, "count": _alerts.recompute()}
+
     # Hard-exclude POS from planning (manager blacklist). Paste POS IDs; they
     # are injected into the engine BLACKLIST by db_state and never planned.
     import re as _re

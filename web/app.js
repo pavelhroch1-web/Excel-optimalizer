@@ -63,6 +63,7 @@ function showApp() {
   loadPlannerModes();
   loadRouteTechnicians();
   loadExclusionCount();
+  loadAlerts();
 }
 function showLogin() {
   appScreen.classList.add("hidden");
@@ -1008,6 +1009,53 @@ on("planner-whatif-form", "submit", async (e) => {
   } catch (err) {
     document.getElementById("planner-compare").innerHTML = `<p class="result err">Chyba: ${esc(err.message)}</p>`;
   }
+});
+
+// ---- automatic import + alerts --------------------------------------------
+
+const _TYPE_LABEL = { workbook: "kompletní workbook", salesapp: "SalesApp", pos_master: "POS Master", activity_plan: "Activity Plan", unknown: "neznámý" };
+
+on("auto-import-form", "submit", async (e) => {
+  e.preventDefault();
+  const f = document.getElementById("auto-file").files[0];
+  if (!f) { setResult("auto-import-result", "Vyber soubor.", "err"); return; }
+  setResult("auto-import-result", "Zpracovávám…", "");
+  try {
+    const fd = new FormData(); fd.append("file", f);
+    const res = await apiFetch("/api/import/auto", { method: "POST", body: fd });
+    const r = await res.json();
+    if (r.detected === "unknown") { setResult("auto-import-result", r.error || "Nerozpoznaný typ.", "err"); return; }
+    const counts = Object.entries(r.counts || {}).map(([k, v]) => `${k}: ${v}`).join(", ");
+    setResult("auto-import-result", `Rozpoznáno: ${_TYPE_LABEL[r.detected] || r.detected}. ${counts}.`, "ok");
+    loadAlerts(); loadStatus && loadStatus();
+  } catch (err) { setResult("auto-import-result", "Chyba: " + err.message, "err"); }
+});
+
+function renderAlerts(list) {
+  if (!list.length) return `<p class="pd-sub">Žádná upozornění. 👍</p>`;
+  const color = (s) => s === "warn" ? "#B3453A" : s === "info" ? "var(--warn)" : "var(--text-dim)";
+  return list.map((a) => {
+    const p = a.payload || {};
+    return `<div class="pl-tech"><span class="dot" style="width:10px;height:10px;border-radius:50%;background:${color(p.severity)};flex:none"></span>` +
+      `<span style="flex:1">${esc(p.message || "")}</span></div>`;
+  }).join("");
+}
+
+async function loadAlerts() {
+  const el = document.getElementById("alerts-out");
+  if (!el) return;
+  try {
+    const list = (await apiJson("/api/alerts")).alerts;
+    document.getElementById("alerts-count").textContent = list.length;
+    el.innerHTML = renderAlerts(list);
+  } catch (e) { /* ignore */ }
+}
+
+on("alerts-refresh", "click", async () => {
+  const el = document.getElementById("alerts-out");
+  el.innerHTML = "<p class='result'>Přepočítávám…</p>";
+  try { await postJson("/api/alerts/recompute", {}); loadAlerts(); }
+  catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
 });
 
 // ---- plan vs reality (SalesApp) -------------------------------------------

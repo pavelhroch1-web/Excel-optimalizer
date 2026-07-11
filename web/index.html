@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Field Force Optimizer</title>
-<link rel="stylesheet" href="styles.css?v=15">
-<script src="config.js?v=15"></script>
+<link rel="stylesheet" href="styles.css?v=16">
+<script src="config.js?v=16"></script>
 </head>
 <body>
 
@@ -23,7 +23,7 @@
 
 <div id="app-screen" class="screen hidden">
   <header>
-    <h1>Field Force Optimizer <span class="ver">v15</span></h1>
+    <h1>Field Force Optimizer <span class="ver">v16</span></h1>
     <button id="logout" class="ghost">Odhlásit</button>
   </header>
 
@@ -40,6 +40,25 @@
       <div class="label">Draft</div>
       <div class="value" id="draft-state">—</div>
     </div>
+  </section>
+
+  <!-- AUTOMATIC IMPORT: drop a file, the system detects & processes it -->
+  <section class="card">
+    <h2>Automatický import <span class="badge">rozpozná sám</span></h2>
+    <p class="hint">Nahraj Excel – systém sám pozná, jestli je to POS Master, SalesApp nebo Activity Plan, zpracuje ho a přepočítá metriky i upozornění. Žádné ruční nastavování.</p>
+    <form id="auto-import-form" class="row">
+      <input type="file" id="auto-file" accept=".xlsx">
+      <button type="submit" class="primary">Nahrát a zpracovat</button>
+    </form>
+    <p id="auto-import-result" class="result"></p>
+  </section>
+
+  <!-- ALERTS: the system surfaces anomalies itself -->
+  <section class="card">
+    <h2>Upozornění <span class="badge" id="alerts-count">0</span></h2>
+    <p class="hint">Systém sám hlásí odchylky (dlouho/krátko na POS, málo aktivní technik, dlouhodobě neobsloužené POS…). Přepočítá se po každém importu SalesApp.</p>
+    <div class="row"><button id="alerts-refresh" class="ghost">Přepočítat upozornění</button></div>
+    <div id="alerts-out"></div>
   </section>
 
   <!-- PLANNER: decision-support work tool -->
@@ -365,6 +384,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=15"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>

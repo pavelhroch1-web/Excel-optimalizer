@@ -51,10 +51,8 @@ _POS_MAP = {
 }
 
 
-def import_pos_master(conn, wb) -> int:
-    if "POS_MASTER" not in wb.sheetnames:
-        return 0
-    hidx, it, _ = _rows(wb["POS_MASTER"])
+def import_pos_master(conn, ws) -> int:
+    hidx, it, _ = _rows(ws)
     n = 0
     for row in it:
         pid = _g(row, hidx, "posId")
@@ -82,10 +80,7 @@ def import_pos_master(conn, wb) -> int:
     return n
 
 
-def import_salesapp(conn, wb, filename: str | None = None) -> int:
-    if "SALESAPP_IMPORT" not in wb.sheetnames:
-        return 0
-    ws = wb["SALESAPP_IMPORT"]
+def import_salesapp(conn, ws, filename: str | None = None) -> int:
     hidx, it, header = _rows(ws)
     purpose_cols = [(str(h), i) for i, h in enumerate(header) if str(h).startswith("Účel")]
 
@@ -144,10 +139,8 @@ def _flush_visits(conn, batch):
         batch)
 
 
-def import_activity_plan(conn, wb) -> int:
-    if "ACTIVITY_PLAN" not in wb.sheetnames:
-        return 0
-    hidx, it, _ = _rows(wb["ACTIVITY_PLAN"])
+def import_activity_plan(conn, ws) -> int:
+    hidx, it, _ = _rows(ws)
     conn.execute("DELETE FROM campaigns")
     n = 0
     for row in it:
@@ -223,9 +216,9 @@ def import_workbook(path: str, filename: str | None = None) -> dict:
     conn = db.connect()
     try:
         result = {
-            "pos_master": import_pos_master(conn, wb),
-            "salesapp_visits": import_salesapp(conn, wb, filename),
-            "campaigns": import_activity_plan(conn, wb),
+            "pos_master": import_pos_master(conn, wb["POS_MASTER"]) if "POS_MASTER" in wb.sheetnames else 0,
+            "salesapp_visits": import_salesapp(conn, wb["SALESAPP_IMPORT"], filename) if "SALESAPP_IMPORT" in wb.sheetnames else 0,
+            "campaigns": import_activity_plan(conn, wb["ACTIVITY_PLAN"]) if "ACTIVITY_PLAN" in wb.sheetnames else 0,
             "config": import_config(conn, wb),
         }
         result["technicians"] = derive_technicians(conn)
