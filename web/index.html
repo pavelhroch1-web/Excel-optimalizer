@@ -6,8 +6,8 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<link rel="stylesheet" href="styles.css?v=22">
-<script src="config.js?v=22"></script>
+<link rel="stylesheet" href="styles.css?v=23">
+<script src="config.js?v=23"></script>
 </head>
 <body>
 
@@ -25,7 +25,7 @@
 
 <div id="app-screen" class="screen hidden">
   <header>
-    <h1>Field Force Optimizer <span class="ver">v22</span></h1>
+    <h1>Field Force Optimizer <span class="ver">v23</span></h1>
     <button id="logout" class="ghost">Odhlásit</button>
   </header>
 
@@ -204,19 +204,24 @@
     <div id="reality-out"></div>
   </section>
 
-  <!-- ACTUAL ROUTE MAP: how the technician really drove (order from times) -->
-  <section class="card planner-card">
-    <h2>Reálná trasa <span class="badge">SalesApp + mapa</span></h2>
-    <p class="hint">Jak technik reálně jezdil – pořadí návštěv známe z časů. Ukáže trasu na mapě, najeté km, čas na cestě i čas na jednotlivých POS.</p>
+  <!-- TECHNICIAN ANALYTICS: interactive route map + metrics + efficiency -->
+  <section class="card">
+    <h2>Analýza techniků <span class="badge">SalesApp · mapa · efektivita</span></h2>
+    <p class="hint">Kompletní rozbor dne technika ze SalesApp: skutečná trasa a pořadí návštěv, najeté km a přejezdy z mapových podkladů, čas na cestě i na POS, produktivita a vrstvy nad mapou (plán, navštíveno, projeto-ale-nenavštíveno, příležitosti v okolí). Systém sám hlásí dlouhé přesuny a nevyužité příležitosti.</p>
     <form id="route-actual-form" class="row">
       <label>Technik<select id="ract-tech"></select></label>
       <label>Den<select id="ract-day"></select></label>
-      <button type="submit" class="primary">Zobrazit trasu</button>
+      <label>Okolí trasy (km)<input type="number" id="ract-radius" value="2" min="0.5" max="10" step="0.5" style="width:90px"></label>
+      <button type="submit" class="primary">Analyzovat den</button>
+      <button type="button" id="ract-trends-btn" class="ghost">Dlouhodobé trendy</button>
     </form>
     <p id="ract-result" class="result"></p>
     <div id="ract-totals"></div>
-    <div id="ract-map" style="height:420px;border-radius:12px;overflow:hidden;margin:10px 0;display:none"></div>
+    <div id="ract-findings"></div>
+    <div id="ract-layers" class="ract-layers" style="display:none"></div>
+    <div id="ract-map" style="height:460px;border-radius:12px;overflow:hidden;margin:10px 0;display:none"></div>
     <div id="ract-legs"></div>
+    <div id="ract-trends"></div>
   </section>
 
   <!-- CLOUD GENERATE: heavy plan on GitHub Actions (no OOM here) -->
@@ -480,6 +485,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=22"></script>
+<script src="app.js?v=23"></script>
 </body>
 </html>

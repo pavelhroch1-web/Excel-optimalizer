@@ -1042,7 +1042,18 @@ async function loadRactDays() {
   } catch (e) { sel.innerHTML = `<option value="">—</option>`; }
 }
 
-function renderRouteMap(day) {
+let _ractLayers = {};              // Leaflet layer groups by name
+let _ractOn = { visited: true, planned: false, passedBy: false, opportunities: true };
+let _analytics = null;             // last analysis result (re-toggle without refetch)
+
+const _LAYER_META = {
+  visited: { label: "Navštíveno (trasa)", color: "#0F7C77" },
+  planned: { label: "V plánu", color: "#2C6FB5" },
+  passedBy: { label: "Projeto, nenavštíveno", color: "#8A8D93" },
+  opportunities: { label: "Příležitosti po termínu", color: "#C42B1C" },
+};
+
+function _ensureMap() {
   const mapDiv = document.getElementById("ract-map");
   mapDiv.style.display = "block";
   if (typeof L === "undefined") { mapDiv.style.display = "none"; return false; }
@@ -1051,22 +1062,92 @@ function renderRouteMap(day) {
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
       { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(_ractMap);
   }
-  if (_ractLayer) _ractLayer.remove();
-  _ractLayer = L.layerGroup().addTo(_ractMap);
-  const pts = [];
-  for (const s of day.stops) {
-    if (s.lat == null || s.lon == null) continue;
-    pts.push([s.lat, s.lon]);
-    L.marker([s.lat, s.lon]).addTo(_ractLayer)
-      .bindPopup(`#${s.seq} ${esc(s.name || s.pos || "")}<br>${esc(s.city || "")}<br>${s.started ? s.started.slice(-8) : ""} · ${s.onPosMin ?? "—"} min na POS`)
-      .bindTooltip(String(s.seq), { permanent: true, direction: "center", className: "ract-num" });
-  }
-  if (pts.length) {
-    L.polyline(pts, { color: "#12807C", weight: 3, opacity: 0.7 }).addTo(_ractLayer);
-    _ractMap.fitBounds(pts, { padding: [30, 30] });
-  }
-  setTimeout(() => _ractMap.invalidateSize(), 50);
   return true;
+}
+
+function renderAnalyticsMap(res) {
+  if (!_ensureMap()) return false;
+  Object.values(_ractLayers).forEach((lg) => lg.remove());
+  _ractLayers = {};
+  const L2 = res.layers;
+  const bounds = [];
+
+  // visited route: numbered markers + line
+  const vg = L.layerGroup();
+  const pts = [];
+  res.stops.forEach((s) => {
+    if (s.lat == null || s.lon == null) return;
+    pts.push([s.lat, s.lon]); bounds.push([s.lat, s.lon]);
+    L.marker([s.lat, s.lon]).addTo(vg)
+      .bindPopup(`#${s.seq} <b>${esc(s.name || s.pos || "")}</b><br>${esc(s.city || "")}<br>${s.started ? String(s.started).slice(-8) : ""} · ${s.onPosMin ?? "—"} min na POS`)
+      .bindTooltip(String(s.seq), { permanent: true, direction: "center", className: "ract-num" });
+  });
+  if (pts.length) L.polyline(pts, { color: _LAYER_META.visited.color, weight: 3, opacity: 0.75 }).addTo(vg);
+  _ractLayers.visited = vg;
+
+  // planned POS (not already visited markers): blue rings
+  const pg = L.layerGroup();
+  (L2.planned || []).forEach((p) => {
+    if (p.lat == null || p.lon == null || p.visited) return;
+    bounds.push([p.lat, p.lon]);
+    L.circleMarker([p.lat, p.lon], { radius: 6, color: _LAYER_META.planned.color, weight: 2, fillOpacity: 0.15 })
+      .addTo(pg).bindPopup(`V plánu (neobslouženo): <b>${esc(p.name || p.pos)}</b><br>${esc(p.city || "")}`);
+  });
+  _ractLayers.planned = pg;
+
+  // passed-by not visited: small grey dots
+  const bg = L.layerGroup();
+  (L2.passedBy || []).forEach((p) => {
+    L.circleMarker([p.lat, p.lon], { radius: 4, color: _LAYER_META.passedBy.color, weight: 1, fillOpacity: 0.5 })
+      .addTo(bg).bindPopup(`Projeto (${p.distKm} km od trasy): <b>${esc(p.name || p.pos)}</b><br>${esc(p.city || "")}<br><span class="pos-link" data-pos="${esc(p.pos)}">detail</span>`);
+  });
+  _ractLayers.passedBy = bg;
+
+  // opportunities (cadence overdue near route): red highlighted
+  const og = L.layerGroup();
+  (L2.opportunities || []).forEach((p) => {
+    bounds.push([p.lat, p.lon]);
+    L.circleMarker([p.lat, p.lon], { radius: 8, color: _LAYER_META.opportunities.color, weight: 2, fillColor: _LAYER_META.opportunities.color, fillOpacity: 0.35 })
+      .addTo(og).bindPopup(`Příležitost (${p.cadence}, ${p.distKm} km): <b>${esc(p.name || p.pos)}</b><br>poslední: ${p.lastVisit ? String(p.lastVisit).slice(0, 10) : "nikdy"}<br><span class="pos-link" data-pos="${esc(p.pos)}">detail</span>`);
+  });
+  _ractLayers.opportunities = og;
+
+  // apply toggles
+  Object.keys(_ractLayers).forEach((k) => { if (_ractOn[k]) _ractLayers[k].addTo(_ractMap); });
+  if (bounds.length) _ractMap.fitBounds(bounds, { padding: [30, 30] });
+  setTimeout(() => _ractMap.invalidateSize(), 50);
+  _ractMap.on("popupopen", (e) => {
+    e.popup._contentNode && e.popup._contentNode.querySelectorAll(".pos-link").forEach((el) =>
+      el.addEventListener("click", () => openPosDetail(el.dataset.pos)));
+  });
+  return true;
+}
+
+function renderLayerToggles(res) {
+  const el = document.getElementById("ract-layers");
+  el.style.display = "flex";
+  const counts = {
+    visited: res.stops.length, planned: (res.layers.planned || []).filter((p) => !p.visited).length,
+    passedBy: (res.layers.passedBy || []).length, opportunities: (res.layers.opportunities || []).length,
+  };
+  el.innerHTML = Object.entries(_LAYER_META).map(([k, m]) =>
+    `<label class="lay-toggle"><input type="checkbox" data-layer="${k}" ${_ractOn[k] ? "checked" : ""}>` +
+    `<span class="lay-dot" style="background:${m.color}"></span>${m.label} <b>${counts[k]}</b></label>`).join("");
+  el.querySelectorAll("input[data-layer]").forEach((cb) => cb.addEventListener("change", () => {
+    const k = cb.dataset.layer; _ractOn[k] = cb.checked;
+    if (!_ractLayers[k]) return;
+    if (cb.checked) _ractLayers[k].addTo(_ractMap); else _ractLayers[k].remove();
+  }));
+}
+
+function renderFindings(findings) {
+  const el = document.getElementById("ract-findings");
+  if (!findings || !findings.length) { el.innerHTML = ""; return; }
+  el.innerHTML = `<div class="pl-section">Efektivita trasy — co zlepšit</div>` +
+    findings.map((f) => {
+      const cls = f.severity === "warn" ? "st-overdue" : "st-upcoming";
+      return `<div class="finding ${cls}"><span class="stop-dot"></span><span>${esc(f.message)}</span></div>`;
+    }).join("");
 }
 
 on("ract-tech", "change", loadRactDays);
@@ -1075,27 +1156,32 @@ on("route-actual-form", "submit", async (e) => {
   e.preventDefault();
   const tech = document.getElementById("ract-tech").value;
   const day = document.getElementById("ract-day").value;
+  const radius = document.getElementById("ract-radius").value || 2;
   if (!tech || !day) { setResult("ract-result", "Vyber technika a den.", "err"); return; }
-  setResult("ract-result", "Načítám trasu…", "");
+  setResult("ract-result", "Analyzuji den…", "");
+  document.getElementById("ract-trends").innerHTML = "";
   try {
-    const r = await apiJson(`/api/route/actual?technician=${encodeURIComponent(tech)}&date_from=${day}&date_to=${day}`);
-    const d = r.days[0];
-    if (!d) { setResult("ract-result", "Pro tento den nejsou data.", "err"); return; }
+    const res = await apiJson(`/api/analytics/day?technician=${encodeURIComponent(tech)}&date=${day}&radius_km=${radius}`);
+    if (!res.hasData) { setResult("ract-result", res.message || "Pro tento den nejsou data.", "err"); return; }
+    _analytics = res;
+    const m = res.metrics;
     document.getElementById("ract-totals").innerHTML = `<div class="pl-tiles">` +
-      tile("Zastávek", d.stopCount, "návštěv") +
-      tile("Najeto km", d.totalKm, "informativně") +
-      tile("Čas na cestě", Math.round(d.travelMin) + " min", "mezi POS") +
-      tile("Čas na POS", Math.round(d.onPosMin) + " min", "celkem") +
-      tile("Odpracováno", d.workHours != null ? d.workHours + " h" : "—",
-           d.workStart && d.workEnd ? `${d.workStart}–${d.workEnd}` : "z časů návštěv") + `</div>`;
-    const hasMap = renderRouteMap(d);
+      tile("Zastávek", m.visits, "návštěv") +
+      tile("Najeto km", m.totalKm, "mezi POS") +
+      tile("Čas na cestě", Math.round(m.travelMin) + " min", `Ø ${m.avgTravelMin ?? "—"} min/přejezd`) +
+      tile("Čas na POS", Math.round(m.onPosMin) + " min", `Ø ${m.avgOnPosMin ?? "—"} min/POS`) +
+      tile("Odpracováno", m.workHours != null ? m.workHours + " h" : "—", `${m.workStart || ""}–${m.workEnd || ""}`) +
+      tile("Produktivita", m.onPosRatioPct != null ? m.onPosRatioPct + " %" : "—", `čas na POS · ${m.visitsPerWorkHour ?? "—"} návštěv/h`) + `</div>`;
+    renderFindings(res.findings);
+    renderLayerToggles(res);
+    const hasMap = renderAnalyticsMap(res);
     let legsHtml = `<div class="pl-section">Zastávky a přejezdy</div><table class="pd-score-table"><tbody>`;
-    d.stops.forEach((s, i) => {
+    res.stops.forEach((s) => {
       legsHtml += `<tr><td>#${s.seq}</td><td><span class="pos-link" data-pos="${esc(s.pos || "")}">${esc(s.name || s.pos || "")}</span></td>` +
-        `<td>${esc(s.city || "")}</td><td>${s.started ? s.started.slice(-8) : ""}</td>` +
+        `<td>${esc(s.city || "")}</td><td>${s.started ? String(s.started).slice(-8) : ""}</td>` +
         `<td style="text-align:right">${s.onPosMin ?? "—"} min</td></tr>`;
-      const leg = d.legs.find((l) => l.fromSeq === s.seq);
-      if (leg) legsHtml += `<tr><td></td><td colspan="4" style="color:var(--text-dim)">↓ ${leg.km ?? "—"} km · ${leg.travelMin ?? "—"} min jízdy</td></tr>`;
+      const leg = res.legs.find((l) => l.fromSeq === s.seq);
+      if (leg) legsHtml += `<tr><td></td><td colspan="4" style="color:var(--text-3)">↓ ${leg.km ?? "—"} km · ${leg.travelMin ?? "—"} min jízdy</td></tr>`;
     });
     legsHtml += `</tbody></table>`;
     if (!hasMap) legsHtml = `<p class="hint">Mapa se nenačetla (offline?). Trasa je níže.</p>` + legsHtml;
@@ -1104,6 +1190,40 @@ on("route-actual-form", "submit", async (e) => {
     document.querySelectorAll("#ract-legs .pos-link").forEach((el) =>
       el.addEventListener("click", () => el.dataset.pos && openPosDetail(el.dataset.pos)));
   } catch (err) { setResult("ract-result", "Chyba: " + err.message, "err"); }
+});
+
+// long-term trends (simple inline SVG sparklines)
+function _spark(vals, color, w, h) {
+  const nums = vals.filter((v) => v != null);
+  if (nums.length < 2) return "";
+  const mn = Math.min(...nums), mx = Math.max(...nums), rng = mx - mn || 1;
+  const pts = vals.map((v, i) => v == null ? null :
+    `${(i / (vals.length - 1)) * w},${h - ((v - mn) / rng) * (h - 4) - 2}`).filter(Boolean);
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline points="${pts.join(" ")}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/></svg>`;
+}
+
+on("ract-trends-btn", "click", async () => {
+  const tech = document.getElementById("ract-tech").value;
+  if (!tech) { setResult("ract-result", "Vyber technika.", "err"); return; }
+  const el = document.getElementById("ract-trends");
+  el.innerHTML = `<p class="result">Počítám trendy…</p>`;
+  try {
+    const t = await apiJson(`/api/analytics/trends?technician=${encodeURIComponent(tech)}`);
+    const s = t.summary;
+    if (!t.series.length) { el.innerHTML = `<p class="hint">Pro tohoto technika nejsou data k trendům.</p>`; return; }
+    const km = t.series.map((x) => x.km), vis = t.series.map((x) => x.visits), onp = t.series.map((x) => x.avgOnPosMin);
+    el.innerHTML = `<div class="pl-section">Dlouhodobé trendy (${s.days} dní)</div>` +
+      `<div class="pl-tiles">` +
+      tile("Ø návštěv/den", s.avgVisitsPerDay ?? "—", `celkem ${s.totalVisits}`) +
+      tile("Ø km/den", s.avgKmPerDay ?? "—", `celkem ${s.totalKm} km`) +
+      tile("Ø čas na POS", s.avgOnPosMin != null ? s.avgOnPosMin + " min" : "—", "napříč dny") +
+      tile("Ø produktivita", s.avgVisitsPerWorkHour ?? "—", "návštěv/h") + `</div>` +
+      `<table class="pd-score-table"><thead><tr><th>Metrika</th><th>Trend</th></tr></thead><tbody>` +
+      `<tr><td>Návštěvy/den</td><td>${_spark(vis, "#0F7C77", 220, 34)}</td></tr>` +
+      `<tr><td>Km/den</td><td>${_spark(km, "#2C6FB5", 220, 34)}</td></tr>` +
+      `<tr><td>Ø čas na POS</td><td>${_spark(onp, "#9A6206", 220, 34)}</td></tr>` +
+      `</tbody></table>`;
+  } catch (err) { el.innerHTML = `<p class="result err">${esc(err.message)}</p>`; }
 });
 
 // ---- technician configuration ---------------------------------------------

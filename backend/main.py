@@ -971,6 +971,17 @@ if LOCAL_MODE:
     def route_actual_ep(technician: str, date_from: str | None = None, date_to: str | None = None):
         return route_actual.technician_route(technician, date_from, date_to)
 
+    # Route analytics: metrics + map layers + efficiency findings + trends.
+    import route_analytics  # noqa: E402
+
+    @app.get("/api/analytics/day", dependencies=[Depends(require_auth)])
+    def analytics_day(technician: str, date: str, radius_km: float = 2.0):
+        return route_analytics.day(technician, date, radius_km)
+
+    @app.get("/api/analytics/trends", dependencies=[Depends(require_auth)])
+    def analytics_trends(technician: str, days_back: int = 90):
+        return route_analytics.trends(technician, days_back)
+
     import planner_unserved  # noqa: E402
 
     @app.post("/api/planner/unserved", dependencies=[Depends(require_auth)])
