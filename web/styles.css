@@ -233,4 +233,13 @@ button.danger { color: #B3453A; border-color: #B3453A55; }
 /* actual route map: numbered markers */
 .ract-num { background: transparent; border: none; box-shadow: none; color: #fff;
   font-weight: 700; font-size: 11px; text-shadow: 0 0 3px #000, 0 0 3px #000; }
+
+/* ---- Live TourPlan (main screen) ---- */
+.live-card { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.chip { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 8px;
+  border: 1px solid var(--border); white-space: nowrap; }
+.chip.st-done { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, var(--border)); background: color-mix(in srgb, var(--good) 10%, transparent); }
+.chip.st-due { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.chip.st-overdue { color: #B3453A; border-color: color-mix(in srgb, #B3453A 45%, var(--border)); background: color-mix(in srgb, #B3453A 10%, transparent); }
+.chip.st-upcoming { color: var(--text-dim); }
 #ract-map { background: var(--bg); }

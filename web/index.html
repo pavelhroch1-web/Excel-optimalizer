@@ -6,8 +6,8 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<link rel="stylesheet" href="styles.css?v=19">
-<script src="config.js?v=19"></script>
+<link rel="stylesheet" href="styles.css?v=20">
+<script src="config.js?v=20"></script>
 </head>
 <body>
 
@@ -25,7 +25,7 @@
 
 <div id="app-screen" class="screen hidden">
   <header>
-    <h1>Field Force Optimizer <span class="ver">v19</span></h1>
+    <h1>Field Force Optimizer <span class="ver">v20</span></h1>
     <button id="logout" class="ghost">Odhlásit</button>
   </header>
 
@@ -42,6 +42,26 @@
       <div class="label">Draft</div>
       <div class="value" id="draft-state">—</div>
     </div>
+  </section>
+
+  <!-- LIVE TOURPLAN: the main daily working screen -->
+  <section class="card live-card">
+    <h2>Živý TourPlan <span class="badge" id="live-version">—</span></h2>
+    <p class="hint">Publikovaný plán je referenční a zůstává, dokud nepublikuješ novou verzi. Průběžně se proti němu porovnává realita ze SalesApp a odpočítává se čas do další návštěvy každého POS podle cadence (GECO/CORN).</p>
+    <div class="row">
+      <label>Technik<select id="live-tech"><option value="">všichni</option></select></label>
+      <button id="live-refresh" class="ghost">Obnovit</button>
+    </div>
+    <div id="live-board"></div>
+    <div class="pl-whatif">
+      <div class="pl-section">Odpočet do další návštěvy (cadence GECO/CORN) <span id="due-count" class="badge">—</span></div>
+      <p class="hint" style="margin:0 0 8px">POS seřazené podle naléhavosti – nejdřív nikdy nenavštívené a nejvíc po termínu. Návštěva OZ i technika se počítá jako pokrytí.</p>
+      <div class="row">
+        <label>Stav<select id="due-status"><option value="">vše</option><option value="overdue">po termínu</option><option value="dueSoon">brzy splatné</option><option value="ok">v pořádku</option></select></label>
+      </div>
+      <div id="due-out"></div>
+    </div>
+    <p id="live-result" class="result"></p>
   </section>
 
   <!-- AUTOMATIC IMPORT: drop a file, the system detects & processes it -->
@@ -443,6 +463,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=19"></script>
+<script src="app.js?v=20"></script>
 </body>
 </html>

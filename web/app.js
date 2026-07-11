@@ -67,6 +67,8 @@ function showApp() {
   loadReassignments();
   loadAlerts();
   loadRactTechnicians();
+  loadLiveTechnicians();
+  loadLive();
 }
 function showLogin() {
   appScreen.classList.add("hidden");
@@ -1418,6 +1420,123 @@ on("reassign-form", "submit", async (e) => {
     loadReassignments();
   } catch (err) { setResult("reassign-result", "Chyba: " + err.message, "err"); }
 });
+
+// ---- live published TourPlan (main working screen) ------------------------
+
+const _LIVE_STATUS = {
+  done: { label: "Hotovo", cls: "st-done" },
+  due: { label: "Tento týden", cls: "st-due" },
+  overdue: { label: "Zpožděno", cls: "st-overdue" },
+  upcoming: { label: "Naplánováno", cls: "st-upcoming" },
+};
+
+function _cd(days) {
+  if (days == null) return "—";
+  if (days < 0) return `${-days} dní po termínu`;
+  if (days === 0) return "dnes";
+  return `za ${days} dní`;
+}
+
+function renderBoard(b) {
+  if (!b.published) return `<p class="pd-sub">${esc(b.message || "Zatím nebyl publikován žádný plán.")}</p>`;
+  const r = b.rollup;
+  let html = `<div class="pl-tiles">` +
+    tile("Verze", b.version || "—", `${b.versionCount} publikováno`) +
+    tile("Týdny plánu", b.weekRange || "—", `teď je týden ${b.currentWeek}`) +
+    tile("Zastávek", r.total, "v publikovaném plánu") +
+    tile("Splněno", r.done, `${r.fulfilmentPct ?? 0} %`, r.fulfilmentPct >= 80 ? "good" : "") +
+    tile("Zpožděno", r.overdue, "z plánu", r.overdue ? "bad" : "good") +
+    tile("Naplánováno", r.upcoming, "před termínem") + `</div>`;
+  // per-week strip
+  if (b.perWeek && b.perWeek.length) {
+    html += `<div class="pl-section">Podle týdnů</div><table class="pd-score-table"><thead><tr><th>Týden</th><th>Zastávek</th><th>Hotovo</th><th>Zpožděno</th></tr></thead><tbody>` +
+      b.perWeek.map((w) => `<tr><td><strong>${w.week}</strong></td><td>${w.stops}</td>` +
+        `<td>${w.done}</td><td>${w.overdue || "—"}</td></tr>`).join("") + `</tbody></table>`;
+  }
+  // upcoming stops (limit for readability), most imminent first
+  const stops = b.stops.filter((s) => s.status !== "done")
+    .sort((a, z) => (a.daysUntil ?? 9999) - (z.daysUntil ?? 9999)).slice(0, 60);
+  if (stops.length) {
+    html += `<div class="pl-section">Nadcházející zastávky</div><table class="pd-score-table"><thead><tr>` +
+      `<th>Týd</th><th>Datum</th><th>Technik</th><th>POS</th><th>Stav</th><th>Odpočet</th></tr></thead><tbody>` +
+      stops.map((s) => {
+        const st = _LIVE_STATUS[s.status] || { label: s.status, cls: "" };
+        return `<tr><td>${s.week ?? "—"}</td><td>${esc(s.planDate || "—")}</td>` +
+          `<td>${esc(s.technician || "—")}</td>` +
+          `<td><span class="pos-link" data-pos="${esc(s.pos || "")}">${esc(s.name || s.pos || "")}</span></td>` +
+          `<td><span class="chip ${st.cls}">${st.label}</span></td>` +
+          `<td>${_cd(s.daysUntil)}</td></tr>`;
+      }).join("") + `</tbody></table>`;
+    if (b.stops.filter((s) => s.status !== "done").length > 60)
+      html += `<p class="hint">Zobrazeno prvních 60 nejbližších zastávek.</p>`;
+  }
+  return html;
+}
+
+function renderDue(d) {
+  const c = d.counts;
+  document.getElementById("due-count").textContent = d.total;
+  let html = `<div class="pl-tiles">` +
+    tile("Po termínu", c.overdue, "mimo cadence", c.overdue ? "bad" : "good") +
+    tile("Brzy splatné", c.dueSoon, "do 14 dní", c.dueSoon ? "warn" : "") +
+    tile("V pořádku", c.ok, "v cadence", "good") +
+    tile("Nikdy nenavštíveno", c.neverVisited, "priorita", c.neverVisited ? "warn" : "") + `</div>`;
+  if (!d.posList.length) return html + `<p class="pd-sub">Žádné POS v tomto stavu.</p>`;
+  html += `<table class="pd-score-table"><thead><tr><th>POS</th><th>Cadence</th><th>Poslední návštěva</th><th>Splatnost</th><th>Odpočet</th></tr></thead><tbody>` +
+    d.posList.map((p) => `<tr><td><span class="pos-link" data-pos="${esc(p.pos)}">${esc(p.name || p.pos)}</span></td>` +
+      `<td>${esc(p.cadence)} (${p.cadenceWeeks} t.)</td><td>${esc(p.lastVisit || "nikdy")}</td>` +
+      `<td>${esc(p.nextDue || "—")}</td><td>${_cd(p.daysRemaining)}</td></tr>`).join("") +
+    `</tbody></table><p class="hint">Zobrazeno ${d.shown} z ${d.total}.</p>`;
+  return html;
+}
+
+function _bindPosLinks(scope) {
+  document.querySelectorAll(`${scope} .pos-link`).forEach((el) =>
+    el.addEventListener("click", () => el.dataset.pos && openPosDetail(el.dataset.pos)));
+}
+
+async function loadLive() {
+  const el = document.getElementById("live-board");
+  if (!el) return;
+  const tech = document.getElementById("live-tech").value;
+  try {
+    const b = await apiJson("/api/live/board" + (tech ? `?technician=${encodeURIComponent(tech)}` : ""));
+    document.getElementById("live-version").textContent = b.published ? (b.version || "publikováno") : "nepublikováno";
+    el.innerHTML = renderBoard(b);
+    _bindPosLinks("#live-board");
+  } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+  loadDue();
+}
+
+async function loadDue() {
+  const el = document.getElementById("due-out");
+  if (!el) return;
+  const tech = document.getElementById("live-tech").value;
+  const status = document.getElementById("due-status").value;
+  try {
+    const q = new URLSearchParams();
+    if (tech) q.set("technician", tech);
+    if (status) q.set("status", status);
+    const d = await apiJson("/api/live/next-due?" + q.toString());
+    el.innerHTML = renderDue(d);
+    _bindPosLinks("#due-out");
+  } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+}
+
+async function loadLiveTechnicians() {
+  const sel = document.getElementById("live-tech");
+  if (!sel) return;
+  try {
+    const list = (await apiJson("/api/technicians")).technicians
+      .filter((t) => t.role === "TECHNIK" && t.active);
+    sel.innerHTML = `<option value="">všichni</option>` +
+      list.map((t) => `<option>${esc(t.name)}</option>`).join("");
+  } catch (e) { /* ignore */ }
+}
+
+on("live-refresh", "click", loadLive);
+on("live-tech", "change", loadLive);
+on("due-status", "change", loadDue);
 
 // ---- route planner (long-term per-technician plan) ------------------------
 

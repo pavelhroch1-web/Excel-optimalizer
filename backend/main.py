@@ -867,6 +867,17 @@ if LOCAL_MODE:
         """Informational: who visited this POS (technician vs OZ), when, what."""
         return pos_insights.pos_visit_summary(pos_id)
 
+    # Living published TourPlan (main working screen) + cadence countdown.
+    import live_plan  # noqa: E402
+
+    @app.get("/api/live/board", dependencies=[Depends(require_auth)])
+    def live_board(technician: str | None = None):
+        return live_plan.board(technician)
+
+    @app.get("/api/live/next-due", dependencies=[Depends(require_auth)])
+    def live_next_due(technician: str | None = None, status: str | None = None):
+        return live_plan.next_due(technician, status)
+
     # Route Planner: long-term per-technician visit plan (read model over the
     # draft the engine produced; km are supportive info only).
     import route_planner  # noqa: E402
