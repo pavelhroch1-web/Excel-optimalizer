@@ -76,11 +76,25 @@ lock the weeks, so history and future dashboards query SQL, not xlsx.
 - **Export:** Tour Plan, reports (SQLite → xlsx).
 Nothing "works" inside a spreadsheet anymore.
 
-## Build / distribution
-- `desktop_client/build_desktop_exe.bat` → PyInstaller `--onefile` →
-  `dist/FieldForceOptimizer.exe` (portable). Bundles `web/`, `schema.sql`, and
-  the scaffold snapshot.
-- Later, optionally an Inno Setup installer for a nicer first run.
+## Build / distribution — portable, no install, no admin
+The corporate constraint is firm: **unzip a folder and run**, no installer, no
+admin rights, no writes outside the app's own folder. The build and runtime are
+designed for exactly that:
+- `desktop_client/build_desktop_exe.bat` → PyInstaller **`--onedir`** →
+  `dist/FieldForceOptimizer/` (exe + `_internal/`), zipped to
+  `dist/FieldForceOptimizer-portable.zip`. `--onedir` (not `--onefile`) is
+  deliberate: onefile unpacks to `%TEMP%` on every launch, which is slow and can
+  be blocked on locked-down PCs; onedir runs straight from the unzipped folder.
+- Bundles `web/`, `schema.sql`, and the scaffold snapshot.
+- **All writes stay inside the app folder.** `db.data_dir()` puts the SQLite DB
+  + snapshots in `FieldForceData/` next to the exe (falls back to
+  `%LOCALAPPDATA%` only if that folder is read-only). `desktop_app.py` also
+  redirects the process temp dir (`tempfile.tempdir` + `TMP/TEMP/TMPDIR`) into
+  `FieldForceData/tmp` when frozen, so even intermediate temp files never touch
+  `%TEMP%`. No registry, no Program Files, no admin.
+- Deployment: unzip anywhere (desktop, network share, USB), run
+  `FieldForceOptimizer.exe`. Config + data live in `FieldForceData/` beside it,
+  so the whole app is copy/move/backup-able as one folder.
 
 ### Planning Engine reads config from the DB (db_state)
 `db_state.configure(state, mode, start_week, length)` maps the enabled

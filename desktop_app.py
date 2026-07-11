@@ -32,6 +32,20 @@ for p in (BASE_DIR, os.path.join(BASE_DIR, "backend"),
 # Musí být nastaveno PŘED importem main (přepíná úložiště na SQLite, vypíná auth).
 os.environ.setdefault("FFO_LOCAL", "1")
 
+# Portable: udrž VŠECHNY zápisy (vč. dočasných souborů) uvnitř pracovní složky
+# aplikace, ať nic nepíše mimo ni (žádné %TEMP%, žádná admin práva, žádná
+# instalace). Data + tmp jsou vedle .exe ve FieldForceData/.
+if getattr(sys, "frozen", False):
+    try:
+        import db as _db  # backend/db.py je už na sys.path
+        _tmp = os.path.join(_db.data_dir(), "tmp")
+        os.makedirs(_tmp, exist_ok=True)
+        import tempfile as _tempfile
+        _tempfile.tempdir = _tmp
+        os.environ["TMP"] = os.environ["TEMP"] = os.environ["TMPDIR"] = _tmp
+    except Exception:  # noqa: BLE001 - nikdy nebránit startu appky
+        pass
+
 HOST = "127.0.0.1"
 
 
