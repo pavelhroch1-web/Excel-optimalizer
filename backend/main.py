@@ -856,6 +856,17 @@ if LOCAL_MODE:
     def reality_technicians(week_from: int | None = None, week_to: int | None = None):
         return plan_reality.reality(week_from, week_to)
 
+    # Actual driven route (order known from SalesApp times) + km + travel time.
+    import route_actual  # noqa: E402
+
+    @app.get("/api/route/days", dependencies=[Depends(require_auth)])
+    def route_days(technician: str):
+        return {"days": route_actual.technician_days(technician)}
+
+    @app.get("/api/route/actual", dependencies=[Depends(require_auth)])
+    def route_actual_ep(technician: str, date_from: str | None = None, date_to: str | None = None):
+        return route_actual.technician_route(technician, date_from, date_to)
+
     import planner_unserved  # noqa: E402
 
     @app.post("/api/planner/unserved", dependencies=[Depends(require_auth)])

@@ -229,3 +229,8 @@ button.danger { color: #B3453A; border-color: #B3453A55; }
 .pl-compare .col h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; color: var(--text-dim); }
 .pl-compare .arrow { font-size: 20px; color: var(--text-dim); }
 .pl-delta.pos { color: var(--good); } .pl-delta.neg { color: #B3453A; }
+
+/* actual route map: numbered markers */
+.ract-num { background: transparent; border: none; box-shadow: none; color: #fff;
+  font-weight: 700; font-size: 11px; text-shadow: 0 0 3px #000, 0 0 3px #000; }
+#ract-map { background: var(--bg); }

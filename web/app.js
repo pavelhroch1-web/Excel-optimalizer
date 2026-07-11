@@ -64,6 +64,7 @@ function showApp() {
   loadRouteTechnicians();
   loadExclusionCount();
   loadAlerts();
+  loadRactTechnicians();
 }
 function showLogin() {
   appScreen.classList.add("hidden");
@@ -1009,6 +1010,92 @@ on("planner-whatif-form", "submit", async (e) => {
   } catch (err) {
     document.getElementById("planner-compare").innerHTML = `<p class="result err">Chyba: ${esc(err.message)}</p>`;
   }
+});
+
+// ---- actual route map -----------------------------------------------------
+
+let _ractMap = null, _ractLayer = null;
+
+async function loadRactTechnicians() {
+  const sel = document.getElementById("ract-tech");
+  if (!sel) return;
+  try {
+    const list = (await apiJson("/api/technicians")).technicians.filter((t) => t.role === "TECHNIK" && t.active);
+    sel.innerHTML = list.map((t) => `<option>${esc(t.name)}</option>`).join("");
+    if (list.length) loadRactDays();
+  } catch (e) { /* ignore */ }
+}
+
+async function loadRactDays() {
+  const tech = document.getElementById("ract-tech").value;
+  const sel = document.getElementById("ract-day");
+  if (!tech) return;
+  try {
+    const days = (await apiJson(`/api/route/days?technician=${encodeURIComponent(tech)}`)).days;
+    sel.innerHTML = days.map((d) => `<option>${d}</option>`).join("") || `<option value="">žádné</option>`;
+  } catch (e) { sel.innerHTML = `<option value="">—</option>`; }
+}
+
+function renderRouteMap(day) {
+  const mapDiv = document.getElementById("ract-map");
+  mapDiv.style.display = "block";
+  if (typeof L === "undefined") { mapDiv.style.display = "none"; return false; }
+  if (!_ractMap) {
+    _ractMap = L.map("ract-map");
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(_ractMap);
+  }
+  if (_ractLayer) _ractLayer.remove();
+  _ractLayer = L.layerGroup().addTo(_ractMap);
+  const pts = [];
+  for (const s of day.stops) {
+    if (s.lat == null || s.lon == null) continue;
+    pts.push([s.lat, s.lon]);
+    L.marker([s.lat, s.lon]).addTo(_ractLayer)
+      .bindPopup(`#${s.seq} ${esc(s.name || s.pos || "")}<br>${esc(s.city || "")}<br>${s.started ? s.started.slice(-8) : ""} · ${s.onPosMin ?? "—"} min na POS`)
+      .bindTooltip(String(s.seq), { permanent: true, direction: "center", className: "ract-num" });
+  }
+  if (pts.length) {
+    L.polyline(pts, { color: "#12807C", weight: 3, opacity: 0.7 }).addTo(_ractLayer);
+    _ractMap.fitBounds(pts, { padding: [30, 30] });
+  }
+  setTimeout(() => _ractMap.invalidateSize(), 50);
+  return true;
+}
+
+on("ract-tech", "change", loadRactDays);
+
+on("route-actual-form", "submit", async (e) => {
+  e.preventDefault();
+  const tech = document.getElementById("ract-tech").value;
+  const day = document.getElementById("ract-day").value;
+  if (!tech || !day) { setResult("ract-result", "Vyber technika a den.", "err"); return; }
+  setResult("ract-result", "Načítám trasu…", "");
+  try {
+    const r = await apiJson(`/api/route/actual?technician=${encodeURIComponent(tech)}&date_from=${day}&date_to=${day}`);
+    const d = r.days[0];
+    if (!d) { setResult("ract-result", "Pro tento den nejsou data.", "err"); return; }
+    document.getElementById("ract-totals").innerHTML = `<div class="pl-tiles">` +
+      tile("Zastávek", d.stopCount, "návštěv") +
+      tile("Najeto km", d.totalKm, "informativně") +
+      tile("Čas na cestě", Math.round(d.travelMin) + " min", "mezi POS") +
+      tile("Čas na POS", Math.round(d.onPosMin) + " min", "celkem") + `</div>`;
+    const hasMap = renderRouteMap(d);
+    let legsHtml = `<div class="pl-section">Zastávky a přejezdy</div><table class="pd-score-table"><tbody>`;
+    d.stops.forEach((s, i) => {
+      legsHtml += `<tr><td>#${s.seq}</td><td><span class="pos-link" data-pos="${esc(s.pos || "")}">${esc(s.name || s.pos || "")}</span></td>` +
+        `<td>${esc(s.city || "")}</td><td>${s.started ? s.started.slice(-8) : ""}</td>` +
+        `<td style="text-align:right">${s.onPosMin ?? "—"} min</td></tr>`;
+      const leg = d.legs.find((l) => l.fromSeq === s.seq);
+      if (leg) legsHtml += `<tr><td></td><td colspan="4" style="color:var(--text-dim)">↓ ${leg.km ?? "—"} km · ${leg.travelMin ?? "—"} min jízdy</td></tr>`;
+    });
+    legsHtml += `</tbody></table>`;
+    if (!hasMap) legsHtml = `<p class="hint">Mapa se nenačetla (offline?). Trasa je níže.</p>` + legsHtml;
+    document.getElementById("ract-legs").innerHTML = legsHtml;
+    setResult("ract-result", "", "ok");
+    document.querySelectorAll("#ract-legs .pos-link").forEach((el) =>
+      el.addEventListener("click", () => el.dataset.pos && openPosDetail(el.dataset.pos)));
+  } catch (err) { setResult("ract-result", "Chyba: " + err.message, "err"); }
 });
 
 // ---- technician configuration ---------------------------------------------
