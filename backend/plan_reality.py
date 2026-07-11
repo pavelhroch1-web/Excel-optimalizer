@@ -58,9 +58,16 @@ def _actual_by_pos_week(week_from, week_to):
 
 
 def fulfillment(week_from: int, week_to: int, tolerance: int = 1) -> dict:
-    """Compare the published plan with reality in [week_from, week_to]."""
-    planned = db.get("SELECT pos_id, week, technician FROM published_plans "
-                     "WHERE week BETWEEN ? AND ?", (week_from, week_to))
+    """Compare the published plan with reality in [week_from, week_to].
+
+    published_plans keeps one row-set per publish, so a week can appear under
+    several snapshots; join plan_lifecycle to take only the snapshot currently
+    locked for each week (the same source of truth board() uses), else planned
+    counts double."""
+    planned = db.get(
+        "SELECT pp.pos_id, pp.week, pp.technician FROM published_plans pp "
+        "JOIN plan_lifecycle pl ON pl.week=pp.week AND pl.snapshot_id=pp.snapshot_id "
+        "AND pl.status='Published' WHERE pp.week BETWEEN ? AND ?", (week_from, week_to))
     actual = _actual_by_pos_week(week_from - tolerance, week_to + tolerance)
 
     per_tech: dict = {}

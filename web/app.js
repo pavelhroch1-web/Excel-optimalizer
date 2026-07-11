@@ -3,7 +3,9 @@
 // thin wrapper around one backend endpoint, which runs the unchanged
 // desktop_client/engines/ Python engines.
 
-const API_BASE = window.FFO_API_BASE || "http://localhost:8000";
+// Empty string = same origin (local desktop / bundled FastAPI). Use a string
+// check, not `||`, so "" is honoured instead of falling back to a fixed port.
+const API_BASE = (typeof window.FFO_API_BASE === "string") ? window.FFO_API_BASE : "http://localhost:8000";
 
 const loginScreen = document.getElementById("login-screen");
 const appScreen = document.getElementById("app-screen");
@@ -1422,72 +1424,29 @@ on("reassign-form", "submit", async (e) => {
 });
 
 // ---- live published TourPlan (main working screen) ------------------------
+// Fetch once, filter entirely client-side => instant, no round-trips.
 
 const _LIVE_STATUS = {
   done: { label: "Hotovo", cls: "st-done" },
-  due: { label: "Tento týden", cls: "st-due" },
+  due: { label: "Dnes / tento týden", cls: "st-due" },
   overdue: { label: "Zpožděno", cls: "st-overdue" },
   upcoming: { label: "Naplánováno", cls: "st-upcoming" },
 };
+const _STATUS_ORDER = ["overdue", "due", "upcoming", "done"];
+const _DUE_STATUS = {
+  overdue: { label: "Po termínu", cls: "st-overdue" },
+  dueSoon: { label: "Brzy splatné", cls: "st-due" },
+  ok: { label: "V pořádku", cls: "st-done" },
+};
+
+const _live = { board: null, due: null, week: "all", status: "all", tech: "", dueStatus: "all" };
 
 function _cd(days) {
-  if (days == null) return "—";
-  if (days < 0) return `${-days} dní po termínu`;
-  if (days === 0) return "dnes";
-  return `za ${days} dní`;
-}
-
-function renderBoard(b) {
-  if (!b.published) return `<p class="pd-sub">${esc(b.message || "Zatím nebyl publikován žádný plán.")}</p>`;
-  const r = b.rollup;
-  let html = `<div class="pl-tiles">` +
-    tile("Verze", b.version || "—", `${b.versionCount} publikováno`) +
-    tile("Týdny plánu", b.weekRange || "—", `teď je týden ${b.currentWeek}`) +
-    tile("Zastávek", r.total, "v publikovaném plánu") +
-    tile("Splněno", r.done, `${r.fulfilmentPct ?? 0} %`, r.fulfilmentPct >= 80 ? "good" : "") +
-    tile("Zpožděno", r.overdue, "z plánu", r.overdue ? "bad" : "good") +
-    tile("Naplánováno", r.upcoming, "před termínem") + `</div>`;
-  // per-week strip
-  if (b.perWeek && b.perWeek.length) {
-    html += `<div class="pl-section">Podle týdnů</div><table class="pd-score-table"><thead><tr><th>Týden</th><th>Zastávek</th><th>Hotovo</th><th>Zpožděno</th></tr></thead><tbody>` +
-      b.perWeek.map((w) => `<tr><td><strong>${w.week}</strong></td><td>${w.stops}</td>` +
-        `<td>${w.done}</td><td>${w.overdue || "—"}</td></tr>`).join("") + `</tbody></table>`;
-  }
-  // upcoming stops (limit for readability), most imminent first
-  const stops = b.stops.filter((s) => s.status !== "done")
-    .sort((a, z) => (a.daysUntil ?? 9999) - (z.daysUntil ?? 9999)).slice(0, 60);
-  if (stops.length) {
-    html += `<div class="pl-section">Nadcházející zastávky</div><table class="pd-score-table"><thead><tr>` +
-      `<th>Týd</th><th>Datum</th><th>Technik</th><th>POS</th><th>Stav</th><th>Odpočet</th></tr></thead><tbody>` +
-      stops.map((s) => {
-        const st = _LIVE_STATUS[s.status] || { label: s.status, cls: "" };
-        return `<tr><td>${s.week ?? "—"}</td><td>${esc(s.planDate || "—")}</td>` +
-          `<td>${esc(s.technician || "—")}</td>` +
-          `<td><span class="pos-link" data-pos="${esc(s.pos || "")}">${esc(s.name || s.pos || "")}</span></td>` +
-          `<td><span class="chip ${st.cls}">${st.label}</span></td>` +
-          `<td>${_cd(s.daysUntil)}</td></tr>`;
-      }).join("") + `</tbody></table>`;
-    if (b.stops.filter((s) => s.status !== "done").length > 60)
-      html += `<p class="hint">Zobrazeno prvních 60 nejbližších zastávek.</p>`;
-  }
-  return html;
-}
-
-function renderDue(d) {
-  const c = d.counts;
-  document.getElementById("due-count").textContent = d.total;
-  let html = `<div class="pl-tiles">` +
-    tile("Po termínu", c.overdue, "mimo cadence", c.overdue ? "bad" : "good") +
-    tile("Brzy splatné", c.dueSoon, "do 14 dní", c.dueSoon ? "warn" : "") +
-    tile("V pořádku", c.ok, "v cadence", "good") +
-    tile("Nikdy nenavštíveno", c.neverVisited, "priorita", c.neverVisited ? "warn" : "") + `</div>`;
-  if (!d.posList.length) return html + `<p class="pd-sub">Žádné POS v tomto stavu.</p>`;
-  html += `<table class="pd-score-table"><thead><tr><th>POS</th><th>Cadence</th><th>Poslední návštěva</th><th>Splatnost</th><th>Odpočet</th></tr></thead><tbody>` +
-    d.posList.map((p) => `<tr><td><span class="pos-link" data-pos="${esc(p.pos)}">${esc(p.name || p.pos)}</span></td>` +
-      `<td>${esc(p.cadence)} (${p.cadenceWeeks} t.)</td><td>${esc(p.lastVisit || "nikdy")}</td>` +
-      `<td>${esc(p.nextDue || "—")}</td><td>${_cd(p.daysRemaining)}</td></tr>`).join("") +
-    `</tbody></table><p class="hint">Zobrazeno ${d.shown} z ${d.total}.</p>`;
-  return html;
+  if (days == null) return `<span class="cd cd-never">nikdy</span>`;
+  if (days < 0) return `<span class="cd cd-over">${-days} d po termínu</span>`;
+  if (days === 0) return `<span class="cd cd-today">dnes</span>`;
+  if (days <= 7) return `<span class="cd cd-soon">za ${days} d</span>`;
+  return `<span class="cd">za ${days} d</span>`;
 }
 
 function _bindPosLinks(scope) {
@@ -1495,48 +1454,171 @@ function _bindPosLinks(scope) {
     el.addEventListener("click", () => el.dataset.pos && openPosDetail(el.dataset.pos)));
 }
 
+function _pill(id, group, active, label, count, cls) {
+  return `<button class="pill ${cls || ""} ${active ? "on" : ""}" data-g="${group}" data-v="${id}">` +
+    `${esc(label)}${count != null ? ` <b>${count}</b>` : ""}</button>`;
+}
+
+// --- render the whole cockpit from cached data + current filters ---
+function renderLive() {
+  const b = _live.board;
+  const meta = document.getElementById("live-meta");
+  if (!b || !b.published) {
+    meta.innerHTML = `<span class="pill-static">nepublikováno</span>`;
+    document.getElementById("live-hero").innerHTML = "";
+    document.getElementById("live-filters").style.display = "none";
+    document.getElementById("live-board").innerHTML =
+      `<p class="pd-sub">${esc((b && b.message) || "Zatím nebyl publikován žádný plán. Vygeneruj a publikuj plán v sekci Planner.")}</p>`;
+    return;
+  }
+  document.getElementById("live-filters").style.display = "";
+  const stopsAll = b.stops;
+  const techStops = _live.tech ? stopsAll.filter((s) => s.technician === _live.tech) : stopsAll;
+
+  // meta line
+  meta.innerHTML =
+    `<span class="pill-static">${esc(b.version || "")}</span>` +
+    `<span class="pill-static ghost-static">${b.versionCount} verzí</span>` +
+    (b.publishedAt ? `<span class="meta-dim">publikováno ${esc(String(b.publishedAt).slice(0, 16))}</span>` : "");
+
+  // hero KPIs (headline, at-a-glance)
+  const r = b.rollup;
+  const cur = b.currentWeek;
+  const wkNow = techStops.filter((s) => s.week === cur);
+  const wkDone = wkNow.filter((s) => s.status === "done").length;
+  const overdue = techStops.filter((s) => s.status === "overdue").length;
+  const dueOverdue = _live.due ? _live.due.counts.overdue : 0;
+  document.getElementById("live-hero").innerHTML =
+    `<div class="hero-kpi">
+       <div class="hk-ring" style="--p:${r.fulfilmentPct || 0}">
+         <span class="hk-ring-v">${r.fulfilmentPct ?? 0}%</span>
+       </div>
+       <div class="hk-txt"><div class="hk-l">Plnění plánu</div><div class="hk-s">${r.done}/${r.total} zastávek</div></div>
+     </div>` +
+    `<div class="hero-kpi"><div class="hk-num">${wkNow.length}</div><div class="hk-txt"><div class="hk-l">Tento týden (T${cur})</div><div class="hk-s">${wkDone} hotovo, ${wkNow.length - wkDone} zbývá</div></div></div>` +
+    `<div class="hero-kpi ${overdue ? "bad" : "good"}"><div class="hk-num">${overdue}</div><div class="hk-txt"><div class="hk-l">Zpožděno</div><div class="hk-s">z publikovaného plánu</div></div></div>` +
+    `<div class="hero-kpi ${dueOverdue ? "warn" : "good"}"><div class="hk-num">${dueOverdue}</div><div class="hk-txt"><div class="hk-l">Po termínu cadence</div><div class="hk-s">GECO/CORN backlog</div></div></div>`;
+
+  // week filter pills
+  const weeks = [...new Set(techStops.map((s) => s.week).filter((w) => w != null))].sort((a, z) => a - z);
+  let wf = _pill("all", "week", _live.week === "all", "Vše", techStops.length);
+  wf += weeks.map((w) => _pill(String(w), "week", String(_live.week) === String(w),
+    "T" + w + (w === cur ? " · teď" : ""), techStops.filter((s) => s.week === w).length)).join("");
+  document.getElementById("week-filter").innerHTML = wf;
+
+  // status filter pills (counts within week+tech scope)
+  const scoped = techStops.filter((s) => _live.week === "all" || String(s.week) === String(_live.week));
+  const scount = (st) => scoped.filter((s) => s.status === st).length;
+  let sf = _pill("all", "status", _live.status === "all", "Vše", scoped.length);
+  sf += _STATUS_ORDER.map((st) => _pill(st, "status", _live.status === st,
+    _LIVE_STATUS[st].label, scount(st), _LIVE_STATUS[st].cls)).join("");
+  document.getElementById("status-filter").innerHTML = sf;
+
+  // visible stops (week + status), grouped by week -> day
+  let vis = scoped.filter((s) => _live.status === "all" || s.status === _live.status);
+  vis = vis.slice().sort((a, z) =>
+    (a.week - z.week) || ((a.daysUntil ?? 9999) - (z.daysUntil ?? 9999)));
+  renderStops(vis);
+
+  // due panel (independent of week; respects tech + its own status pills)
+  renderDuePanel();
+}
+
+function renderStops(vis) {
+  const el = document.getElementById("live-board");
+  if (!vis.length) { el.innerHTML = `<p class="pd-sub">Žádné zastávky pro tento filtr.</p>`; return; }
+  const CAP = 150;
+  const shown = vis.slice(0, CAP);
+  // group by "T{week} · {planDate}"
+  const groups = {};
+  shown.forEach((s) => { (groups[`${s.week}|${s.planDate || ""}`] ||= []).push(s); });
+  let html = "";
+  Object.entries(groups).forEach(([k, rows]) => {
+    const [wk, pd] = k.split("|");
+    html += `<div class="day-head"><span>T${wk}${pd ? " · " + esc(pd) : ""}</span><span class="day-n">${rows.length} zastávek</span></div>`;
+    html += `<div class="stop-list">` + rows.map((s) => {
+      const st = _LIVE_STATUS[s.status] || { label: s.status, cls: "" };
+      return `<div class="stop-row ${st.cls}">` +
+        `<span class="stop-dot"></span>` +
+        `<span class="stop-pos pos-link" data-pos="${esc(s.pos || "")}">${esc(s.name || s.pos || "")}</span>` +
+        `<span class="stop-city">${esc(s.city || "")}</span>` +
+        `<span class="stop-tech">${esc(s.technician || "—")}</span>` +
+        `<span class="stop-cd">${_cd(s.daysUntil)}</span>` +
+        `<span class="chip ${st.cls}">${st.label}</span>` +
+        `</div>`;
+    }).join("") + `</div>`;
+  });
+  if (vis.length > CAP) html += `<p class="hint">Zobrazeno ${CAP} z ${vis.length}. Zužij filtrem (týden/technik/stav).</p>`;
+  el.innerHTML = html;
+  _bindPosLinks("#live-board");
+}
+
+function renderDuePanel() {
+  const d = _live.due;
+  const el = document.getElementById("due-out");
+  const bar = document.getElementById("due-filter");
+  if (!d) { el.innerHTML = ""; bar.innerHTML = ""; return; }
+  const list0 = _live.tech ? d.posList.filter((p) => p.technician === _live.tech) : d.posList;
+  const c = { overdue: 0, dueSoon: 0, ok: 0 };
+  list0.forEach((p) => { c[p.status] = (c[p.status] || 0) + 1; });
+  bar.innerHTML = _pill("all", "due", _live.dueStatus === "all", "Vše", list0.length) +
+    Object.entries(_DUE_STATUS).map(([st, m]) =>
+      _pill(st, "due", _live.dueStatus === st, m.label, c[st] || 0, m.cls)).join("");
+  let list = _live.dueStatus === "all" ? list0 : list0.filter((p) => p.status === _live.dueStatus);
+  if (!list.length) { el.innerHTML = `<p class="pd-sub">Žádné POS v tomto stavu.</p>`; return; }
+  const CAP = 120;
+  el.innerHTML = `<div class="stop-list">` + list.slice(0, CAP).map((p) => {
+    const m = _DUE_STATUS[p.status] || { cls: "" };
+    return `<div class="stop-row ${m.cls}"><span class="stop-dot"></span>` +
+      `<span class="stop-pos pos-link" data-pos="${esc(p.pos)}">${esc(p.name || p.pos)}</span>` +
+      `<span class="stop-city">${esc(p.cadence)} · ${p.cadenceWeeks} t.</span>` +
+      `<span class="stop-tech">${esc(p.lastVisit || "nikdy")}</span>` +
+      `<span class="stop-cd">${_cd(p.daysRemaining)}</span></div>`;
+  }).join("") + `</div>` +
+    (list.length > CAP ? `<p class="hint">Zobrazeno ${CAP} z ${list.length}.</p>` : "");
+  _bindPosLinks("#due-out");
+}
+
+// --- data load (once) + technician dropdown ---
 async function loadLive() {
   const el = document.getElementById("live-board");
   if (!el) return;
-  const tech = document.getElementById("live-tech").value;
+  el.innerHTML = `<p class="result">Načítám…</p>`;
   try {
-    const b = await apiJson("/api/live/board" + (tech ? `?technician=${encodeURIComponent(tech)}` : ""));
-    document.getElementById("live-version").textContent = b.published ? (b.version || "publikováno") : "nepublikováno";
-    el.innerHTML = renderBoard(b);
-    _bindPosLinks("#live-board");
-  } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
-  loadDue();
-}
-
-async function loadDue() {
-  const el = document.getElementById("due-out");
-  if (!el) return;
-  const tech = document.getElementById("live-tech").value;
-  const status = document.getElementById("due-status").value;
-  try {
-    const q = new URLSearchParams();
-    if (tech) q.set("technician", tech);
-    if (status) q.set("status", status);
-    const d = await apiJson("/api/live/next-due?" + q.toString());
-    el.innerHTML = renderDue(d);
-    _bindPosLinks("#due-out");
+    const [b, d] = await Promise.all([
+      apiJson("/api/live/board"),
+      apiJson("/api/live/next-due"),
+    ]);
+    _live.board = b; _live.due = d;
+    // default week = current if present else all
+    if (b.published && b.weeks && b.weeks.includes(b.currentWeek)) _live.week = b.currentWeek;
+    // technician dropdown from active technicians
+    populateLiveTechs(b);
+    renderLive();
   } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
 }
 
-async function loadLiveTechnicians() {
+function populateLiveTechs(b) {
   const sel = document.getElementById("live-tech");
-  if (!sel) return;
-  try {
-    const list = (await apiJson("/api/technicians")).technicians
-      .filter((t) => t.role === "TECHNIK" && t.active);
-    sel.innerHTML = `<option value="">všichni</option>` +
-      list.map((t) => `<option>${esc(t.name)}</option>`).join("");
-  } catch (e) { /* ignore */ }
+  if (!sel || sel.dataset.filled) return;
+  const techs = [...new Set((b.stops || []).map((s) => s.technician).filter(Boolean))].sort();
+  sel.innerHTML = `<option value="">všichni</option>` + techs.map((t) => `<option>${esc(t)}</option>`).join("");
+  sel.dataset.filled = "1";
 }
+function loadLiveTechnicians() { /* techs come from the board now */ }
 
+// filter clicks (event delegation, instant client-side re-render)
+document.addEventListener("click", (e) => {
+  const pill = e.target.closest(".live-card .pill");
+  if (!pill) return;
+  const g = pill.dataset.g, v = pill.dataset.v;
+  if (g === "week") _live.week = v === "all" ? "all" : Number(v);
+  else if (g === "status") _live.status = v;
+  else if (g === "due") _live.dueStatus = v;
+  renderLive();
+});
+on("live-tech", "change", () => { _live.tech = document.getElementById("live-tech").value; renderLive(); });
 on("live-refresh", "click", loadLive);
-on("live-tech", "change", loadLive);
-on("due-status", "change", loadDue);
 
 // ---- route planner (long-term per-technician plan) ------------------------
 

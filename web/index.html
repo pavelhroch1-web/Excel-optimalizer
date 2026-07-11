@@ -46,19 +46,24 @@
 
   <!-- LIVE TOURPLAN: the main daily working screen -->
   <section class="card live-card">
-    <h2>Živý TourPlan <span class="badge" id="live-version">—</span></h2>
-    <p class="hint">Publikovaný plán je referenční a zůstává, dokud nepublikuješ novou verzi. Průběžně se proti němu porovnává realita ze SalesApp a odpočítává se čas do další návštěvy každého POS podle cadence (GECO/CORN).</p>
-    <div class="row">
-      <label>Technik<select id="live-tech"><option value="">všichni</option></select></label>
-      <button id="live-refresh" class="ghost">Obnovit</button>
+    <div class="live-head">
+      <h2>Živý TourPlan</h2>
+      <div class="live-meta" id="live-meta"></div>
+    </div>
+    <div id="live-hero" class="live-hero"></div>
+    <div class="live-filters" id="live-filters">
+      <div class="fbar" id="week-filter"></div>
+      <div class="fbar" id="status-filter"></div>
+      <label class="fsel">Technik <select id="live-tech"><option value="">všichni</option></select></label>
+      <button id="live-refresh" class="ghost small" title="Obnovit">↻ Obnovit</button>
     </div>
     <div id="live-board"></div>
     <div class="pl-whatif">
-      <div class="pl-section">Odpočet do další návštěvy (cadence GECO/CORN) <span id="due-count" class="badge">—</span></div>
-      <p class="hint" style="margin:0 0 8px">POS seřazené podle naléhavosti – nejdřív nikdy nenavštívené a nejvíc po termínu. Návštěva OZ i technika se počítá jako pokrytí.</p>
-      <div class="row">
-        <label>Stav<select id="due-status"><option value="">vše</option><option value="overdue">po termínu</option><option value="dueSoon">brzy splatné</option><option value="ok">v pořádku</option></select></label>
+      <div class="live-head">
+        <div class="pl-section" style="margin:0">Odpočet do další návštěvy · cadence GECO/CORN</div>
       </div>
+      <p class="hint" style="margin:0 0 10px">Nejdřív nejnaléhavější – nikdy nenavštívené a nejvíc po termínu. Návštěva OZ i technika se počítá jako pokrytí.</p>
+      <div class="fbar" id="due-filter"></div>
       <div id="due-out"></div>
     </div>
     <p id="live-result" class="result"></p>

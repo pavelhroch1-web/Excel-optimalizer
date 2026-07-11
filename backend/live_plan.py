@@ -151,7 +151,7 @@ def _last_visits():
 # ---- next-due countdown by cadence -----------------------------------------
 
 def next_due(technician: str | None = None, status: str | None = None,
-             limit: int | None = 200) -> dict:
+             limit: int | None = 1000) -> dict:
     """Per-POS countdown to the next visit by GECO/CORN cadence."""
     rules, _neglected = _cadence_rules()
     any_role, tech_only = _last_visits()
