@@ -782,6 +782,15 @@ if LOCAL_MODE:
                                       body.visits_per_tech_week, body.tech_count,
                                       body.clear_neglect_weeks)
 
+    import planner_unserved  # noqa: E402
+
+    @app.post("/api/planner/unserved", dependencies=[Depends(require_auth)])
+    def planner_unserved_ep(body: SimRequest):
+        """Which important POS did NOT get planned, grouped by the engine's own
+        reason (capacity / hold-back / min-gap / filtered)."""
+        return planner_unserved.unserved(body.mode, body.start_week, body.length,
+                                         body.visits_per_tech_week, body.tech_count)
+
     @app.post("/api/planner/whatif", dependencies=[Depends(require_auth)])
     def planner_whatif(body: WhatIfRequest):
         return planner_sim.what_if(body.base.model_dump(), body.scenario.model_dump())
