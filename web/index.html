@@ -6,8 +6,8 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<link rel="stylesheet" href="styles.css?v=21">
-<script src="config.js?v=21"></script>
+<link rel="stylesheet" href="styles.css?v=22">
+<script src="config.js?v=22"></script>
 </head>
 <body>
 
@@ -25,7 +25,7 @@
 
 <div id="app-screen" class="screen hidden">
   <header>
-    <h1>Field Force Optimizer <span class="ver">v21</span></h1>
+    <h1>Field Force Optimizer <span class="ver">v22</span></h1>
     <button id="logout" class="ghost">Odhlásit</button>
   </header>
 
@@ -44,26 +44,37 @@
     </div>
   </section>
 
-  <!-- LIVE TOURPLAN: the main daily working screen -->
-  <section class="card live-card">
-    <div class="live-head">
-      <h2>Živý TourPlan</h2>
-      <div class="live-meta" id="live-meta"></div>
-    </div>
-    <div id="live-hero" class="live-hero"></div>
-    <div id="fix-banner" class="fix-banner" style="display:none"></div>
-    <div class="live-filters" id="live-filters">
-      <div class="fbar" id="week-filter"></div>
-      <div class="fbar" id="status-filter"></div>
-      <label class="fsel">Technik <select id="live-tech"><option value="">všichni</option></select></label>
-      <button id="live-refresh" class="ghost small" title="Obnovit">↻ Obnovit</button>
-    </div>
-    <div id="live-board"></div>
-    <div class="pl-whatif">
-      <div class="live-head">
-        <div class="pl-section" style="margin:0">Odpočet do další návštěvy · cadence GECO/CORN</div>
+  <!-- LIVE TOURPLAN: the main daily working cockpit -->
+  <section class="cockpit">
+    <div class="ck-bar">
+      <div class="ck-title">Živý TourPlan <span class="live-meta" id="live-meta"></span></div>
+      <div class="ck-search">
+        <span class="ck-search-ico" id="ck-search-ico"></span>
+        <input id="pos-search" type="text" autocomplete="off" spellcheck="false"
+               placeholder="Hledat POS – číslo, název nebo město…">
+        <div id="pos-search-results" class="ck-results" style="display:none"></div>
       </div>
-      <p class="hint" style="margin:0 0 10px">Nejdřív nejnaléhavější – nikdy nenavštívené a nejvíc po termínu. Návštěva OZ i technika se počítá jako pokrytí.</p>
+      <button id="live-refresh" class="btn-ghost ck-refresh" title="Obnovit">Obnovit</button>
+    </div>
+
+    <div id="live-headline" class="ck-headline"></div>
+    <div id="live-hero" class="ck-kpis"></div>
+    <div id="live-insights" class="ck-insights"></div>
+    <div id="fix-banner" class="fix-banner" style="display:none"></div>
+
+    <div class="ck-work card">
+      <div class="live-filters" id="live-filters">
+        <div class="fbar" id="week-filter"></div>
+        <div class="fbar" id="status-filter"></div>
+        <label class="fsel">Technik <select id="live-tech"><option value="">všichni</option></select></label>
+        <button id="live-refresh2" class="ghost small hidden">↻</button>
+      </div>
+      <div id="live-board"></div>
+    </div>
+
+    <div class="ck-work card">
+      <h2>Odpočet do další návštěvy <span class="badge">cadence GECO/CORN</span></h2>
+      <p class="hint">Nejdřív nejnaléhavější – nikdy nenavštívené a nejvíc po termínu. Návštěva OZ i technika se počítá jako pokrytí.</p>
       <div class="fbar" id="due-filter"></div>
       <div id="due-out"></div>
     </div>
@@ -469,6 +480,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=21"></script>
+<script src="app.js?v=22"></script>
 </body>
 </html>

@@ -19,6 +19,36 @@ def _last_visit(pos_id: str, role: str) -> dict | None:
     return dict(r[0]) if r else None
 
 
+def search(q: str, limit: int = 40) -> dict:
+    """Full-text-ish POS search by number / name / city, with last visit.
+    Powers the command-bar search on the main screen."""
+    q = (q or "").strip()
+    if not q:
+        return {"query": q, "results": [], "count": 0}
+    like = f"%{q}%"
+    rows = db.get(
+        "SELECT pos_id, name, city, technician, category, market, classification "
+        "FROM pos_master WHERE active=1 AND "
+        "(pos_id LIKE ? OR name LIKE ? OR city LIKE ?) "
+        "ORDER BY (pos_id = ?) DESC, (pos_id LIKE ?) DESC, name LIMIT ?",
+        (like, like, like, q, q + "%", limit))
+    # last visit (any role) per matched POS in one pass
+    ids = [str(r["pos_id"]) for r in rows]
+    last: dict = {}
+    if ids:
+        marks = ",".join("?" for _ in ids)
+        for r in db.get(
+            f"SELECT pos_id, MAX(visit_date) AS lv FROM salesapp_visits "
+            f"WHERE pos_id IN ({marks}) GROUP BY pos_id", tuple(ids)):
+            last[str(r["pos_id"])] = r["lv"]
+    results = []
+    for r in rows:
+        d = dict(r)
+        d["lastVisit"] = last.get(str(r["pos_id"]))
+        results.append(d)
+    return {"query": q, "results": results, "count": len(results)}
+
+
 def pos_visit_summary(pos_id: str) -> dict:
     """Everything the planner/POS Explorer needs about who has been at a POS."""
     counts = {row["visitor_role"] or "UNKNOWN": row["c"] for row in db.get(

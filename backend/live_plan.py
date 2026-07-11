@@ -21,7 +21,6 @@ import os
 
 import db
 import store
-import state_xlsx
 from desktop_client.engines.core_logic import CadenceRule, matches_cadence_rule_scope
 
 
@@ -69,16 +68,29 @@ def _cadence_rules():
     if _cache["snap"] == sid and _cache["rules"] is not None:
         return _cache["rules"], _cache["neglected"]
 
+    # Read ONLY the two sheets we need (CADENCE_RULES + CONTROL) straight from the
+    # snapshot xlsx - far faster than state_xlsx.load_state() which parses all ~40
+    # sheets incl. the 11k-row POS_MASTER.
+    import openpyxl
     path = store.snapshot_temp()
+    cad_raw: list = []
+    control_raw: list = []
     try:
-        state = state_xlsx.load_state(path)
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        try:
+            if "CADENCE_RULES" in wb.sheetnames:
+                cad_raw = [list(r) for r in wb["CADENCE_RULES"].iter_rows(values_only=True)]
+            if "CONTROL" in wb.sheetnames:
+                control_raw = [list(r) for r in wb["CONTROL"].iter_rows(values_only=True)]
+        finally:
+            wb.close()
     finally:
         try:
             os.remove(path)
         except OSError:
             pass
 
-    raw = state.get("CADENCE_RULES") or []
+    raw = cad_raw or []
     headers = [str(h).strip() for h in raw[0]] if raw else []
 
     def ci(name):
@@ -116,7 +128,7 @@ def _cadence_rules():
 
     # NEGLECTED_AFTER from CONTROL (soft due for non-cadence POS).
     neglected = 12
-    for r in (state.get("CONTROL") or [])[1:]:
+    for r in (control_raw or [])[1:]:
         if r and str(r[0]).strip() == "NEGLECTED_AFTER_WEEKS":
             neglected = num(at(r, 1)) or 12
             break

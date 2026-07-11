@@ -1441,6 +1441,23 @@ const _DUE_STATUS = {
 
 const _live = { board: null, due: null, week: "all", status: "all", tech: "", dueStatus: "all" };
 
+// inline SVG icons (no external deps, CSP-safe). 20px, stroke=currentColor.
+const _ICONS = {
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  alert: '<path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/>',
+  target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
+  flame: '<path d="M12 2c1 4 5 5 5 9a5 5 0 0 1-10 0c0-2 1-3 1-3 1 2 2 2 2 2 0-3-2-4 2-8z"/>',
+};
+function ico(name, cls) {
+  return `<svg class="ico ${cls || ""}" viewBox="0 0 24 24" width="20" height="20" fill="none" ` +
+    `stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${_ICONS[name] || ""}</svg>`;
+}
+
 function _cd(days) {
   if (days == null) return `<span class="cd cd-never">nikdy</span>`;
   if (days < 0) return `<span class="cd cd-over">${-days} d po termínu</span>`;
@@ -1464,11 +1481,14 @@ function renderLive() {
   const b = _live.board;
   const meta = document.getElementById("live-meta");
   if (!b || !b.published) {
-    meta.innerHTML = `<span class="pill-static">nepublikováno</span>`;
+    meta.innerHTML = `<span class="pill-static ghost-static">nepublikováno</span>`;
     document.getElementById("live-hero").innerHTML = "";
+    document.getElementById("live-headline").innerHTML =
+      `<div class="ck-hl"><div class="hl-txt"><div class="hl-big">Zatím není publikovaný plán</div>` +
+      `<div class="hl-sub">Vygeneruj a publikuj plán v sekci Planner – pak se tady rozsvítí přehled dne.</div></div></div>`;
+    document.getElementById("live-insights").innerHTML = "";
     document.getElementById("live-filters").style.display = "none";
-    document.getElementById("live-board").innerHTML =
-      `<p class="pd-sub">${esc((b && b.message) || "Zatím nebyl publikován žádný plán. Vygeneruj a publikuj plán v sekci Planner.")}</p>`;
+    document.getElementById("live-board").innerHTML = "";
     return;
   }
   document.getElementById("live-filters").style.display = "";
@@ -1481,23 +1501,51 @@ function renderLive() {
     `<span class="pill-static ghost-static">${b.versionCount} verzí</span>` +
     (b.publishedAt ? `<span class="meta-dim">publikováno ${esc(String(b.publishedAt).slice(0, 16))}</span>` : "");
 
-  // hero KPIs (headline, at-a-glance)
   const r = b.rollup;
   const cur = b.currentWeek;
   const wkNow = techStops.filter((s) => s.week === cur);
   const wkDone = wkNow.filter((s) => s.status === "done").length;
+  const wkLeft = wkNow.length - wkDone;
   const overdue = techStops.filter((s) => s.status === "overdue").length;
   const dueOverdue = _live.due ? _live.due.counts.overdue : 0;
+  const dueNever = _live.due ? _live.due.counts.neverVisited : 0;
+
+  // HEADLINE — the one thing to know on open
+  let hlTone = "ok", hlIco = "check", hlBig = "Vše pod kontrolou", hlSub = "Žádné akutní resty v publikovaném plánu.";
+  if (overdue || dueOverdue) {
+    hlTone = overdue + dueOverdue > 40 ? "bad" : "warn";
+    hlIco = "alert";
+    hlBig = `${overdue + dueOverdue} POS potřebuje pozornost`;
+    const parts = [];
+    if (overdue) parts.push(`${overdue} zpožděno v plánu`);
+    if (dueOverdue) parts.push(`${dueOverdue} po termínu cadence`);
+    if (wkLeft) parts.push(`${wkLeft} zbývá tento týden`);
+    hlSub = parts.join(" · ");
+  } else if (wkLeft) {
+    hlTone = "warn"; hlIco = "calendar";
+    hlBig = `${wkLeft} zastávek k obsloužení tento týden`;
+    hlSub = `Týden ${cur} · ${wkDone} už hotovo.`;
+  }
+  document.getElementById("live-headline").innerHTML =
+    `<div class="ck-hl ${hlTone}">${ico(hlIco, "hl-ico")}` +
+    `<div class="hl-txt"><div class="hl-big">${esc(hlBig)}</div><div class="hl-sub">${esc(hlSub)}</div></div>` +
+    `<div class="hl-date">${new Date().toLocaleDateString("cs-CZ", { weekday: "long", day: "numeric", month: "long" })}</div></div>`;
+
+  // KPI CARDS — bigger, iconed, at-a-glance
+  const kpi = (icoName, tone, big, label, sub, ring) =>
+    `<div class="kpi ${tone || ""}">` +
+    (ring != null
+      ? `<div class="kpi-ring" style="--p:${ring}"><span>${big}</span></div>`
+      : `<div class="kpi-ico">${ico(icoName)}</div><div class="kpi-num">${big}</div>`) +
+    `<div class="kpi-l">${esc(label)}</div><div class="kpi-s">${esc(sub)}</div></div>`;
   document.getElementById("live-hero").innerHTML =
-    `<div class="hero-kpi">
-       <div class="hk-ring" style="--p:${r.fulfilmentPct || 0}">
-         <span class="hk-ring-v">${r.fulfilmentPct ?? 0}%</span>
-       </div>
-       <div class="hk-txt"><div class="hk-l">Plnění plánu</div><div class="hk-s">${r.done}/${r.total} zastávek</div></div>
-     </div>` +
-    `<div class="hero-kpi"><div class="hk-num">${wkNow.length}</div><div class="hk-txt"><div class="hk-l">Tento týden (T${cur})</div><div class="hk-s">${wkDone} hotovo, ${wkNow.length - wkDone} zbývá</div></div></div>` +
-    `<div class="hero-kpi ${overdue ? "bad" : "good"}"><div class="hk-num">${overdue}</div><div class="hk-txt"><div class="hk-l">Zpožděno</div><div class="hk-s">z publikovaného plánu</div></div></div>` +
-    `<div class="hero-kpi ${dueOverdue ? "warn" : "good"}"><div class="hk-num">${dueOverdue}</div><div class="hk-txt"><div class="hk-l">Po termínu cadence</div><div class="hk-s">GECO/CORN backlog</div></div></div>`;
+    kpi(null, r.fulfilmentPct >= 80 ? "good" : "", `${r.fulfilmentPct ?? 0}%`, "Plnění plánu", `${r.done} z ${r.total} zastávek`, r.fulfilmentPct || 0) +
+    kpi("calendar", wkLeft ? "warn" : "good", wkLeft, "Zbývá tento týden", `týden ${cur} · ${wkDone} hotovo`) +
+    kpi("clock", overdue ? "bad" : "good", overdue, "Zpožděno", "z publikovaného plánu") +
+    kpi("flame", dueOverdue ? "bad" : "good", dueOverdue, "Po termínu cadence", `GECO/CORN${dueNever ? ` · ${dueNever} nikdy` : ""}`);
+
+  // INSIGHTS — biggest problem + technician needing attention
+  renderInsights(techStops, cur);
 
   // week filter pills
   const weeks = [...new Set(techStops.map((s) => s.week).filter((w) => w != null))].sort((a, z) => a - z);
@@ -1524,6 +1572,67 @@ function renderLive() {
   renderFixBanner();
   // due panel (independent of week; respects tech + its own status pills)
   renderDuePanel();
+}
+
+// biggest problem + technician needing attention (computed client-side)
+function renderInsights(techStops, cur) {
+  const el = document.getElementById("live-insights");
+  if (!el) return;
+  const byTech = {};
+  techStops.forEach((s) => {
+    const t = s.technician || "—";
+    const d = (byTech[t] ||= { tech: t, planned: 0, done: 0, overdue: 0, cad: 0 });
+    d.planned++; if (s.status === "done") d.done++; if (s.status === "overdue") d.overdue++;
+  });
+  (_live.due && _live.due.posList || []).forEach((p) => {
+    if (p.status === "overdue" && byTech[p.technician]) byTech[p.technician].cad++;
+  });
+  const techs = Object.values(byTech).map((d) => ({
+    ...d, fulfil: d.planned ? Math.round(100 * d.done / d.planned) : null,
+    score: d.overdue * 2 + d.cad,
+  })).filter((d) => d.tech !== "—");
+  techs.sort((a, z) => (z.score - a.score) || ((a.fulfil ?? 101) - (z.fulfil ?? 101)));
+  const worst = techs[0];
+
+  // biggest problem
+  const overdueTot = techStops.filter((s) => s.status === "overdue").length;
+  const cadOver = _live.due ? _live.due.counts.overdue : 0;
+  const cadNever = _live.due ? _live.due.counts.neverVisited : 0;
+  let prob;
+  if (overdueTot >= cadOver && overdueTot > 0) {
+    prob = { ico: "clock", tone: "bad", big: `${overdueTot} zpožděných zastávek`,
+      sub: "Naplánováno, ale zatím neobslouženo.", g: "status", v: "overdue", act: "Zobrazit zpožděné" };
+  } else if (cadOver > 0) {
+    prob = { ico: "flame", tone: "bad", big: `${cadOver} POS po termínu cadence`,
+      sub: `GECO/CORN backlog${cadNever ? ` · ${cadNever} nikdy nenavštíveno` : ""}.`, g: "due", v: "overdue", act: "Zobrazit backlog" };
+  } else {
+    prob = { ico: "check", tone: "good", big: "Žádný akutní problém", sub: "Plán běží podle cadence.", g: null };
+  }
+
+  const cards = [];
+  cards.push(
+    `<div class="insight ${prob.tone}" ${prob.g ? `data-g="${prob.g}" data-v="${prob.v}" role="button"` : ""}>` +
+    `<div class="in-ico">${ico(prob.ico)}</div>` +
+    `<div class="in-body"><div class="in-h">Největší problém</div>` +
+    `<div class="in-big">${esc(prob.big)}</div><div class="in-s">${esc(prob.sub)}</div>` +
+    (prob.g ? `<div class="in-act">${esc(prob.act)} →</div>` : "") + `</div></div>`);
+
+  if (worst && (worst.overdue || worst.cad)) {
+    cards.push(
+      `<div class="insight warn" data-g="tech-set" data-v="${esc(worst.tech)}" role="button">` +
+      `<div class="in-ico">${ico("user")}</div>` +
+      `<div class="in-body"><div class="in-h">Technik vyžaduje pozornost</div>` +
+      `<div class="in-big">${esc(worst.tech)}</div>` +
+      `<div class="in-s">${worst.overdue} zpožděno${worst.cad ? ` · ${worst.cad} po termínu cadence` : ""}` +
+      `${worst.fulfil != null ? ` · plnění ${worst.fulfil} %` : ""}</div>` +
+      `<div class="in-act">Zobrazit jeho zastávky →</div></div></div>`);
+  } else {
+    cards.push(
+      `<div class="insight good"><div class="in-ico">${ico("user")}</div>` +
+      `<div class="in-body"><div class="in-h">Technici</div><div class="in-big">Bez restů</div>` +
+      `<div class="in-s">Žádný technik nemá zpožděné zastávky.</div></div></div>`);
+  }
+  el.innerHTML = cards.join("");
 }
 
 function renderStops(vis) {
@@ -1659,19 +1768,20 @@ async function loadLive() {
   const el = document.getElementById("live-board");
   if (!el) return;
   el.innerHTML = `<p class="result">Načítám…</p>`;
+  // Board first (fast) → render immediately. Cadence countdown is heavier
+  // (loads the snapshot's rules) so it streams in afterwards and re-renders.
   try {
-    const [b, d] = await Promise.all([
-      apiJson("/api/live/board"),
-      apiJson("/api/live/next-due"),
-    ]);
-    _live.board = b; _live.due = d;
+    const b = await apiJson("/api/live/board");
+    _live.board = b;
     await loadFixes();
-    // default week = current if present else all
     if (b.published && b.weeks && b.weeks.includes(b.currentWeek)) _live.week = b.currentWeek;
-    // technician dropdown from active technicians
     populateLiveTechs(b);
     renderLive();
   } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+  try {
+    _live.due = await apiJson("/api/live/next-due");
+    renderLive();
+  } catch (e) { /* cadence optional */ }
 }
 
 function populateLiveTechs(b) {
@@ -1683,18 +1793,62 @@ function populateLiveTechs(b) {
 }
 function loadLiveTechnicians() { /* techs come from the board now */ }
 
-// filter clicks (event delegation, instant client-side re-render)
+// filter + insight clicks (event delegation, instant client-side re-render)
 document.addEventListener("click", (e) => {
-  const pill = e.target.closest(".live-card .pill");
-  if (!pill) return;
-  const g = pill.dataset.g, v = pill.dataset.v;
+  const el = e.target.closest(".cockpit .pill, .cockpit .insight[data-g]");
+  if (!el) return;
+  const g = el.dataset.g, v = el.dataset.v;
   if (g === "week") _live.week = v === "all" ? "all" : Number(v);
   else if (g === "status") _live.status = v;
-  else if (g === "due") _live.dueStatus = v;
+  else if (g === "due") { _live.dueStatus = v; document.getElementById("due-out")?.scrollIntoView({ behavior: "smooth", block: "center" }); }
+  else if (g === "tech-set") {
+    _live.tech = v; _live.status = "overdue"; _live.week = "all";
+    const sel = document.getElementById("live-tech"); if (sel) sel.value = v;
+  }
   renderLive();
 });
 on("live-tech", "change", () => { _live.tech = document.getElementById("live-tech").value; renderLive(); });
 on("live-refresh", "click", loadLive);
+document.getElementById("ck-search-ico") && (document.getElementById("ck-search-ico").innerHTML = ico("search"));
+
+// --- POS command-bar search (debounced) ---
+let _posSearchTimer;
+on("pos-search", "input", () => {
+  clearTimeout(_posSearchTimer);
+  const q = document.getElementById("pos-search").value.trim();
+  const box = document.getElementById("pos-search-results");
+  if (!box) return;
+  if (q.length < 2) { box.style.display = "none"; return; }
+  _posSearchTimer = setTimeout(async () => {
+    try {
+      const r = await apiJson("/api/pos/search?q=" + encodeURIComponent(q));
+      if (!r.results.length) {
+        box.innerHTML = `<div class="ck-res-empty">Nic nenalezeno pro „${esc(q)}"</div>`;
+        box.style.display = "block"; return;
+      }
+      box.innerHTML = r.results.map((p) =>
+        `<div class="ck-res" data-pos="${esc(p.pos_id)}">` +
+        `<div class="ck-res-main"><b>${esc(p.name || p.pos_id)}</b> <span class="ck-res-id">${esc(p.pos_id)}</span></div>` +
+        `<div class="ck-res-sub">${esc(p.city || "")}${p.technician ? " · " + esc(p.technician) : ""} · ` +
+        `poslední návštěva: ${p.lastVisit ? esc(String(p.lastVisit).slice(0, 10)) : "nikdy"}</div></div>`).join("");
+      box.style.display = "block";
+      box.querySelectorAll(".ck-res").forEach((el) => el.addEventListener("click", () => {
+        openPosDetail(el.dataset.pos);
+        box.style.display = "none";
+        document.getElementById("pos-search").value = "";
+      }));
+    } catch (e) { box.style.display = "none"; }
+  }, 200);
+});
+on("pos-search", "keydown", (e) => {
+  if (e.key === "Escape") { document.getElementById("pos-search-results").style.display = "none"; e.target.blur(); }
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".ck-search")) {
+    const box = document.getElementById("pos-search-results");
+    if (box) box.style.display = "none";
+  }
+});
 
 // ---- route planner (long-term per-technician plan) ------------------------
 

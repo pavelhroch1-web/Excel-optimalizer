@@ -862,6 +862,11 @@ if LOCAL_MODE:
 
     import pos_insights  # noqa: E402
 
+    @app.get("/api/pos/search", dependencies=[Depends(require_auth)])
+    def pos_search(q: str = ""):
+        """Search POS by number / name / city (command bar)."""
+        return pos_insights.search(q)
+
     @app.get("/api/pos/{pos_id}/visits", dependencies=[Depends(require_auth)])
     def pos_visits(pos_id: str):
         """Informational: who visited this POS (technician vs OZ), when, what."""
