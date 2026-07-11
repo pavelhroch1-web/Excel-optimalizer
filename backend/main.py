@@ -798,6 +798,17 @@ if LOCAL_MODE:
         return planner_sweep.sweep(body.mode, body.start_week, body.length,
                                    body.capacities, body.tech_count)
 
+    # Plan vs. reality (SalesApp) - the tracking / evaluation half.
+    import plan_reality  # noqa: E402
+
+    @app.get("/api/reality/fulfillment", dependencies=[Depends(require_auth)])
+    def reality_fulfillment(week_from: int, week_to: int):
+        return plan_reality.fulfillment(week_from, week_to)
+
+    @app.get("/api/reality/technicians", dependencies=[Depends(require_auth)])
+    def reality_technicians(week_from: int | None = None, week_to: int | None = None):
+        return plan_reality.reality(week_from, week_to)
+
     import planner_unserved  # noqa: E402
 
     @app.post("/api/planner/unserved", dependencies=[Depends(require_auth)])
