@@ -325,3 +325,49 @@ and the "POS already covered" logic depend on this link.
 `FFO_LOCAL=1` selects the local runtime (SQLite store + auth bypass + frontend
 served by FastAPI). The old cloud code paths (`gh.py`, GitHub Actions) remain
 in the repo but are not used in production.
+
+## Operational memory — the closed loop (and how future layers attach)
+
+The system is a closed loop, not a one-shot planner:
+
+```
+import → planner makes a plan → technicians realise it → SalesApp brings reality
+       → the system measures deviations → remembers them → uses them next time
+```
+
+Everything the loop remembers is written by `history.py` (append-only) and read
+back through `memory.py` (a small, stable query contract). No layer touches raw
+tables.
+
+### Memory substrate (append-only; never rewritten — enforced by triggers)
+- `pos_master_history` — field-level POS change history (esp. PPT). Written on
+  every import (diff vs the pre-import state); missing POS are marked inactive.
+- `metrics` (+ `metric_definitions` catalog) — KPI time-series for network /
+  technician / planner_run. Weekly bucket + exact `computed_at`. Every value
+  carries **provenance** (`source_kind` + `source_id`) and optional `dims`
+  (region/partner/…). A new metric = a catalog row + metrics rows, never a
+  schema change. The catalog stores each metric's **semantics as data** (unit,
+  `direction` good/bad, entity types) so higher layers reason without hardcoding.
+- `planner_runs` — every run, append-only, with inputs, a `config_fingerprint`
+  (+ full `config_snapshot`), and its assessment (planned / unserved-by-reason /
+  score distribution) captured from the SAME engine run (no re-run).
+- `events` — unified activity timeline (import / publish / planner_run /
+  config_change). Only `kind='alert'` is mutable (transient recompute).
+- `snapshots` — immutable full engine state at publish; any past network state
+  is reconstructable from a snapshot + `pos_master_history` deltas.
+
+### Capture points (write side of the loop)
+- **import** → `history.capture_metrics('import', …)` (network + technician KPIs
+  incl. plan-fulfilment vs reality) + POS diff/history.
+- **publish** → publish event + `capture_metrics('publish', …)`.
+- **generate** → `record_planner_run(...)` with the run's assessment.
+- **any config edit** → a `config_change` event.
+
+### Read contract (`memory.py`) — the extension boundary
+`catalog()`, `trend(entity, metric, grain)`, `pos_evolution(pos)`,
+`planner_run_explain(run_id)`, `config_diff(a, b)`. The cockpit and every FUTURE
+layer — AI recommendations, alerts, technician benchmarking, capacity / PPT /
+visit prediction, anomaly detection, campaign simulation — attach to these
+functions, NOT to SQL. Because metrics are generic (catalog + provenance + dims)
+and history is append-only, those layers can be added later by *reading* the
+memory; none of them requires a schema change or a rewrite.

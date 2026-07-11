@@ -171,10 +171,34 @@ def capture_metrics(source_kind: str, source_id: int | None = None, days_back: i
                     record_metric(conn, "technician", mk, float(v), entity_id=t["technician"],
                                   period_type="week", period_key=wk, dims=dims,
                                   source_kind=source_kind, source_id=source_id)
+        # The LOOP's measurement step: plan vs reality (deviation) remembered, so
+        # the next planning has it. Best-effort over the published weeks so far.
+        _capture_fulfilment(conn, wk, source_kind, source_id)
         conn.commit()
     finally:
         conn.close()
     return wk
+
+
+def _capture_fulfilment(conn, wk: str, source_kind: str, source_id: int | None) -> None:
+    """Record plan-fulfilment (plan vs reality) per network + technician into the
+    memory, so long-term plan adherence is a first-class trend."""
+    try:
+        import plan_reality
+        weeks = db.get("SELECT MIN(week) a, MAX(week) b FROM published_plans")
+        if not weeks or weeks[0]["a"] is None:
+            return
+        f = plan_reality.fulfillment(int(weeks[0]["a"]), int(weeks[0]["b"]))
+        if f.get("fulfilmentPct") is not None:
+            record_metric(conn, "network", "plan_fulfilment_pct", float(f["fulfilmentPct"]),
+                          period_type="week", period_key=wk, source_kind=source_kind, source_id=source_id)
+        for t in f.get("perTechnician", []):
+            if t.get("fulfilmentPct") is not None:
+                record_metric(conn, "technician", "plan_fulfilment_pct", float(t["fulfilmentPct"]),
+                              entity_id=t["technician"], period_type="week", period_key=wk,
+                              source_kind=source_kind, source_id=source_id)
+    except Exception:  # noqa: BLE001 - fulfilment is best-effort (needs published plans)
+        pass
 
 
 def run_assessment_from_candidates(cands: list, rejected: list | None) -> dict:

@@ -513,6 +513,16 @@ def publish(body: PublishRequest):
         # sees the freshly-locked week; the next upload resumes from the new
         # snapshot regardless.
         store.save_draft(path, f"Draft po publikaci {record['id']}")
+        if LOCAL_MODE:
+            # Loop: a publish is a memory event + a KPI snapshot (incl. plan
+            # fulfilment vs reality), tagged with this publish as provenance.
+            try:
+                import history
+                eid = history.log_event("publish", "snapshot", str(record.get("id")),
+                                        {"publishedWeeks": result["publishedWeeks"]})
+                history.capture_metrics("publish", eid)
+            except Exception:  # noqa: BLE001 - never fail a publish on a memory write
+                pass
         return {"published": record, "engineMessage": result["message"]}
     finally:
         for p in (path, snap_path):
@@ -1144,6 +1154,34 @@ if LOCAL_MODE:
     @app.get("/api/history/planner-runs", dependencies=[Depends(require_auth)])
     def history_planner_runs(limit: int = 100):
         return {"runs": history.planner_runs(limit)}
+
+    # Memory read layer: the stable query contract the cockpit and every future
+    # layer (AI / alerts / prediction / benchmarking) attaches to. Pure reads.
+    import memory  # noqa: E402
+
+    @app.get("/api/memory/catalog", dependencies=[Depends(require_auth)])
+    def memory_catalog():
+        return {"metrics": memory.catalog()}
+
+    @app.get("/api/memory/trend", dependencies=[Depends(require_auth)])
+    def memory_trend(entity_type: str, metric_key: str, entity_id: str | None = None,
+                     grain: str = "week"):
+        return memory.trend(entity_type, metric_key, entity_id, grain)
+
+    @app.get("/api/memory/pos/{pos_id}/evolution", dependencies=[Depends(require_auth)])
+    def memory_pos_evolution(pos_id: str):
+        return memory.pos_evolution(pos_id)
+
+    @app.get("/api/memory/planner-run/{run_id}", dependencies=[Depends(require_auth)])
+    def memory_run_explain(run_id: int):
+        r = memory.planner_run_explain(run_id)
+        if r is None:
+            raise HTTPException(status_code=404, detail="Běh planneru nenalezen")
+        return r
+
+    @app.get("/api/memory/config-diff", dependencies=[Depends(require_auth)])
+    def memory_config_diff(run_a: int, run_b: int):
+        return memory.config_diff(run_a, run_b)
 
     # Settings platform: configure planner/optimization/dashboard/report/map/
     # scoring from the app. Definitions drive a generic admin UI; values override.
