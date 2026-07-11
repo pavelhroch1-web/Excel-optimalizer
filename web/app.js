@@ -71,6 +71,7 @@ function showApp() {
   loadRactTechnicians();
   loadLiveTechnicians();
   loadLive();
+  loadCockpitBrief();
 }
 function showLogin() {
   appScreen.classList.add("hidden");
@@ -2323,6 +2324,147 @@ async function loadLive() {
   } catch (e) { /* cadence optional */ }
 }
 
+// ---- MORNING OPERATIONAL BRIEF -------------------------------------------
+// The manager's first 10 seconds: what's happening, the biggest problem, which
+// technicians deviate, which POS are problematic, why the planner decided, what
+// stayed unserved, and the trend vs before. Composed from existing endpoints in
+// parallel — no new backend.
+const _BRIEF_KPIS = [
+  { m: "total_visits", label: "Návštěvy", et: "network" },
+  { m: "plan_fulfilment_pct", label: "Plnění plánu", et: "network", unit: "%" },
+  { m: "coverage_overdue", label: "POS po termínu", et: "network", inv: true },
+  { m: "total_km", label: "Km celkem", et: "network", inv: true },
+];
+
+async function loadCockpitBrief() {
+  const el = document.getElementById("op-brief");
+  if (!el) return;
+  if (!el.dataset.init) { el.dataset.init = "1"; el.innerHTML = `<p class="result">Načítám operační brief…</p>`; }
+  try {
+    const [team, runsResp, ...trends] = await Promise.all([
+      apiJson("/api/analytics/team").catch(() => null),
+      apiJson("/api/history/planner-runs?limit=1").catch(() => null),
+      ...(_BRIEF_KPIS.map((k) => apiJson(`/api/memory/trend?entity_type=${k.et}&metric_key=${k.m}`).catch(() => null))),
+    ]);
+    el.innerHTML = renderBrief(team, (runsResp && runsResp.runs && runsResp.runs[0]) || null, trends);
+  } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+}
+
+function renderBrief(team, lastRun, trends) {
+  const t = (team && team.team) || {};
+  const techs = (team && team.technicians) || [];
+  const leaks = (team && team.leaks) || {};
+  const attn = [...techs].sort((a, b) => (b.attention || 0) - (a.attention || 0));
+  const overdueTechs = [...techs].filter((x) => x.overdue > 0).sort((a, b) => b.overdue - a.overdue);
+
+  // --- the single biggest problem to lead with (pick the strongest signal) ---
+  let lead = { icon: "check", tone: "good", text: "Síť je v pořádku — žádná výrazná odchylka k řešení." };
+  const totOverdue = t.totalOverdue || 0;
+  const unserved = lastRun && lastRun.result ? (lastRun.result.unserved || 0) : 0;
+  const worstTech = attn[0];
+  // a technician is a lead-worthy problem on attention OR a concrete red flag
+  const techFlag = worstTech && (
+    (worstTech.attention || 0) >= 20 ||
+    (worstTech.onPosRatioPct != null && worstTech.onPosRatioPct < 30) ||
+    (worstTech.longTransfers || 0) >= 6 ||
+    (worstTech.overdue || 0) > 0);
+  if (totOverdue > 0) {
+    lead = { icon: "clock", tone: "warn", text: `<b>${totOverdue}</b> POS je po termínu kadence napříč sítí — naplánuj dohnání.`, nav: "tourplan" };
+  } else if (unserved > 0 && lastRun.result.core) {
+    lead = { icon: "alert", tone: "warn", text: `Poslední plán nechal <b>${lastRun.result.unserved}</b> POS neobslouženo (${lastRun.result.core} CORE).`, nav: "tourplan" };
+  }
+  if (techFlag && (lead.tone === "good" || (worstTech.attention || 0) >= 40)) {
+    lead = { icon: "alert", tone: (worstTech.attention || 0) >= 40 ? "risk" : "warn",
+             text: `Odchylka u technika: <b>${esc(worstTech.technician)}</b> — ${_techIssue(worstTech)}.`, nav: "analytics" };
+  }
+
+  const now = new Date();
+  const hi = `<div class="brief-head"><div>
+      <div class="brief-title">Operační přehled sítě</div>
+      <div class="brief-date">${now.toLocaleDateString("cs-CZ", { weekday: "long", day: "numeric", month: "long" })}</div>
+    </div>
+    <button class="btn-ghost ck-refresh" id="brief-refresh">Obnovit</button></div>`;
+
+  const leadHtml = `<div class="brief-lead tone-${lead.tone}" ${lead.nav ? `data-nav="${lead.nav}" role="button" tabindex="0"` : ""}>
+      <span class="bl-ico">${ico(lead.icon)}</span><div class="bl-text">${lead.text}</div>
+      ${lead.nav ? `<span class="bl-go">Řešit →</span>` : ""}</div>`;
+
+  // --- network KPIs with trend vs previous period ---
+  const kpiHtml = `<div class="brief-kpis">` + _BRIEF_KPIS.map((k, i) => {
+    const tr = trends[i];
+    const val = tr && tr.latest != null ? tr.latest : _teamKpi(t, k.m);
+    const arrow = _trendArrow(tr, k.inv);
+    return `<div class="brief-kpi"><div class="bk-label">${esc(k.label)}</div>
+      <div class="bk-val">${val == null ? "—" : _fmtNum(val)}${k.unit || ""}</div>
+      <div class="bk-trend ${arrow.cls}">${arrow.html}</div></div>`;
+  }).join("") + `</div>`;
+
+  // --- three columns: technicians / POS / planner decision ---
+  const techCol = `<div class="brief-col"><div class="brief-col-h">${ico("user")} Technici s odchylkou</div>` +
+    (attn.slice(0, 4).filter((x) => (x.attention || 0) > 0).map((a) =>
+      `<div class="brief-row" data-tech="${esc(a.technician)}" role="button" tabindex="0">
+        <div class="br-main">${esc(a.technician)}</div>
+        <div class="br-sub">${_techIssue(a)}</div></div>`).join("") ||
+      `<div class="brief-empty">Žádné výrazné odchylky.</div>`) + `</div>`;
+
+  const posCol = `<div class="brief-col"><div class="brief-col-h">${ico("target")} Problémové oblasti</div>` +
+    (overdueTechs.slice(0, 4).map((a) =>
+      `<div class="brief-row" data-tech="${esc(a.technician)}" role="button" tabindex="0">
+        <div class="br-main">${esc(a.technician)}</div>
+        <div class="br-sub"><span class="br-badge warn">${a.overdue} po termínu</span>
+          ${a.longTransfers ? `<span class="br-badge">${a.longTransfers} dl. přejezdů</span>` : ""}</div></div>`).join("") ||
+      `<div class="brief-empty">Žádné POS po termínu.</div>`) + `</div>`;
+
+  const plannerCol = `<div class="brief-col"><div class="brief-col-h">${ico("route")} Poslední rozhodnutí planneru</div>` +
+    (lastRun ? _renderLastRun(lastRun) : `<div class="brief-empty">Zatím žádný běh planneru.</div>`) + `</div>`;
+
+  return hi + leadHtml + kpiHtml + `<div class="brief-cols">${techCol}${posCol}${plannerCol}</div>`;
+}
+
+function _techIssue(a) {
+  const bits = [];
+  if (a.overdue > 0) bits.push(`${a.overdue} POS po termínu`);
+  if (a.onPosRatioPct != null && a.onPosRatioPct < 30) bits.push(`jen ${a.onPosRatioPct}% času na POS`);
+  if (a.longTransfers > 3) bits.push(`${a.longTransfers} dlouhých přejezdů`);
+  if (a.kmPerDay != null && a.kmPerDay > 200) bits.push(`${Math.round(a.kmPerDay)} km/den`);
+  if (a.avgWorkHours != null && a.avgWorkHours < 4) bits.push(`krátká prac. doba`);
+  return bits.slice(0, 2).join(" · ") || "sledovat";
+}
+
+function _renderLastRun(r) {
+  const res = r.result || {};
+  const chips = [
+    res.planned != null ? `<span class="br-badge good">${res.planned} naplánováno</span>` : "",
+    res.unserved != null ? `<span class="br-badge warn">${res.unserved} neobslouženo</span>` : "",
+    res.mandatory != null ? `<span class="br-badge">${res.mandatory} garantováno</span>` : "",
+  ].join(" ");
+  const reasons = res.unservedByReason ? Object.entries(res.unservedByReason).slice(0, 2)
+    .map(([k, v]) => `${v}× ${esc(k)}`).join(" · ") : "";
+  return `<div class="brief-run" data-run="${r.id}" role="button" tabindex="0">
+    <div class="br-main">${esc(r.mode || "")} · tý. ${r.start_week}${r.length > 1 ? "–" + (r.start_week + r.length - 1) : ""}</div>
+    <div class="br-chips">${chips}</div>
+    ${reasons ? `<div class="br-sub">Neobslouženo hl. kvůli: ${reasons}</div>` : ""}
+    <div class="br-why">Proč rozhodl takto →</div></div>`;
+}
+
+function _teamKpi(t, m) {
+  return { total_visits: t.totalVisits, total_km: t.totalKm, coverage_overdue: t.totalOverdue,
+           plan_fulfilment_pct: t.planFulfilmentPct }[m];
+}
+function _fmtNum(v) {
+  if (v == null) return "—";
+  const n = Number(v);
+  return Math.abs(n) >= 1000 ? n.toLocaleString("cs-CZ", { maximumFractionDigits: 0 }) : (Math.round(n * 10) / 10);
+}
+function _trendArrow(tr, inv) {
+  if (!tr || tr.changePct == null) return { cls: "flat", html: "vs. minule —" };
+  const up = tr.changePct > 0;
+  const good = inv ? !up : up;
+  const sym = up ? "▲" : (tr.changePct < 0 ? "▼" : "▬");
+  return { cls: good ? "up-good" : (tr.changePct === 0 ? "flat" : "down-bad"),
+           html: `${sym} ${Math.abs(tr.changePct)}% vs. minule` };
+}
+
 function populateLiveTechs(b) {
   const sel = document.getElementById("live-tech");
   if (!sel || sel.dataset.filled) return;
@@ -2348,6 +2490,67 @@ document.addEventListener("click", (e) => {
 });
 on("live-tech", "change", () => { _live.tech = document.getElementById("live-tech").value; renderLive(); });
 on("live-refresh", "click", loadLive);
+
+// operational brief: drill-downs (nav / technician → analytics / run → explain)
+document.getElementById("op-brief") && document.getElementById("op-brief").addEventListener("click", (e) => {
+  const refresh = e.target.closest("#brief-refresh");
+  if (refresh) { loadCockpitBrief(); return; }
+  const lead = e.target.closest(".brief-lead[data-nav]");
+  if (lead) { showView(lead.dataset.nav); return; }
+  const techEl = e.target.closest("[data-tech]");
+  if (techEl) { openTechnicianAnalytics(techEl.dataset.tech); return; }
+  const runEl = e.target.closest("[data-run]");
+  if (runEl) { openPlannerRun(runEl.dataset.run); return; }
+});
+
+// jump to Analytics focused on one technician (reuses the analytics view)
+function openTechnicianAnalytics(name) {
+  showView("analytics");
+  const sel = document.getElementById("ract-tech");
+  if (sel) {
+    const opt = [...sel.options].find((o) => o.value === name);
+    if (opt) { sel.value = name; sel.dispatchEvent(new Event("change")); }
+  }
+}
+
+// "Proč planner rozhodl takto" — reopen a past run: inputs, config, assessment.
+async function openPlannerRun(runId) {
+  const overlay = document.getElementById("pos-detail-overlay");
+  const bodyEl = document.getElementById("pd-body");
+  document.getElementById("pd-title").textContent = "Běh planneru #" + runId;
+  bodyEl.innerHTML = "<p class='pd-sub'>Načítám…</p>";
+  overlay.classList.remove("hidden");
+  try {
+    const r = await apiJson("/api/memory/planner-run/" + encodeURIComponent(runId));
+    const res = r.result || {};
+    const reasons = res.unservedByReason
+      ? Object.entries(res.unservedByReason).map(([k, v]) =>
+          `<div class="pd-kv"><span>${esc(k)}</span><b>${v}</b></div>`).join("") : "";
+    bodyEl.innerHTML =
+      `<div class="pd-section">Vstupy</div>
+       <div class="pd-kv"><span>Režim</span><b>${esc(r.mode || "—")}</b></div>
+       <div class="pd-kv"><span>Týdny</span><b>${r.start_week}${r.length > 1 ? "–" + (r.start_week + r.length - 1) : ""}</b></div>
+       <div class="pd-kv"><span>Otisk konfigurace</span><b><code>${esc((r.config_fingerprint || "").slice(0, 12))}</code></b></div>
+       <div class="pd-kv"><span>Kdy</span><b>${esc(r.ran_at || "")}</b></div>
+       <div class="pd-section">Výsledek rozhodnutí</div>
+       <div class="score-bars">
+         ${_runBar("Naplánováno", res.planned, "good")}
+         ${_runBar("Garantováno (kadence)", res.mandatory)}
+         ${_runBar("Odloženo (hold-back)", res.heldBack)}
+         ${_runBar("Neobslouženo", res.unserved, "warn")}
+       </div>
+       <div class="pd-kv"><span>Medián business score</span><b>${res.scoreMedian != null ? _fmtNum(res.scoreMedian) : "—"}</b></div>
+       <div class="pd-kv"><span>Medián PPT vybraných</span><b>${res.pptMedianSelected != null ? _fmtNum(res.pptMedianSelected) : "—"}</b></div>
+       ${reasons ? `<div class="pd-section">Proč zůstalo neobslouženo</div>${reasons}` : ""}
+       <p class="pd-sub" style="margin-top:12px">Rozhodnutí vychází z konfigurace platné v čase běhu (uložený otisk) a z historie sítě. Změna konfigurace mezi běhy je dohledatelná přes porovnání otisků.</p>`;
+  } catch (e) { bodyEl.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+}
+
+function _runBar(label, val, tone) {
+  if (val == null) return "";
+  return `<div class="run-bar ${tone || ""}"><span class="rb-l">${esc(label)}</span><b class="rb-v">${_fmtNum(val)}</b></div>`;
+}
+
 document.getElementById("ck-search-ico") && (document.getElementById("ck-search-ico").innerHTML = ico("search"));
 
 // --- POS command-bar search (debounced) ---
