@@ -99,7 +99,11 @@ def fulfillment(week_from: int, week_to: int, tolerance: int = 1) -> dict:
 
 
 def reality(week_from: int | None = None, week_to: int | None = None) -> dict:
-    """What technicians actually did in the window (rich real data)."""
+    """What ACTIVE technicians actually did in the window (rich real data).
+    Only role=TECHNIK & active=1 count - OZ/Admin/Manager are excluded per the
+    technician configuration."""
+    tech_ok = {r["name"] for r in db.get(
+        "SELECT name FROM technicians WHERE role='TECHNIK' AND active=1")}
     rows = db.get("SELECT technician, pos_id, visitor_role, visit_date, real_duration "
                   "FROM salesapp_visits WHERE technician IS NOT NULL AND visit_date IS NOT NULL")
     per: dict = {}
@@ -107,7 +111,7 @@ def reality(week_from: int | None = None, week_to: int | None = None) -> dict:
         wk = _iso_week(r["visit_date"])
         if wk is None or (week_from and wk < week_from) or (week_to and wk > week_to):
             continue
-        if r["visitor_role"] != "TECHNIK":
+        if r["technician"] not in tech_ok:
             continue
         d = per.setdefault(r["technician"], {"technician": r["technician"], "visits": 0,
                                              "posSet": set(), "days": set(), "durSum": 0.0, "durN": 0})

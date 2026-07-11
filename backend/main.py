@@ -668,6 +668,31 @@ if LOCAL_MODE:
     def data_summary():
         return {t: db.get(f"SELECT COUNT(*) AS c FROM {t}")[0]["c"] for t in _DATA_TABLES}
 
+    # Technician configuration: role (TECHNIK/OZ/ADMIN/MANAGER) + active. All
+    # technician metrics count only active TECHNIK. Manual edits stick across
+    # imports (manual_role=1); auto-rule 3xx=OZ otherwise.
+    class TechnicianUpdate(BaseModel):
+        role: str | None = None
+        active: bool | None = None
+
+    @app.get("/api/technicians", dependencies=[Depends(require_auth)])
+    def list_technicians():
+        rows = db.get("SELECT name, role, manual_role, active, region, capacity_per_week "
+                      "FROM technicians ORDER BY role, name")
+        return {"technicians": [dict(r) for r in rows]}
+
+    @app.put("/api/technicians/{name}", dependencies=[Depends(require_auth)])
+    def update_technician(name: str, body: TechnicianUpdate):
+        sets, params = [], []
+        if body.role is not None:
+            sets += ["role=?", "manual_role=1"]; params.append(body.role)
+        if body.active is not None:
+            sets.append("active=?"); params.append(1 if body.active else 0)
+        if sets:
+            params.append(name)
+            db.run(f"UPDATE technicians SET {', '.join(sets)}, updated_at=datetime('now') WHERE name=?", tuple(params))
+        return {"ok": True}
+
     # Automatic import: drop a file, the system detects its type and processes it.
     import auto_import  # noqa: E402
 

@@ -1011,6 +1011,42 @@ on("planner-whatif-form", "submit", async (e) => {
   }
 });
 
+// ---- technician configuration ---------------------------------------------
+
+const _ROLES = ["TECHNIK", "OZ", "ADMIN", "MANAGER"];
+
+async function loadTechnicians() {
+  const el = document.getElementById("tech-out");
+  if (!el) return;
+  const filter = document.getElementById("tech-filter").value;
+  try {
+    let list = (await apiJson("/api/technicians")).technicians;
+    if (filter) list = list.filter((t) => t.role === filter);
+    el.innerHTML = `<table class="pd-score-table"><thead><tr><th>Jméno</th><th>Role</th><th>Aktivní</th></tr></thead><tbody>` +
+      list.map((t) =>
+        `<tr><td>${esc(t.name)}${t.manual_role ? " ✎" : ""}</td>` +
+        `<td><select data-tech="${esc(t.name)}" class="tech-role">` +
+        _ROLES.map((r) => `<option ${r === t.role ? "selected" : ""}>${r}</option>`).join("") + `</select></td>` +
+        `<td><input type="checkbox" class="tech-active" data-tech="${esc(t.name)}" ${t.active ? "checked" : ""}></td></tr>`).join("") +
+      `</tbody></table><p class="hint">${list.length} osob. ✎ = ručně nastaveno.</p>`;
+    el.querySelectorAll(".tech-role").forEach((s) => s.addEventListener("change", async () => {
+      await postJsonPut(`/api/technicians/${encodeURIComponent(s.dataset.tech)}`, { role: s.value });
+      loadAlerts();
+    }));
+    el.querySelectorAll(".tech-active").forEach((cb) => cb.addEventListener("change", async () => {
+      await postJsonPut(`/api/technicians/${encodeURIComponent(cb.dataset.tech)}`, { active: cb.checked });
+      loadAlerts();
+    }));
+  } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+}
+
+function postJsonPut(path, body) {
+  return apiJson(path, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+}
+
+on("tech-refresh", "click", loadTechnicians);
+on("tech-filter", "change", loadTechnicians);
+
 // ---- automatic import + alerts --------------------------------------------
 
 const _TYPE_LABEL = { workbook: "kompletní workbook", salesapp: "SalesApp", pos_master: "POS Master", activity_plan: "Activity Plan", unknown: "neznámý" };

@@ -200,12 +200,16 @@ def derive_technicians(conn) -> int:
         "INSERT OR IGNORE INTO technicians (name) "
         "SELECT DISTINCT technician FROM pos_master WHERE technician IS NOT NULL AND technician<>'' "
         "UNION SELECT DISTINCT technician FROM salesapp_visits WHERE technician IS NOT NULL AND technician<>''")
-    # role from visits: OZ if the person's OZ visits outnumber TECHNIK visits.
+    # Auto-rule (only where NOT manually set): service number 3xx => OZ, or the
+    # person's OZ visits outnumber TECHNIK visits. Manual roles (Admin/Manager,
+    # or hand overrides) are never touched.
     conn.execute(
-        "UPDATE technicians SET role='OZ' WHERE name IN ("
-        "  SELECT technician FROM salesapp_visits WHERE technician IS NOT NULL "
-        "  GROUP BY technician "
-        "  HAVING SUM(visitor_role='OZ') > SUM(visitor_role='TECHNIK'))")
+        "UPDATE technicians SET role='OZ' WHERE manual_role=0 AND ("
+        "  name GLOB '3[0-9][0-9]*' "
+        "  OR name IN (SELECT technician FROM salesapp_visits WHERE technician IS NOT NULL "
+        "              GROUP BY technician HAVING SUM(visitor_role='OZ') > SUM(visitor_role='TECHNIK')))")
+    # anyone auto-classified and not OZ defaults back to TECHNIK
+    conn.execute("UPDATE technicians SET role='TECHNIK' WHERE manual_role=0 AND role NOT IN ('OZ')")
     return conn.execute("SELECT COUNT(*) c FROM technicians").fetchone()[0]
 
 

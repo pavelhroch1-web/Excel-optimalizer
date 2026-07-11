@@ -23,7 +23,8 @@
 CREATE TABLE IF NOT EXISTS technicians (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     name              TEXT NOT NULL UNIQUE,
-    role              TEXT NOT NULL DEFAULT 'TECHNIK',   -- TECHNIK | OZ | OTHER
+    role              TEXT NOT NULL DEFAULT 'TECHNIK',   -- TECHNIK | OZ | ADMIN | MANAGER
+    manual_role       INTEGER NOT NULL DEFAULT 0,        -- 1 = set by hand, import won't override
     region            TEXT,
     area              TEXT,
     capacity_per_week INTEGER,
