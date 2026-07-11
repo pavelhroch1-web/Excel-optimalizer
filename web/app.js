@@ -1010,6 +1010,73 @@ on("planner-whatif-form", "submit", async (e) => {
   }
 });
 
+// ---- plan vs reality (SalesApp) -------------------------------------------
+
+function renderReality(r) {
+  if (!r.technicians.length) return `<p class="pd-sub">V tomto rozsahu nejsou žádné návštěvy techniků.</p>`;
+  const mins = r.technicians.map((t) => t.avgOnPosMinutes).filter((x) => x != null).sort((a, b) => a - b);
+  const median = mins.length ? mins[Math.floor(mins.length / 2)] : null;
+  let html = `<p class="pd-sub">${r.technicianCount} techniků, týdny ${r.weekFrom ?? "–"}–${r.weekTo ?? "–"}.</p>`;
+  html += `<table class="pd-score-table"><thead><tr><th>Technik</th><th>Návštěv</th><th>POS</th><th>Dní</th><th>/den</th><th>min/POS</th></tr></thead><tbody>`;
+  html += r.technicians.map((t) => {
+    // flag unusually long/short on-POS time vs median (>1.6x or <0.5x)
+    let cls = "";
+    if (median && t.avgOnPosMinutes != null) {
+      if (t.avgOnPosMinutes > median * 1.6) cls = "wi-impact neg";
+      else if (t.avgOnPosMinutes < median * 0.5) cls = "wi-impact";
+    }
+    return `<tr><td>${esc(t.technician)}</td><td>${t.visits}</td><td>${t.uniquePos}</td>` +
+      `<td>${t.daysWorked}</td><td>${t.avgVisitsPerDay}</td>` +
+      `<td class="${cls}" style="text-align:right">${t.avgOnPosMinutes ?? "—"}</td></tr>`;
+  }).join("");
+  html += `</tbody></table><p class="hint">Medián času na POS ≈ ${median ?? "—"} min. Výrazně vyšší hodnoty (červeně) stojí za pozornost.</p>`;
+  return html;
+}
+
+function renderFulfillment(f) {
+  let html = `<div class="pl-tiles">`;
+  html += tile("Naplánováno", f.planned, `týdny ${f.weekFrom}–${f.weekTo}`);
+  html += tile("Splněno", f.done + f.doneShifted, `${f.fulfilmentPct ?? "—"} %`, (f.fulfilmentPct >= 80 ? "good" : "warn"));
+  html += tile("Neobslouženo", f.missed, "z plánu", f.missed ? "bad" : "good");
+  html += tile("Mimořádné návštěvy", f.extraVisits, "mimo plán");
+  html += tile("Jiný technik", f.wrongTechnician, "než plánováno", f.wrongTechnician ? "warn" : "");
+  html += `</div>`;
+  if (f.note) html += `<p class="hint">${esc(f.note)}</p>`;
+  if (f.perTechnician && f.perTechnician.length && (f.done + f.doneShifted + f.missed)) {
+    html += `<table class="pd-score-table"><thead><tr><th>Technik</th><th>Plán</th><th>Splněno</th><th>Neobsl.</th><th>%</th></tr></thead><tbody>` +
+      f.perTechnician.map((t) => `<tr><td>${esc(t.technician)}</td><td>${t.planned}</td>` +
+        `<td>${t.done + t.doneShifted}</td><td>${t.missed}</td><td>${t.fulfilmentPct} %</td></tr>`).join("") +
+      `</tbody></table>`;
+  }
+  return html;
+}
+
+on("reality-form", "submit", async (e) => {
+  e.preventDefault();
+  const wf = document.getElementById("reality-wf").value;
+  const wt = document.getElementById("reality-wt").value;
+  setResult("reality-result", "Načítám realitu…", "");
+  try {
+    const q = new URLSearchParams();
+    if (wf) q.set("week_from", wf); if (wt) q.set("week_to", wt);
+    const r = await apiJson("/api/reality/technicians?" + q.toString());
+    document.getElementById("reality-out").innerHTML = renderReality(r);
+    setResult("reality-result", "", "ok");
+  } catch (err) { setResult("reality-result", "Chyba: " + err.message, "err"); }
+});
+
+on("fulfil-btn", "click", async () => {
+  const wf = document.getElementById("reality-wf").value;
+  const wt = document.getElementById("reality-wt").value;
+  if (!wf || !wt) { setResult("reality-result", "Zadej rozsah týdnů.", "err"); return; }
+  setResult("reality-result", "Porovnávám plán s realitou…", "");
+  try {
+    const f = await apiJson(`/api/reality/fulfillment?week_from=${wf}&week_to=${wt}`);
+    document.getElementById("reality-out").innerHTML = renderFulfillment(f);
+    setResult("reality-result", "", "ok");
+  } catch (err) { setResult("reality-result", "Chyba: " + err.message, "err"); }
+});
+
 // ---- predictions: capacity sweep ------------------------------------------
 
 function renderSweep(s) {

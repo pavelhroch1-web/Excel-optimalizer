@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Field Force Optimizer</title>
-<link rel="stylesheet" href="styles.css?v=14">
-<script src="config.js?v=14"></script>
+<link rel="stylesheet" href="styles.css?v=15">
+<script src="config.js?v=15"></script>
 </head>
 <body>
 
@@ -23,7 +23,7 @@
 
 <div id="app-screen" class="screen hidden">
   <header>
-    <h1>Field Force Optimizer <span class="ver">v14</span></h1>
+    <h1>Field Force Optimizer <span class="ver">v15</span></h1>
     <button id="logout" class="ghost">Odhlásit</button>
   </header>
 
@@ -88,6 +88,20 @@
       </form>
       <p id="excl-result" class="result"></p>
     </div>
+  </section>
+
+  <!-- PLAN VS REALITY: tracking / evaluation from SalesApp -->
+  <section class="card planner-card">
+    <h2>Plán vs. realita <span class="badge">SalesApp</span></h2>
+    <p class="hint">Porovnání publikovaného TourPlanu se skutečnými návštěvami (splněno / neobslouženo / mimořádné) a reálná aktivita techniků (návštěvy, dny, čas na POS). Zadej rozsah týdnů.</p>
+    <form id="reality-form" class="row">
+      <label>Od týdne<input type="number" id="reality-wf" min="1" max="53" value="5"></label>
+      <label>Do týdne<input type="number" id="reality-wt" min="1" max="53" value="28"></label>
+      <button type="submit" class="primary">Realita techniků</button>
+      <button type="button" id="fulfil-btn" class="ghost">Plán vs. realita</button>
+    </form>
+    <p id="reality-result" class="result"></p>
+    <div id="reality-out"></div>
   </section>
 
   <!-- CLOUD GENERATE: heavy plan on GitHub Actions (no OOM here) -->
@@ -351,6 +365,6 @@
   </aside>
 </div>
 
-<script src="app.js?v=14"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>
