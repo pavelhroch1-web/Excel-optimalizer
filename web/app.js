@@ -662,27 +662,63 @@ on("pos-detail-overlay", "click", (e) => {
   if (e.target.id === "pos-detail-overlay") closePosDetail();
 });
 
+const _ROLE_LABEL = { TECHNIK: "Technik", OZ: "OZ", ADMIN: "Admin", MANAGER: "Manažer" };
+
+function renderPosHistory(s) {
+  let html = `<div class="pl-tiles">` +
+    tile("Návštěv celkem", s.totalVisitCount ?? 0, "všechny role") +
+    tile("Technik", s.technicianVisitCount ?? 0, "návštěv") +
+    tile("OZ", s.ozVisitCount ?? 0, "návštěv (informativně)") + `</div>`;
+  const lv = (v, lbl) => v
+    ? `<div class="pd-lastvisit"><span class="pd-lv-l">${lbl}</span><b>${esc(String(v.visit_date).slice(0, 10))}</b>` +
+      `<span class="pd-lv-s">${esc(v.technician || "")}${v.purpose ? " · " + esc(v.purpose) : ""}</span></div>`
+    : `<div class="pd-lastvisit"><span class="pd-lv-l">${lbl}</span><span class="pd-lv-s">nikdy</span></div>`;
+  html += `<div class="pd-lv-row">${lv(s.lastTechnicianVisit, "Poslední návštěva technika")}${lv(s.lastOzVisit, "Poslední návštěva OZ")}</div>`;
+  const rv = s.recentVisits || [];
+  if (rv.length) {
+    html += `<div class="pd-section">Historie návštěv (posledních ${rv.length})</div>` +
+      `<table class="pd-score-table"><thead><tr><th>Datum</th><th>Role</th><th>Kdo</th><th>Účel</th><th>Trvání</th></tr></thead><tbody>` +
+      rv.map((v) => {
+        let dur = "—";
+        if (v.started_at && v.finished_at) {
+          const m = Math.round((new Date(v.finished_at.replace(" ", "T")) - new Date(v.started_at.replace(" ", "T"))) / 60000);
+          if (m > 0 && m < 1440) dur = m + " min";
+        }
+        return `<tr><td>${esc(String(v.visit_date).slice(0, 10))}</td>` +
+          `<td>${esc(_ROLE_LABEL[v.visitor_role] || v.visitor_role || "—")}</td>` +
+          `<td>${esc(v.technician || "—")}</td><td>${esc(v.purpose || "—")}</td><td>${dur}</td></tr>`;
+      }).join("") + `</tbody></table>`;
+  } else {
+    html += `<p class="pd-sub">Žádné zaznamenané návštěvy ze SalesApp.</p>`;
+  }
+  return html;
+}
+
 async function openPosDetail(posId, week) {
   const overlay = document.getElementById("pos-detail-overlay");
   const bodyEl = document.getElementById("pd-body");
   document.getElementById("pd-title").textContent = "POS " + posId;
-  bodyEl.innerHTML = "<p class='pd-sub'>Načítám diagnostiku…</p>";
+  bodyEl.innerHTML = "<p class='pd-sub'>Načítám…</p>";
   overlay.classList.remove("hidden");
-  if (!week) {
-    bodyEl.innerHTML = "<p class='result err'>Nejdřív zadej týden v sekci Kandidáti nebo otevři POS z návrhu.</p>";
-    return;
+  let html = "";
+  // Engine diagnostic (only when opened with a planning week context).
+  if (week) {
+    try {
+      const d = await apiJson("/api/draft/pos/" + encodeURIComponent(posId) + "?week=" + week);
+      if (d.found) {
+        document.getElementById("pd-title").textContent = "POS " + d.pos + " · " + (d.nazev || "");
+        html += renderPosDetail(d, week);
+      }
+    } catch (e) { /* fall back to history-only */ }
   }
+  // Visit history (always available — last visit, who, when, purpose).
   try {
-    const d = await apiJson("/api/draft/pos/" + encodeURIComponent(posId) + "?week=" + week);
-    if (!d.found) {
-      bodyEl.innerHTML = "<p class='result err'>POS nebyl nalezen v datech.</p>";
-      return;
-    }
-    document.getElementById("pd-title").textContent = "POS " + d.pos + " · " + (d.nazev || "");
-    bodyEl.innerHTML = renderPosDetail(d, week);
+    const s = await apiJson("/api/pos/" + encodeURIComponent(posId) + "/visits");
+    html += (html ? `<div class="pd-section" style="margin-top:20px">Historie ze SalesApp</div>` : "") + renderPosHistory(s);
   } catch (err) {
-    bodyEl.innerHTML = "<p class='result err'>Chyba: " + esc(err.message) + "</p>";
+    if (!html) html = `<p class="result err">Chyba: ${esc(err.message)}</p>`;
   }
+  bodyEl.innerHTML = html;
 }
 
 function renderPosDetail(d, week) {
