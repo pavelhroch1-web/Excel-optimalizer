@@ -550,6 +550,10 @@ button.ghost.small { padding: 7px 13px; font-size: 12.5px; margin-left: auto; }
 .td-tl-row { display: grid; grid-template-columns: 26px 92px 1fr auto; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--border); font-size: 12.5px; }
 .ttl-seq { width: 22px; height: 22px; border-radius: 6px; background: var(--panel-2); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 11px; }
 .ttl-time { color: var(--text-3); font-variant-numeric: tabular-nums; } .ttl-name { font-weight: 550; } .ttl-on { color: var(--text-2); white-space: nowrap; }
+.td-tl-x { opacity: 0.72; } .td-tl-x .ttl-name { font-weight: 450; font-style: italic; }
+.ttl-seq-x { background: transparent; color: var(--text-3); }
+.ttl-kind { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .3px; background: var(--panel-2); color: var(--text-3); }
+.ttl-break { background: #f4e8c8; color: #8a6d1a; } .ttl-office { background: #dfe8f4; color: #345; } .ttl-prospect { background: #e2f0e2; color: #2a5; }
 @media (max-width: 760px) { .td-days-wrap { grid-template-columns: 1fr; } .td-days-list { border-right: none; border-bottom: 1px solid var(--border); max-height: 200px; } }
 
 /* company "where we lose time" block on the cockpit */

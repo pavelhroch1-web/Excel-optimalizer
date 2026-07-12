@@ -2786,13 +2786,23 @@ async function openTechDay(name, date) {
     const o = d.optimal;
     const optLine = o ? `<div class="td-day-opt ${o.savedKm > 5 ? "warn" : ""}">Optimální pořadí: skutečně ${o.actualKm} km / ${_fmtHM(o.actualTravelMin)} → optimum ${o.optimalKm} km / ${_fmtHM(o.optimalTravelMin)}
       <b>· ušetřit ${o.savedKm} km, ${o.savedMin} min</b></div>` : "";
-    const tl = d.stops.map((s, i) =>
-      `<div class="td-tl-row"><span class="ttl-seq">${i + 1}</span>
+    let posSeq = 0;
+    const kindLabel = { break: "pauza", office: "středisko", prospect: "akvizice", other: "ostatní" };
+    const tl = d.stops.map((s) => {
+      const isPos = (s.kind || "pos") === "pos";
+      const seq = isPos ? `<span class="ttl-seq">${++posSeq}</span>` : `<span class="ttl-seq ttl-seq-x">•</span>`;
+      const tag = isPos ? "" : `<span class="ttl-kind ttl-${s.kind}">${kindLabel[s.kind] || s.kind}</span>`;
+      return `<div class="td-tl-row ${isPos ? "" : "td-tl-x"}">${seq}
         <span class="ttl-time">${_hm(s.started)}–${_hm(s.finished)}</span>
-        <span class="ttl-name">${esc(s.name || s.pos)}</span>
-        <span class="ttl-on">${s.onPosMin != null ? Math.round(s.onPosMin) + " min" : ""}</span></div>`).join("");
-    host.innerHTML = `<div class="td-day-head">${esc(date)} · ${d.stops.length} zastávek · ${d.totalKm ?? "—"} km · ${d.workHours ?? "—"} h
-        (na cestě ${_fmtHM(d.travelMin)}, na POS ${_fmtHM(d.onPosMin)})</div>
+        <span class="ttl-name">${esc(s.name || s.pos)}${tag}</span>
+        <span class="ttl-on">${s.onPosMin != null ? Math.round(s.onPosMin) + " min" : ""}</span></div>`;
+    }).join("");
+    const posCount = d.stops.filter((s) => (s.kind || "pos") === "pos").length;
+    const extras = [];
+    if (d.breakMin) extras.push(`pauza ${_fmtHM(d.breakMin)}`);
+    if (d.adminMin) extras.push(`středisko ${_fmtHM(d.adminMin)}`);
+    host.innerHTML = `<div class="td-day-head">${esc(date)} · ${posCount} POS · ${d.totalKm ?? "—"} km · ${d.workHours ?? "—"} h
+        (na cestě ${_fmtHM(d.travelMin)}, na POS ${_fmtHM(d.onPosMin)}${extras.length ? ", " + extras.join(", ") : ""})</div>
       ${optLine}
       <div id="td-map" class="td-map"></div>
       <div class="td-sec">Timeline dne</div><div class="td-timeline">${tl}</div>`;
@@ -2802,7 +2812,7 @@ async function openTechDay(name, date) {
 
 function _tdDrawMap(d) {
   if (typeof L === "undefined") return;
-  const pts = d.stops.filter((s) => s.lat != null && s.lon != null);
+  const pts = d.stops.filter((s) => (s.kind || "pos") === "pos" && s.lat != null && s.lon != null);
   if (pts.length < 1) { document.getElementById("td-map").innerHTML = "<p class='pd-sub' style='padding:12px'>Bez GPS souřadnic.</p>"; return; }
   const map = L.map("td-map");
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OSM" }).addTo(map);

@@ -116,11 +116,13 @@ def profile(name: str, days_back: int = 120) -> dict:
     end = datetime.date.today()
     start = end - datetime.timedelta(days=days_back)
     route = route_actual.technician_route(name, start.isoformat(), end.isoformat())
-    days = [{"date": d["date"], "stops": len(d.get("stops", [])),
+    days = [{"date": d["date"],
+             "stops": d.get("stopCount") or sum(1 for s in d.get("stops", []) if s.get("kind", "pos") == "pos"),
              "km": d.get("totalKm"), "travelMin": d.get("travelMin"),
-             "onPosMin": d.get("onPosMin"), "workHours": d.get("workHours"),
+             "onPosMin": d.get("onPosMin"), "breakMin": d.get("breakMin"),
+             "adminMin": d.get("adminMin"), "workHours": d.get("workHours"),
              "workStart": d.get("workStart"), "workEnd": d.get("workEnd")}
-            for d in route.get("days", []) if d.get("stops")]
+            for d in route.get("days", []) if d.get("stopCount")]
     days.sort(key=lambda d: d["date"], reverse=True)
 
     return {
@@ -139,7 +141,8 @@ def day(name: str, date: str) -> dict:
     if not d:
         return {"technician": name, "date": date, "found": False}
     stops = d["stops"]
-    pts = [GeoPoint(s["lat"], s["lon"]) for s in stops if s.get("lat") is not None and s.get("lon") is not None]
+    pts = [GeoPoint(s["lat"], s["lon"]) for s in stops
+           if s.get("kind", "pos") == "pos" and s.get("lat") is not None and s.get("lon") is not None]
 
     optimal = None
     if len(pts) >= 2:
@@ -162,6 +165,7 @@ def day(name: str, date: str) -> dict:
     timeline = []
     for i, s in enumerate(stops):
         timeline.append({"seq": s["seq"], "pos": s["pos"], "name": s.get("name"),
+                         "kind": s.get("kind", "pos"),
                          "started": s.get("started"), "finished": s.get("finished"),
                          "onPosMin": s.get("onPosMin"),
                          "lat": s.get("lat"), "lon": s.get("lon")})
@@ -169,7 +173,8 @@ def day(name: str, date: str) -> dict:
         "technician": name, "date": date, "found": True,
         "stops": timeline, "legs": d.get("legs", []),
         "totalKm": d.get("totalKm"), "travelMin": d.get("travelMin"),
-        "onPosMin": d.get("onPosMin"), "workHours": d.get("workHours"),
+        "onPosMin": d.get("onPosMin"), "breakMin": d.get("breakMin"),
+        "adminMin": d.get("adminMin"), "workHours": d.get("workHours"),
         "workStart": d.get("workStart"), "workEnd": d.get("workEnd"),
         "optimal": optimal,
     }

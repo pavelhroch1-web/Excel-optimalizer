@@ -64,7 +64,7 @@ def route_profile(name: str, days_back: int = 90) -> dict | None:
     tot_opt_travel_min = tot_act_model_min = 0.0
     isolated_days = geo_days = 0
     for d in days:
-        pos_counts.append(len(d["stops"]))
+        pos_counts.append(d.get("stopCount") or sum(1 for s in d["stops"] if s.get("kind", "pos") == "pos"))
         spans.append(d.get("workHours"))
         tr, op = d.get("travelMin") or 0, d.get("onPosMin") or 0
         tot_travel_min += tr
