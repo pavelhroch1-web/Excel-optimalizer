@@ -43,13 +43,14 @@ def _iso_week(date_str):
         return None
 
 
-def overview(days_back: int = 21) -> dict:
-    """Per-technician workload + plan load + overdue, team rollups and leaks."""
+def overview(days_back: int = 21, role: str = "TECHNIK") -> dict:
+    """Per-person workload + plan load + overdue, team rollups and leaks, for one
+    role (TECHNIK by default; OZ shown only when explicitly requested)."""
     techs = {r["name"]: dict(r) for r in db.get(
         "SELECT name, capacity_per_week, region FROM technicians "
-        "WHERE role='TECHNIK' AND active=1")}
+        "WHERE role=? AND active=1", (role.upper(),))}
     if not techs:
-        return {"technicians": [], "team": {}, "note": "Nejsou žádní aktivní technici (role TECHNIK)."}
+        return {"technicians": [], "team": {}, "note": f"Nejsou žádní aktivní lidé (role {role})."}
 
     gps = {str(r["pos_id"]): (r["gps_x"], r["gps_y"])
            for r in db.get("SELECT pos_id, gps_x, gps_y FROM pos_master")}

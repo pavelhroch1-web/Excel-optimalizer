@@ -241,6 +241,176 @@ def derive_technicians(conn) -> int:
     return conn.execute("SELECT COUNT(*) c FROM technicians").fetchone()[0]
 
 
+# TourPlan column -> published_plans column. Header matching is case/diacritics
+# tolerant, so the manager's own exported TourPlan loads as-is.
+_TOURPLAN_MAP = {
+    "WEEK": "week", "TYDEN": "week", "TÝDEN": "week", "TOURPLAN": "week",
+    "DATE": "plan_date", "DATUM": "plan_date",
+    "DAY": "day", "DEN": "day",
+    "TECHNICIAN": "technician", "TECHNIK": "technician",
+    "POS": "pos_id", "POSID": "pos_id",
+    "KATEGORIE": "category", "CATEGORY": "category",
+    "NAZEV": "name", "NÁZEV": "name", "NAME": "name",
+    "ULICE": "street", "CISLO": "house_number", "ČÍSLO": "house_number",
+    "MESTO": "city", "MĚSTO": "city", "CITY": "city",
+    "OBLAST": "area", "AREA": "area", "POSAREA": "pos_area",
+    "PPT": "ppt", "REASON": "reason", "DUVOD": "reason", "DŮVOD": "reason",
+    "GROUP": "day_group", "SKUPINA": "day_group", "SEQ": "day_seq",
+}
+
+
+def _tourplan_header_row(ws, max_scan: int = 8):
+    """The header can sit below blank rows; find the row that has POS + a
+    technician + a week/plan column. Returns (row_index, [UPPER headers])."""
+    for ri, row in enumerate(ws.iter_rows(min_row=1, max_row=max_scan, values_only=True), start=1):
+        cells = [str(c).strip().upper() if c is not None else "" for c in row]
+        if "POS" in cells and ("TECHNICIAN" in cells or "TECHNIK" in cells) and \
+           ("WEEK" in cells or "TYDEN" in cells or "TÝDEN" in cells or "TOURPLAN" in cells):
+            return ri, cells
+    return None, None
+
+
+def _find_tourplan_sheet(wb):
+    for name in wb.sheetnames:
+        ri, _ = _tourplan_header_row(wb[name])
+        if ri:
+            return wb[name]
+    return None
+
+
+def _norm_name_tokens(s):
+    """A name as a set of alphabetic tokens (diacritics/order/number-prefix
+    ignored), so 'Vlk Pavel', ' Pavel Vlk' and '604 Pavel Vlk' all match."""
+    import re
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode().lower()
+    return frozenset(t for t in re.split(r"[^a-z]+", s) if len(t) >= 2)
+
+
+def _canonical_tech_map():
+    """token-set -> canonical technician name AS IT APPEARS IN SALESAPP (reality),
+    so an uploaded plan's 'Surname Firstname' names line up with the reality
+    'Firstname Surname' names — plan-vs-reality per technician then matches. The
+    reality name (most frequent) wins over any other spelling."""
+    m = {}
+    for r in db.get("SELECT technician, COUNT(*) n FROM salesapp_visits "
+                    "WHERE technician IS NOT NULL AND technician<>'' "
+                    "GROUP BY technician ORDER BY n DESC"):
+        toks = _norm_name_tokens(r["technician"])
+        if toks and toks not in m:   # most frequent (reality) name wins
+            m[toks] = r["technician"]
+    return m
+
+
+def import_tourplan(path: str, filename: str | None = None) -> dict:
+    """Ingest a manager-exported TourPlan as a PUBLISHED plan, so plan-vs-reality
+    (TourPlan fulfilment, missed planned POS) can be computed against SalesApp.
+    The plan rows come straight from the uploaded file - nothing is hardcoded.
+    Re-importing a week replaces which snapshot is 'Published' for that week."""
+    import datetime
+    db.init_db()
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        ws = _find_tourplan_sheet(wb)
+        if ws is None:
+            raise ValueError("TourPlan: nenašel jsem list se sloupci WEEK/Tourplan + TECHNICIAN/Technik + POS.")
+        header_row, header = _tourplan_header_row(ws)
+        col = {}  # published_plans column -> source index
+        for i, h in enumerate(header):
+            dst = _TOURPLAN_MAP.get(h.replace(" ", ""))
+            if dst and dst not in col:
+                col[dst] = i
+        if "week" not in col or "technician" not in col or "pos_id" not in col:
+            raise ValueError("TourPlan: chybí sloupec s týdnem, technikem nebo POS.")
+        tech_map = _canonical_tech_map()
+
+        def year_of(datev):
+            for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d. %m. %Y"):
+                try:
+                    return datetime.datetime.strptime(str(datev).strip()[:10], fmt).year
+                except (ValueError, TypeError):
+                    pass
+            if isinstance(datev, datetime.datetime):
+                return datev.year
+            return None
+
+        sid = "imp-" + datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        with open(path, "rb") as fh:
+            blob = fh.read()
+        rows = []
+        weeks = {}   # (year, week) seen
+        unmatched = set()
+        this_year = datetime.date.today().year
+        for r in ws.iter_rows(min_row=header_row + 1, values_only=True):
+            wk = r[col["week"]] if col["week"] < len(r) else None
+            pos = r[col["pos_id"]] if col["pos_id"] < len(r) else None
+            if wk in (None, "") or pos in (None, ""):
+                continue
+            try:
+                wk = int(wk)
+            except (ValueError, TypeError):
+                continue
+            datev = r[col["plan_date"]] if "plan_date" in col and col["plan_date"] < len(r) else None
+            yr = year_of(datev) or this_year
+            vals = {"snapshot_id": sid, "year": yr, "week": wk}
+            for dst, i in col.items():
+                if dst in ("week",):
+                    continue
+                v = r[i] if i < len(r) else None
+                vals[dst] = str(v).strip() if (dst not in ("ppt", "day_group", "day_seq") and v is not None) else v
+            vals["pos_id"] = str(pos).strip()
+            # Map the plan's technician name to the datastore's canonical name so
+            # plan-vs-reality per technician lines up.
+            raw_tech = vals.get("technician")
+            if raw_tech:
+                canon = tech_map.get(_norm_name_tokens(raw_tech))
+                if canon:
+                    vals["technician"] = canon
+                else:
+                    unmatched.add(raw_tech)
+            rows.append(vals)
+            weeks[(yr, wk)] = True
+
+        if not rows:
+            raise ValueError("TourPlan: žádné platné řádky (WEEK + POS).")
+
+        conn = db.connect()
+        try:
+            conn.execute(
+                "INSERT INTO snapshots (id, message, published_week, source_files, kind, state_blob) "
+                "VALUES (?,?,?,?, 'imported_plan', ?)",
+                (sid, f"Nahraný TourPlan {filename or ''}".strip(),
+                 min(w for _, w in weeks), json.dumps({"tourplan": filename}), blob))
+            cols = ["snapshot_id", "year", "week", "plan_date", "day", "technician", "pos_id",
+                    "category", "name", "street", "house_number", "city", "area", "pos_area",
+                    "ppt", "reason", "day_group", "day_seq"]
+            conn.executemany(
+                f"INSERT INTO published_plans ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})",
+                [tuple(rw.get(c) for c in cols) for rw in rows])
+            # This snapshot becomes the Published plan for each of its weeks
+            # (PK year,week -> only one snapshot is 'Published' per week).
+            for (yr, wk) in weeks:
+                conn.execute(
+                    "INSERT INTO plan_lifecycle (year, week, status, snapshot_id) VALUES (?,?, 'Published', ?) "
+                    "ON CONFLICT(year, week) DO UPDATE SET status='Published', snapshot_id=excluded.snapshot_id, "
+                    "updated_at=datetime('now')", (yr, wk, sid))
+            conn.commit()
+        finally:
+            conn.close()
+        try:
+            import history
+            history.log_event("import", "tourplan", sid,
+                              {"rows": len(rows), "weeks": sorted(w for _, w in weeks)})
+        except Exception:  # noqa: BLE001
+            pass
+        return {"snapshot": sid, "rows": len(rows),
+                "weeks": sorted(w for _, w in weeks),
+                "technicians": len({rw["technician"] for rw in rows}),
+                "unmatchedTechnicians": sorted(unmatched)}
+    finally:
+        wb.close()
+
+
 def import_workbook(path: str, filename: str | None = None) -> dict:
     """Import everything from one workbook into SQLite. Returns per-table counts."""
     db.init_db()

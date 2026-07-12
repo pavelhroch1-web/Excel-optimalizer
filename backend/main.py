@@ -1212,8 +1212,8 @@ if LOCAL_MODE:
     # Health Score: composite per-technician efficiency (100 = healthy, low =
     # critical). Powers the "Kritické případy" section.
     @app.get("/api/insights/health", dependencies=[Depends(require_auth)])
-    def insights_health(days_back: int = 90):
-        return diagnostics.health_scores(days_back)
+    def insights_health(days_back: int = 90, role: str = "TECHNIK"):
+        return diagnostics.health_scores(days_back, role)
 
     # Settings platform: configure planner/optimization/dashboard/report/map/
     # scoring from the app. Definitions drive a generic admin UI; values override.

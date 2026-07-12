@@ -369,15 +369,47 @@ def combination_analysis(days_back: int = 90) -> dict:
 # bigger pull on the overall score. Deliberately combines several dimensions so a
 # quietly weak technician (few visits, slow on POS, short day, low utilisation)
 # surfaces even without extreme transfers.
-_HEALTH_COMPS = [
-    ("visitsPerDay", "low", 1.4, "málo návštěv/den"),
+# TECHNIK profile: "work actually done" dominates. Not fulfilling the TourPlan,
+# doing few visits or working a short day is a critical problem; route
+# inefficiency is only a "room to improve".
+_HEALTH_COMPS_TECHNIK = [
+    ("planFulfilmentPct", "low", 2.2, "neplní TourPlan"),
+    ("visitsPerDay", "low", 2.0, "málo návštěv/den"),
+    ("workHoursPerDay", "low", 1.8, "krátká pracovní doba"),
     ("loadPct", "low", 1.3, "nízké využití kapacity"),
-    ("workHoursPerDay", "low", 1.2, "krátká pracovní doba"),
-    ("visitsPerWorkHour", "low", 1.2, "nízká produktivita"),
-    ("avgOnPosMin", "high", 1.0, "dlouhé časy na POS"),
-    ("onPosRatioPct", "low", 0.9, "hodně času na cestě"),
-    ("areaReturnsPerWeek", "high", 0.8, "opakované návraty do oblasti"),
+    ("avgOnPosMin", "high", 1.0, "dlouhé časy na POS bez výsledku"),
+    ("visitsPerWorkHour", "low", 0.6, "nízká produktivita"),
+    ("onPosRatioPct", "low", 0.4, "hodně času na cestě"),
+    ("areaReturnsPerWeek", "high", 0.4, "opakované návraty do oblasti"),
 ]
+
+# OZ (sales reps) play by different rules: no merch visits, no TourPlan
+# fulfilment, and on-POS time / visit count don't mean the same thing. Their
+# Health Score is about route efficiency, wasted driving, repeated returns and
+# use of the working day.
+_HEALTH_COMPS_OZ = [
+    ("onPosRatioPct", "low", 1.6, "hodně času na cestě"),
+    ("areaReturnsPerWeek", "high", 1.4, "opakované návraty do oblasti"),
+    ("workHoursPerDay", "low", 1.4, "krátký pracovní den"),
+    ("visitsPerWorkHour", "low", 1.0, "nízká efektivita dne"),
+    ("loadPct", "low", 0.7, "nízké využití dne"),
+]
+
+_HEALTH_PROFILES = {"TECHNIK": _HEALTH_COMPS_TECHNIK, "OZ": _HEALTH_COMPS_OZ}
+
+
+def _plan_fulfilment_by_tech() -> dict:
+    """TourPlan fulfilment % per technician (plan vs reality over published
+    weeks). Empty if nothing is published yet."""
+    try:
+        import plan_reality
+        wk = db.get("SELECT MIN(week) a, MAX(week) b FROM published_plans")
+        if not wk or wk[0]["a"] is None:
+            return {}
+        f = plan_reality.fulfillment(int(wk[0]["a"]), int(wk[0]["b"]))
+        return {t["technician"]: t.get("fulfilmentPct") for t in f.get("perTechnician", [])}
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def _area_returns_per_week() -> dict:
@@ -393,40 +425,49 @@ def _area_returns_per_week() -> dict:
     return {r["technician"]: (r["rate"] or 0) for r in rows}
 
 
-def health_scores(days_back: int = 90) -> dict:
-    """A composite 0-100 Health Score per technician (100 = healthy, low =
-    critical). Combines work time, time on POS, visits, travel share, capacity
-    utilisation and repeated area returns - so overall weakest technicians
-    surface, not just single-metric outliers. Fast (no route reconstruction)."""
+def health_scores(days_back: int = 90, role: str = "TECHNIK") -> dict:
+    """A composite 0-100 Health Score per person (100 = healthy, low = critical).
+    Role-aware: TECHNIK is judged mostly on work done (TourPlan fulfilment,
+    visits, work hours); OZ on route efficiency / use of the day. Days with 0
+    visits (vacation / sick / training / holiday) never enter the averages. Fast
+    (no route reconstruction)."""
     import team_analytics
-    ov = team_analytics.overview(days_back=days_back)
-    # Only real, active technicians — sparse records (a handful of visits, no
+    role = role.upper()
+    comps = _HEALTH_PROFILES.get(role, _HEALTH_COMPS_TECHNIK)
+    ov = team_analytics.overview(days_back=days_back, role=role)
+    # Only real, active people — sparse records (a handful of visits, no
     # timestamps) would otherwise dominate the critical cases with data noise.
     techs = [dict(t) for t in ov.get("technicians", [])
              if (t.get("visits") or 0) >= 30 and (t.get("daysWorked") or 0) >= 10]
     if len(techs) < 5:
-        return {"technicians": [], "insufficient": True}
+        return {"technicians": [], "insufficient": True, "role": role}
     ar = _area_returns_per_week()
+    fulfil = _plan_fulfilment_by_tech() if role == "TECHNIK" else {}
     for t in techs:
         dw = t.get("daysWorked") or 0
+        # Only worked days (days with >=1 visit) feed the averages, so vacation /
+        # sick / training / holiday days (0 visits) never drag the score down.
         t["visitsPerDay"] = round(t["visits"] / dw, 2) if dw else None
         t["workHoursPerDay"] = round(t["avgWorkHours"] / dw, 2) if (dw and t.get("avgWorkHours")) else None
         t["areaReturnsPerWeek"] = round(ar.get(t["technician"], 0), 2)
+        t["planFulfilmentPct"] = fulfil.get(t["technician"])
 
     # peer stats per component
     stats = {}
-    for field, *_ in _HEALTH_COMPS:
+    for field, *_ in comps:
         vals = [t[field] for t in techs if t.get(field) is not None]
         if vals:
             stats[field] = (statistics.median(vals),
                             statistics.pstdev(vals) if len(vals) > 1 else 0)
 
+    # Only weigh components that actually have peer data, so a missing metric
+    # (e.g. no published plan yet) doesn't silently inflate every score.
+    total_w = sum(w for field, _, w, _ in comps if field in stats) or 1
     out = []
-    total_w = sum(w for _, _, w, _ in _HEALTH_COMPS)
     for t in techs:
         badness = 0.0
         why = []
-        for field, bad_dir, w, label in _HEALTH_COMPS:
+        for field, bad_dir, w, label in comps:
             if field not in stats or t.get(field) is None:
                 continue
             med, sd = stats[field]
@@ -446,10 +487,11 @@ def health_scores(days_back: int = 90) -> dict:
             "visits": t["visits"], "visitsPerDay": t.get("visitsPerDay"),
             "workHoursPerDay": t.get("workHoursPerDay"), "avgOnPosMin": t.get("avgOnPosMin"),
             "onPosRatioPct": t.get("onPosRatioPct"), "loadPct": t.get("loadPct"),
+            "planFulfilmentPct": t.get("planFulfilmentPct"),
             "why": why[:3],
         })
     out.sort(key=lambda x: x["healthScore"])
-    return {"technicians": out, "worst": out[:5]}
+    return {"technicians": out, "worst": out[:5], "role": role}
 
 
 def company_overview(days_back: int = 90) -> dict:

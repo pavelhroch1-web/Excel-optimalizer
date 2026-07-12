@@ -86,6 +86,9 @@ def init_db() -> None:
                           ("source_id", "INTEGER")):
             if col not in mcols:
                 conn.execute(f"ALTER TABLE metrics ADD COLUMN {col} {decl}")
+        scols = {r[1] for r in conn.execute("PRAGMA table_info(snapshots)")}
+        if "kind" not in scols:
+            conn.execute("ALTER TABLE snapshots ADD COLUMN kind TEXT NOT NULL DEFAULT 'state'")
         conn.commit()
     finally:
         conn.close()

@@ -30,6 +30,10 @@ def _classify(ws) -> str | None:
         return "pos_master"
     if "TYPE" in h and "ACTIVITY" in h and "START_WEEK" in h:
         return "activity_plan"
+    hu = {str(x).strip().upper() for x in h}
+    if ("WEEK" in hu or "TÝDEN" in hu or "TYDEN" in hu or "TOURPLAN" in hu) and \
+       ("TECHNICIAN" in hu or "TECHNIK" in hu) and "POS" in hu:
+        return "tourplan"
     return None
 
 
@@ -80,6 +84,13 @@ def import_file(path: str, filename: str | None = None) -> dict:
     finally:
         conn.close()
         wb.close()
+
+    if t == "tourplan":
+        # Ingest as a published plan via its own (transactional) path.
+        summary = importer.import_tourplan(path, filename)
+        counts["tourplan"] = summary
+        rec = _recompute_after(counts)
+        return {"detected": t, "sheet": det["sheet"], "counts": counts, "recomputed": rec}
 
     if t == "salesapp":
         importer.derive_technicians(db.connect())  # refresh roles (own conn)

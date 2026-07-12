@@ -166,6 +166,7 @@ CREATE TABLE IF NOT EXISTS snapshots (
     published_by   TEXT,
     engine_version TEXT,
     source_files   TEXT,                    -- JSON provenance
+    kind           TEXT NOT NULL DEFAULT 'state', -- 'state' (full engine state) | 'imported_plan'
     state_blob     BLOB NOT NULL
 );
 

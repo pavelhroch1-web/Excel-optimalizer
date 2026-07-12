@@ -1657,7 +1657,7 @@ function _cfgToast() {
 
 // ---- automatic import + alerts --------------------------------------------
 
-const _TYPE_LABEL = { workbook: "kompletní workbook", salesapp: "SalesApp", pos_master: "POS Master", activity_plan: "Activity Plan", unknown: "neznámý" };
+const _TYPE_LABEL = { workbook: "kompletní workbook", salesapp: "SalesApp", pos_master: "POS Master", activity_plan: "Activity Plan", tourplan: "TourPlan (publikovaný plán)", unknown: "neznámý" };
 
 async function importFile(f) {
   if (!f) return;
@@ -2350,11 +2350,8 @@ async function loadCockpitBrief() {
     el.innerHTML = renderBrief(team, (runsResp && runsResp.runs && runsResp.runs[0]) || null, trends)
       + `<div id="health-block"></div><div id="company-block"></div>` + renderInsightsBlock(insights);
   } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
-  // Critical cases (Health Score) — the overall weakest technicians. Fast.
-  apiJson("/api/insights/health").then((h) => {
-    const hb = document.getElementById("health-block");
-    if (hb) hb.innerHTML = renderHealthBlock(h);
-  }).catch(() => {});
+  // Critical cases (Health Score) — default technicians; OZ behind a toggle.
+  loadHealth(_healthRole);
   // Company "where we lose time" view is heavier (route analysis) — stream it in.
   apiJson("/api/insights/company").then((co) => {
     const cb = document.getElementById("company-block");
@@ -2362,11 +2359,29 @@ async function loadCockpitBrief() {
   }).catch(() => {});
 }
 
-// "Kritické případy" — the overall weakest technicians by Health Score, always
-// shown, even without extreme transfers. Each pops with a score gauge + why.
+// "Kritické případy" — the overall weakest people by Health Score. Technicians
+// by default (judged on work done); OZ have their own rules behind a toggle.
+let _healthRole = "TECHNIK";
+async function loadHealth(role) {
+  _healthRole = role;
+  const hb = document.getElementById("health-block");
+  if (!hb) return;
+  try {
+    const h = await apiJson("/api/insights/health?role=" + role);
+    hb.innerHTML = renderHealthBlock(h);
+  } catch (e) { hb.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+}
+
 function renderHealthBlock(h) {
   const worst = (h && h.worst) || [];
-  if (!worst.length) return "";
+  const toggle = `<div class="health-toggle">
+    <button class="ht-btn ${_healthRole === "TECHNIK" ? "on" : ""}" data-role="TECHNIK">Technici</button>
+    <button class="ht-btn ${_healthRole === "OZ" ? "on" : ""}" data-role="OZ">OZ</button></div>`;
+  const head = `<div class="health-h">${ico("flame")} Kritické případy <span class="pd-chip">nejnižší Health Score</span>
+      ${toggle}<span class="health-sub">${_healthRole === "OZ" ? "OZ — jiná pravidla (efektivita trasy, využití dne)" : "celkově nejslabší technici — ne jen efektivita trasy"}</span></div>`;
+  if (!worst.length) {
+    return `<section class="health">${head}<p class="brief-empty">${h && h.insufficient ? "Málo dat pro tuto roli." : "Žádné kritické případy."}</p></section>`;
+  }
   const cards = worst.map((t) => {
     const tone = t.healthScore < 70 ? "crit" : (t.healthScore < 80 ? "warn" : "ok");
     const why = (t.why || []).map((w) => `<span class="hc-why">${esc(w.label)}</span>`).join("");
@@ -2380,10 +2395,7 @@ function renderHealthBlock(h) {
         <div class="hc-whys">${why}</div></div>
       <div class="hc-go">Rozbor →</div></div>`;
   }).join("");
-  return `<section class="health">
-    <div class="health-h">${ico("flame")} Kritické případy <span class="pd-chip">nejnižší Health Score</span>
-      <span class="health-sub">celkově nejslabší technici — ne jen extrémní přejezdy</span></div>
-    ${cards}</section>`;
+  return `<section class="health">${head}${cards}</section>`;
 }
 
 // Company view in the language of TIME: total lost capacity + where the reserves are.
@@ -2588,6 +2600,8 @@ document.getElementById("op-brief") && document.getElementById("op-brief").addEv
   if (refresh) { loadCockpitBrief(); return; }
   const lead = e.target.closest(".brief-lead[data-nav]");
   if (lead) { showView(lead.dataset.nav); return; }
+  const roleBtn = e.target.closest(".ht-btn[data-role]");
+  if (roleBtn) { loadHealth(roleBtn.dataset.role); return; }
   const diagEl = e.target.closest("[data-diagnose]");
   if (diagEl) { openDiagnosis(diagEl.dataset.diagnose); return; }
   const techEl = e.target.closest("[data-tech]");

@@ -57,7 +57,7 @@ def _tmp_xlsx() -> str:
 def read_index() -> list[dict]:
     """Published-version history, newest last. [] before the first publish."""
     rows = db.get("SELECT id, created_at, message, published_week, published_by, "
-                  "engine_version, source_files FROM snapshots ORDER BY created_at ASC")
+                  "engine_version, source_files FROM snapshots WHERE kind='state' ORDER BY created_at ASC")
     out = []
     for r in rows:
         rec = dict(r)
@@ -71,14 +71,14 @@ def read_index() -> list[dict]:
 
 
 def _next_version_id() -> str:
-    n = db.get("SELECT COUNT(*) AS c FROM snapshots")[0]["c"]
+    n = db.get("SELECT COUNT(*) AS c FROM snapshots WHERE kind='state'")[0]["c"]
     return f"v{n + 1:04d}"
 
 
 # ---- latest snapshot (source of truth) ------------------------------------
 
 def _latest_snapshot_id() -> str | None:
-    rows = db.get("SELECT id FROM snapshots ORDER BY created_at DESC LIMIT 1")
+    rows = db.get("SELECT id FROM snapshots WHERE kind='state' ORDER BY created_at DESC LIMIT 1")
     return rows[0]["id"] if rows else None
 
 
