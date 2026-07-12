@@ -19,6 +19,15 @@ CITY_SPEED_KMH = 32.0        # dense town driving
 OPEN_SPEED_KMH = 72.0        # open road / between towns
 RAMP_START_KM = 2.0          # up to here a leg is essentially all-city
 RAMP_END_KM = 25.0           # from here a leg is essentially all open-road
+ROAD_FACTOR = 1.35           # straight-line (GPS) -> real road distance
+
+
+def road_km(straight_km: float | None) -> float:
+    """Real driven distance estimated from the straight-line GPS distance.
+    Roads are not straight, so the beeline systematically understates km."""
+    if not straight_km or straight_km <= 0:
+        return 0.0
+    return round(straight_km * ROAD_FACTOR, 1)
 
 
 def effective_speed_kmh(km: float) -> float:
@@ -33,10 +42,14 @@ def effective_speed_kmh(km: float) -> float:
 
 
 def estimate_minutes(km: float | None) -> float:
-    """Estimated driving time for a single leg of `km` kilometres."""
+    """Estimated driving time for a single leg given its straight-line `km`.
+    The beeline is first converted to real road distance, then to minutes at
+    the leg's blended speed - so the time reflects real driving, not the crow's
+    flight."""
     if not km or km <= 0:
         return 0.0
-    return round(60.0 * km / effective_speed_kmh(km), 1)
+    rk = km * ROAD_FACTOR
+    return round(60.0 * rk / effective_speed_kmh(rk), 1)
 
 
 def minutes_for_legs(leg_kms) -> float:
@@ -49,6 +62,7 @@ def describe() -> dict:
     return {
         "citySpeedKmh": CITY_SPEED_KMH, "openSpeedKmh": OPEN_SPEED_KMH,
         "rampFromKm": RAMP_START_KM, "rampToKm": RAMP_END_KM,
+        "roadFactor": ROAD_FACTOR,
         "note": "Rychlost přejezdu roste se vzdáleností: krátké úseky městskou "
                 "rychlostí, dlouhé úseky rychlostí mimo obec.",
     }

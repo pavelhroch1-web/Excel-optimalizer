@@ -2798,11 +2798,8 @@ async function openTechDay(name, date) {
         <span class="ttl-on">${s.onPosMin != null ? Math.round(s.onPosMin) + " min" : ""}</span></div>`;
     }).join("");
     const posCount = d.stops.filter((s) => (s.kind || "pos") === "pos").length;
-    const extras = [];
-    if (d.breakMin) extras.push(`pauza ${_fmtHM(d.breakMin)}`);
-    if (d.adminMin) extras.push(`středisko ${_fmtHM(d.adminMin)}`);
-    host.innerHTML = `<div class="td-day-head">${esc(date)} · ${posCount} POS · ${d.totalKm ?? "—"} km · ${d.workHours ?? "—"} h
-        (na cestě ${_fmtHM(d.travelMin)}, na POS ${_fmtHM(d.onPosMin)}${extras.length ? ", " + extras.join(", ") : ""})</div>
+    host.innerHTML = `<div class="td-day-head">${esc(date)} · ${posCount} POS · ${d.totalKm ?? "—"} km silnicí · ${d.workHours ?? "—"} h v terénu</div>
+      ${_tdTimeBar(d)}
       ${optLine}
       <div id="td-map" class="td-map"></div>
       <div class="td-sec">Timeline dne</div><div class="td-timeline">${tl}</div>`;
@@ -2810,22 +2807,53 @@ async function openTechDay(name, date) {
   } catch (e) { host.innerHTML = `<p class="result err" style="padding:20px">${esc(e.message)}</p>`; }
 }
 
+// Day time budget as a single stacked bar that adds up to the workday.
+function _tdTimeBar(d) {
+  const segs = [
+    ["onPos", d.onPosMin, "Na POS", "#0F7C77"],
+    ["drive", d.drivingMin, "Cesta", "#C0392B"],
+    ["break", d.breakMin, "Pauza", "#D9A441"],
+    ["admin", d.adminMin, "Středisko", "#5B7DB1"],
+    ["idle", d.idleMin, "Prostoj", "#9AA3AD"],
+  ].filter((s) => s[1] && s[1] > 0);
+  const tot = segs.reduce((a, s) => a + s[1], 0) || 1;
+  const bar = segs.map((s) => `<span class="tb-seg" style="width:${(100 * s[1] / tot).toFixed(1)}%;background:${s[3]}" title="${s[2]}: ${_fmtHM(s[1])}"></span>`).join("");
+  const leg = segs.map((s) => `<span class="tb-leg"><i style="background:${s[3]}"></i>${s[2]} ${_fmtHM(s[1])}</span>`).join("");
+  return `<div class="td-timebar"><div class="tb-bar">${bar}</div><div class="tb-legend">${leg}</div></div>`;
+}
+
+// Offline route map: self-contained SVG (no tiles, no internet). Projects the
+// GPS points, draws the real route (solid red) and the optimal ordering (dashed
+// green), numbered stops. Works in the portable/offline build.
 function _tdDrawMap(d) {
-  if (typeof L === "undefined") return;
+  const host = document.getElementById("td-map");
+  if (!host) return;
   const pts = d.stops.filter((s) => (s.kind || "pos") === "pos" && s.lat != null && s.lon != null);
-  if (pts.length < 1) { document.getElementById("td-map").innerHTML = "<p class='pd-sub' style='padding:12px'>Bez GPS souřadnic.</p>"; return; }
-  const map = L.map("td-map");
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OSM" }).addTo(map);
-  const latlngs = pts.map((s) => [s.lat, s.lon]);
-  L.polyline(latlngs, { color: "#C0392B", weight: 3, opacity: 0.8 }).addTo(map);   // actual route
-  if (d.optimal && d.optimal.order) {
-    const opt = d.optimal.order.map((i) => [pts[i].lat, pts[i].lon]);
-    L.polyline(opt, { color: "#0F7C77", weight: 3, opacity: 0.7, dashArray: "6 6" }).addTo(map);   // optimal
+  if (pts.length < 1) { host.innerHTML = "<p class='pd-sub' style='padding:12px'>Bez GPS souřadnic.</p>"; return; }
+  const W = host.clientWidth || 640, H = host.clientHeight || 360, pad = 34;
+  const latRef = pts.reduce((a, s) => a + s.lat, 0) / pts.length;
+  const kx = Math.cos(latRef * Math.PI / 180);
+  const xs = pts.map((s) => s.lon * kx), ys = pts.map((s) => s.lat);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const spanX = (maxX - minX) || 1e-4, spanY = (maxY - minY) || 1e-4;
+  const sc = Math.min((W - 2 * pad) / spanX, (H - 2 * pad) / spanY);
+  const offX = (W - sc * spanX) / 2, offY = (H - sc * spanY) / 2;
+  const PX = (s) => offX + (s.lon * kx - minX) * sc;
+  const PY = (s) => H - (offY + (s.lat - minY) * sc);   // north up
+  const path = (idx) => idx.map((i, k) => `${k ? "L" : "M"}${PX(pts[i]).toFixed(1)},${PY(pts[i]).toFixed(1)}`).join(" ");
+  const seqIdx = pts.map((_, i) => i);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" class="td-svgmap">`;
+  if (d.optimal && d.optimal.order && d.optimal.order.length === pts.length) {
+    svg += `<path d="${path(d.optimal.order)}" fill="none" stroke="#0F7C77" stroke-width="2.4" stroke-dasharray="7 6" opacity="0.85"/>`;
   }
-  pts.forEach((s, i) => L.circleMarker([s.lat, s.lon], { radius: 9, color: "#fff", weight: 2, fillColor: "#C0392B", fillOpacity: 1 })
-    .bindTooltip(String(i + 1) + ". " + (s.name || s.pos)).addTo(map));
-  map.fitBounds(latlngs, { padding: [30, 30] });
-  setTimeout(() => map.invalidateSize(), 100);
+  svg += `<path d="${path(seqIdx)}" fill="none" stroke="#C0392B" stroke-width="2.6" opacity="0.9"/>`;
+  pts.forEach((s, i) => {
+    const x = PX(s).toFixed(1), y = PY(s).toFixed(1);
+    svg += `<circle cx="${x}" cy="${y}" r="12" fill="#C0392B" stroke="#fff" stroke-width="2"><title>${esc(String(i + 1) + ". " + (s.name || s.pos))}</title></circle>`;
+    svg += `<text x="${x}" y="${y}" dy="4" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">${i + 1}</text>`;
+  });
+  svg += `</svg>`;
+  host.innerHTML = svg;
 }
 
 function _hm(iso) { const m = String(iso || "").match(/(\d{1,2}:\d{2})/); return m ? m[1] : "—"; }

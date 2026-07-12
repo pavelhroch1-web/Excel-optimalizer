@@ -151,15 +151,28 @@ def day(name: str, date: str) -> dict:
         order = diagnostics._nn_order(pts)
         opt_legs = [distance_km(pts[order[i]].x, pts[order[i]].y, pts[order[i + 1]].x, pts[order[i + 1]].y)
                     for i in range(len(order) - 1)]
-        actual_km = round(sum(actual_legs), 1)
-        opt_km = round(compute_optimal_route_km(pts), 1)
+        actual_km = travel_model.road_km(sum(actual_legs))
+        opt_km = travel_model.road_km(compute_optimal_route_km(pts))
+        a_min = travel_model.minutes_for_legs(actual_legs)
+        o_min = travel_model.minutes_for_legs(opt_legs)
         optimal = {
             "order": order, "optimalKm": opt_km, "actualKm": actual_km,
             "savedKm": round(actual_km - opt_km, 1),
-            "actualTravelMin": travel_model.minutes_for_legs(actual_legs),
-            "optimalTravelMin": travel_model.minutes_for_legs(opt_legs),
-            "savedMin": round(travel_model.minutes_for_legs(actual_legs) - travel_model.minutes_for_legs(opt_legs)),
+            "actualTravelMin": a_min, "optimalTravelMin": o_min,
+            "savedMin": round(a_min - o_min),
         }
+
+    # honest time breakdown that sums to the workday: on-POS (in stores),
+    # driving (modelled from real road km, not the idle-polluted wall clock),
+    # break, office/admin, and whatever is left over as idle/other.
+    straight_legs = [lg["km"] for lg in d.get("legs", []) if lg.get("km") is not None]
+    driving_min = travel_model.minutes_for_legs(straight_legs)
+    road_km = travel_model.road_km(d.get("totalKm"))
+    on_pos = d.get("onPosMin") or 0
+    brk = d.get("breakMin") or 0
+    adm = d.get("adminMin") or 0
+    work_min = round((d.get("workHours") or 0) * 60, 1)
+    idle_min = round(max(work_min - on_pos - brk - adm - driving_min, 0.0), 1)
 
     # timeline: for each stop, on-POS minutes; between stops, travel (measured)
     timeline = []
@@ -172,7 +185,9 @@ def day(name: str, date: str) -> dict:
     return {
         "technician": name, "date": date, "found": True,
         "stops": timeline, "legs": d.get("legs", []),
-        "totalKm": d.get("totalKm"), "travelMin": d.get("travelMin"),
+        "totalKm": road_km, "straightKm": d.get("totalKm"),
+        "travelMin": d.get("travelMin"), "drivingMin": driving_min,
+        "idleMin": idle_min,
         "onPosMin": d.get("onPosMin"), "breakMin": d.get("breakMin"),
         "adminMin": d.get("adminMin"), "workHours": d.get("workHours"),
         "workStart": d.get("workStart"), "workEnd": d.get("workEnd"),
