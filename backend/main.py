@@ -1215,6 +1215,18 @@ if LOCAL_MODE:
     def insights_health(days_back: int = 90, role: str = "TECHNIK"):
         return diagnostics.health_scores(days_back, role)
 
+    # Deep technician profile: KPIs + Health breakdown + cause diagnosis +
+    # TourPlan fulfilment + missed planned POS driven past + the day list.
+    import tech_detail  # noqa: E402
+
+    @app.get("/api/technician/{name}", dependencies=[Depends(require_auth)])
+    def technician_profile(name: str, days_back: int = 120):
+        return tech_detail.profile(name, days_back)
+
+    @app.get("/api/technician/{name}/day/{date}", dependencies=[Depends(require_auth)])
+    def technician_day(name: str, date: str):
+        return tech_detail.day(name, date)
+
     # Settings platform: configure planner/optimization/dashboard/report/map/
     # scoring from the app. Definitions drive a generic admin UI; values override.
     import settings as _settings  # noqa: E402

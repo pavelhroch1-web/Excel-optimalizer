@@ -2603,7 +2603,7 @@ document.getElementById("op-brief") && document.getElementById("op-brief").addEv
   const roleBtn = e.target.closest(".ht-btn[data-role]");
   if (roleBtn) { loadHealth(roleBtn.dataset.role); return; }
   const diagEl = e.target.closest("[data-diagnose]");
-  if (diagEl) { openDiagnosis(diagEl.dataset.diagnose); return; }
+  if (diagEl) { openTechDetail(diagEl.dataset.diagnose); return; }
   const techEl = e.target.closest("[data-tech]");
   if (techEl) { openTechnicianAnalytics(techEl.dataset.tech); return; }
   const runEl = e.target.closest("[data-run]");
@@ -2663,6 +2663,175 @@ function _dgKv(label, val) {
   const shown = val == null ? "—" : (typeof val === "number" ? _fmtNum(val) : val);
   return `<div class="run-bar"><span class="rb-l">${esc(label)}</span><b class="rb-v">${esc(String(shown))}</b></div>`;
 }
+
+// ===== deep technician detail (full screen, tabs, day map) ==================
+let _td = { name: null, p: null, tab: "prehled", map: null };
+
+async function openTechDetail(name) {
+  _td = { name, p: null, tab: "prehled", map: null };
+  const ov = document.getElementById("tech-detail-overlay");
+  document.getElementById("td-title").innerHTML = `<div class="tdt-name">${esc(name)}</div><div class="tdt-sub">Načítám kompletní profil…</div>`;
+  document.getElementById("td-body").innerHTML = `<p class="result" style="padding:24px">Analyzuji trasy, plán a výkon…</p>`;
+  ov.classList.remove("hidden");
+  _tdSelectTab("prehled");
+  try {
+    _td.p = await apiJson("/api/technician/" + encodeURIComponent(name));
+    renderTdHeader();
+    renderTdTab(_td.tab);
+  } catch (e) { document.getElementById("td-body").innerHTML = `<p class="result err" style="padding:24px">${esc(e.message)}</p>`; }
+}
+
+function _tdSelectTab(tab) {
+  _td.tab = tab;
+  document.querySelectorAll("#td-tabs .td-tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+}
+
+function renderTdHeader() {
+  const p = _td.p, h = p.health || {};
+  const sc = h.healthScore != null ? h.healthScore : "—";
+  const tone = sc === "—" ? "" : (sc < 70 ? "crit" : (sc < 80 ? "warn" : "ok"));
+  document.getElementById("td-title").innerHTML =
+    `<div class="tdt-gauge ${tone}"><svg viewBox="0 0 44 44"><circle class="hc-bg" cx="22" cy="22" r="18"></circle>
+       <circle class="hc-arc" cx="22" cy="22" r="18" style="stroke-dasharray:${sc === "—" ? 0 : Math.round(sc)} 100"></circle></svg>
+       <div class="tdt-score">${sc}</div></div>
+     <div><div class="tdt-name">${esc(p.technician)} <span class="tdt-role">${esc(p.role)}</span></div>
+       <div class="tdt-sub">Health Score · ${p.daysWorked} odpracovaných dní · ${(p.kpi || {}).visits ?? "—"} návštěv</div></div>`;
+}
+
+function renderTdTab(tab) {
+  _tdSelectTab(tab);
+  const p = _td.p, el = document.getElementById("td-body");
+  if (tab === "prehled") el.innerHTML = _tdPrehled(p);
+  else if (tab === "anomalie") el.innerHTML = _tdAnomalie(p);
+  else if (tab === "dny") { el.innerHTML = _tdDny(p); _tdBindDays(); }
+}
+
+function _tdKpi(label, val, unit) {
+  return `<div class="td-kpi"><div class="tk-l">${esc(label)}</div><div class="tk-v">${val == null ? "—" : _fmtNum(val)}${unit || ""}</div></div>`;
+}
+
+function _tdPrehled(p) {
+  const k = p.kpi || {}, d = p.diagnosis || {}, f = p.fulfilment, h = p.health || {};
+  const prof = d.profile || {};
+  const narr = d.narrative ? `<div class="td-narr">${esc(d.narrative)}</div>` : "";
+  const opp = d.opportunity ? `<div class="td-opp">${ico("target")} <span>${esc(d.opportunity.note)}</span></div>` : "";
+  const fulfil = f ? `<div class="td-fulfil ${f.fulfilmentPct < 60 ? "bad" : (f.fulfilmentPct < 80 ? "warn" : "ok")}">
+      <div class="tf-big">${f.fulfilmentPct}%</div><div class="tf-sub">plnění TourPlanu · naplánováno ${f.planned}, splněno ${f.done + f.doneShifted}, <b>minuto ${f.missed}</b></div></div>` : "";
+  const why = (h.why || []).map((w) => `<span class="td-why">${esc(w.label)}</span>`).join("");
+  return `<div class="td-scroll">
+    <div class="td-kpis">
+      ${_tdKpi("Návštěvy", k.visits)}
+      ${_tdKpi("Návštěv/den", k.daysWorked ? Math.round(k.visits / k.daysWorked * 10) / 10 : null)}
+      ${_tdKpi("Prac. doba/den", prof.workHours, " h")}
+      ${_tdKpi("Čas na cestě", prof.travelHoursActual, " h")}
+      ${_tdKpi("Čas na POS", prof.onPosHoursActual, " h")}
+      ${_tdKpi("Km celkem", k.totalKm)}
+      ${_tdKpi("Ztracené hodiny", d.lostHours, " h")}
+      ${_tdKpi("Podíl na cestě", k.onPosRatioPct != null ? (100 - k.onPosRatioPct) : null, "%")}
+    </div>
+    ${fulfil}
+    ${narr}
+    ${opp}
+    ${why ? `<div class="td-sec">Proč nízké Health Score</div><div class="td-whys">${why}</div>` : ""}
+  </div>`;
+}
+
+function _tdAnomalie(p) {
+  const d = p.diagnosis || {}, mp = p.missedPast || {}, combo = d.combination;
+  const causes = (d.causes || []).map((c, i) =>
+    `<div class="cause-row ${i === 0 ? "top" : ""}"><div class="cause-rank">${i + 1}</div>
+      <div class="cause-body"><div class="cause-label">${esc(c.label)}<span class="cause-z">z ${c.z > 0 ? "+" : ""}${c.z}</span></div>
+      <div class="cause-note">${esc(c.note)}</div></div></div>`).join("") || "<p class='pd-sub'>Bez výrazných příčin.</p>";
+  const missed = (mp.examples || []).map((m) =>
+    `<div class="td-miss-row"><span class="tm-pos">POS ${esc(m.pos)}${m.name ? " · " + esc(m.name) : ""}</span>
+      <span class="tm-mid">${esc(m.city || "")} · týden ${m.week}</span>
+      <span class="tm-km">jel ${m.nearestKm} km od ní</span></div>`).join("");
+  const missedBlock = mp.hasPlan ? `<div class="td-sec">${ico("alert")} Naplánované POS, kolem kterých jel, ale nenavštívil je <span class="pd-chip">${mp.count}</span></div>
+      <p class="pd-sub">Silný signál neodvedené práce — plánovaný POS byl do ${3} km od skutečné trasy v daném týdnu, přesto zůstal nenavštívený.</p>
+      ${missed || "<p class='pd-sub'>Žádné takové případy.</p>"}` : "";
+  return `<div class="td-scroll">
+    <div class="td-sec">Příčiny neefektivity (dle síly odchylky)</div>${causes}
+    ${missedBlock}
+    ${combo ? `<div class="td-sec">Promarněné spojení s visibilitou <span class="pd-chip">${combo.savedTrips} cest</span></div>
+      <p class="pd-sub">Potenciál ~${combo.savedKm} km / ~${combo.savedMin} min spojením s návštěvami kvůli kampani.</p>` : ""}
+  </div>`;
+}
+
+function _tdDny(p) {
+  const rows = (p.days || []).slice(0, 40).map((d) =>
+    `<div class="td-day-row" data-date="${esc(d.date)}" role="button" tabindex="0">
+      <div class="tdd-date">${esc(d.date)}</div>
+      <div class="tdd-facts">${d.stops} zastávek · ${d.km ?? "—"} km · ${d.workHours ?? "—"} h
+        ${d.workStart ? `· ${esc(d.workStart)}–${esc(d.workEnd || "")}` : ""}</div>
+      <div class="tdd-go">Trasa →</div></div>`).join("");
+  return `<div class="td-days-wrap"><div class="td-days-list">
+      <div class="td-sec">Odpracované dny (klikni pro trasu)</div>${rows || "<p class='pd-sub'>Žádné dny.</p>"}</div>
+    <div class="td-day-detail" id="td-day-detail"><p class="pd-sub" style="padding:20px">Vyber den vlevo — ukážu skutečnou trasu, timeline a porovnání s optimálním pořadím.</p></div></div>`;
+}
+
+function _tdBindDays() {
+  document.querySelectorAll("#td-body .td-day-row").forEach((r) =>
+    r.addEventListener("click", () => {
+      document.querySelectorAll("#td-body .td-day-row").forEach((x) => x.classList.toggle("on", x === r));
+      openTechDay(_td.name, r.dataset.date);
+    }));
+}
+
+async function openTechDay(name, date) {
+  const host = document.getElementById("td-day-detail");
+  host.innerHTML = `<p class="result" style="padding:20px">Načítám trasu…</p>`;
+  try {
+    const d = await apiJson(`/api/technician/${encodeURIComponent(name)}/day/${date}`);
+    if (!d.found) { host.innerHTML = `<p class="pd-sub" style="padding:20px">Pro tento den nejsou data trasy.</p>`; return; }
+    const o = d.optimal;
+    const optLine = o ? `<div class="td-day-opt ${o.savedKm > 5 ? "warn" : ""}">Optimální pořadí: skutečně ${o.actualKm} km / ${_fmtHM(o.actualTravelMin)} → optimum ${o.optimalKm} km / ${_fmtHM(o.optimalTravelMin)}
+      <b>· ušetřit ${o.savedKm} km, ${o.savedMin} min</b></div>` : "";
+    const tl = d.stops.map((s, i) =>
+      `<div class="td-tl-row"><span class="ttl-seq">${i + 1}</span>
+        <span class="ttl-time">${_hm(s.started)}–${_hm(s.finished)}</span>
+        <span class="ttl-name">${esc(s.name || s.pos)}</span>
+        <span class="ttl-on">${s.onPosMin != null ? Math.round(s.onPosMin) + " min" : ""}</span></div>`).join("");
+    host.innerHTML = `<div class="td-day-head">${esc(date)} · ${d.stops.length} zastávek · ${d.totalKm ?? "—"} km · ${d.workHours ?? "—"} h
+        (na cestě ${_fmtHM(d.travelMin)}, na POS ${_fmtHM(d.onPosMin)})</div>
+      ${optLine}
+      <div id="td-map" class="td-map"></div>
+      <div class="td-sec">Timeline dne</div><div class="td-timeline">${tl}</div>`;
+    _tdDrawMap(d);
+  } catch (e) { host.innerHTML = `<p class="result err" style="padding:20px">${esc(e.message)}</p>`; }
+}
+
+function _tdDrawMap(d) {
+  if (typeof L === "undefined") return;
+  const pts = d.stops.filter((s) => s.lat != null && s.lon != null);
+  if (pts.length < 1) { document.getElementById("td-map").innerHTML = "<p class='pd-sub' style='padding:12px'>Bez GPS souřadnic.</p>"; return; }
+  const map = L.map("td-map");
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OSM" }).addTo(map);
+  const latlngs = pts.map((s) => [s.lat, s.lon]);
+  L.polyline(latlngs, { color: "#C0392B", weight: 3, opacity: 0.8 }).addTo(map);   // actual route
+  if (d.optimal && d.optimal.order) {
+    const opt = d.optimal.order.map((i) => [pts[i].lat, pts[i].lon]);
+    L.polyline(opt, { color: "#0F7C77", weight: 3, opacity: 0.7, dashArray: "6 6" }).addTo(map);   // optimal
+  }
+  pts.forEach((s, i) => L.circleMarker([s.lat, s.lon], { radius: 9, color: "#fff", weight: 2, fillColor: "#C0392B", fillOpacity: 1 })
+    .bindTooltip(String(i + 1) + ". " + (s.name || s.pos)).addTo(map));
+  map.fitBounds(latlngs, { padding: [30, 30] });
+  setTimeout(() => map.invalidateSize(), 100);
+}
+
+function _hm(iso) { const m = String(iso || "").match(/(\d{1,2}:\d{2})/); return m ? m[1] : "—"; }
+
+// tech-detail: tab switching + close
+(function () {
+  const tabs = document.getElementById("td-tabs");
+  if (tabs) tabs.addEventListener("click", (e) => {
+    const b = e.target.closest(".td-tab"); if (b && _td.p) renderTdTab(b.dataset.tab);
+  });
+  const close = () => document.getElementById("tech-detail-overlay").classList.add("hidden");
+  document.getElementById("td-close") && document.getElementById("td-close").addEventListener("click", close);
+  document.getElementById("tech-detail-overlay") && document.getElementById("tech-detail-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "tech-detail-overlay") close();
+  });
+})();
 
 // jump to Analytics focused on one technician (reuses the analytics view)
 function openTechnicianAnalytics(name) {

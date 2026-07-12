@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<link rel="stylesheet" href="styles.css?v=39">
+<link rel="stylesheet" href="styles.css?v=40">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -26,7 +26,7 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v39</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v40</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard"><span class="si-ico" data-ico="grid"></span> Přehled</button>
       <button class="side-item" data-nav="import"><span class="si-ico" data-ico="upload"></span> Import dat</button>
@@ -544,6 +544,22 @@
   </aside>
 </div>
 
-<script src="app.js?v=39"></script>
+<!-- Technician deep-detail (full screen; opens on technician / finding click) -->
+<div id="tech-detail-overlay" class="td-overlay hidden">
+  <div id="tech-detail" class="td-panel">
+    <div class="td-head">
+      <div id="td-title"></div>
+      <div class="td-tabs" id="td-tabs">
+        <button class="td-tab on" data-tab="prehled">Přehled</button>
+        <button class="td-tab" data-tab="anomalie">Anomálie</button>
+        <button class="td-tab" data-tab="dny">Dny &amp; trasy</button>
+      </div>
+      <button id="td-close" class="ghost">✕</button>
+    </div>
+    <div id="td-body" class="td-body"></div>
+  </div>
+</div>
+
+<script src="app.js?v=40"></script>
 </body>
 </html>
