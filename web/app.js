@@ -2987,12 +2987,25 @@ function renderSummary(s) {
       <span class="st-name">${esc(u.name)}</span><span class="st-reg">${esc(u.city || "")} · ${esc(u.technician || "")}</span>
       <span class="st-x warn">${u.plannedWeeks}× plánováno, 0 návštěv</span></div>`).join("") || "—"}</div>`;
 
+  // Campaigns: fulfilment bar + visibility count per active campaign
+  const camps = (s.campaigns || []).map((c) => {
+    const pct = c.fulfilmentPct == null ? 0 : c.fulfilmentPct;
+    const band = pct >= 75 ? "ok" : pct >= 55 ? "mid" : "bad";
+    return `<div class="camp-row">
+      <div class="camp-h"><span class="camp-n">${esc(c.name)}</span><span class="camp-k">${esc(c.kind || "")} · t${c.weekFrom}–${c.weekTo}</span></div>
+      <div class="camp-bar"><div class="camp-fill hs-${band}" style="width:${Math.min(pct, 100)}%"></div></div>
+      <div class="camp-x">${c.fulfilmentPct ?? "—"} % plnění · ${_fmtNum(c.done || 0)}/${_fmtNum(c.planned || 0)} POS · ${_fmtNum(c.visibilityVisits || 0)} visibility návštěv</div>
+    </div>`;
+  }).join("");
+  const campaigns = camps ? `<div class="sk-card"><div class="sk-ct">🎪 Plnění kampaní</div>${camps}</div>` : "";
+
   const tr = s.trend || {};
   const chart = (title, series, unit, dec) => `<div class="tp-chart"><div class="tp-chart-t">${title}</div>${_lineChart(series || [], "value", unit, dec)}</div>`;
   const trends = `<div class="sk-ct" style="margin-top:6px">Vývoj v čase</div><div class="tp-charts">
+    ${chart("Plnění TourPlanu (%)", tr.planFulfilment, " %", 0)}
     ${chart("Produktivita (návšt./h)", tr.productivity, "", 2)}
     ${chart("Health Score", tr.health, "", 0)}
-    ${chart("Plnění plánu → návštěvy", tr.visits, "", 0)}
+    ${chart("Návštěvy", tr.visits, "", 0)}
     ${chart("Odpracované hodiny", tr.workHours, " h", 0)}
     ${_dualChart("Čas na POS vs. na cestě", tr.onPosHours, tr.travelHours)}
   </div>`;
@@ -3000,7 +3013,8 @@ function renderSummary(s) {
   return `<div class="sum-period">Období <b>${esc(s.period.label)}</b> · ${esc(s.period.from)} – ${esc(s.period.to)}
       <span class="sum-vs">vs. minulé ${esc(s.period.prevFrom)} – ${esc(s.period.prevTo)}</span></div>
     ${kpis}${tops}${regions}
-    <div class="sk-cols">${coverage}${unserved}</div>
+    <div class="sk-cols">${coverage}${campaigns}</div>
+    <div class="sk-cols">${unserved}</div>
     ${trends}`;
 }
 

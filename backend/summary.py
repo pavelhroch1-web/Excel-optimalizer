@@ -459,8 +459,10 @@ def summary(period: str = "month", year: int | None = None, month: int | None = 
     # ---- development charts (per period, network of the filtered scope)
     trend = _period_trends(per_period, per_period_tech, role_u, fulfil, area_returns, grain)
 
+    trend["planFulfilment"] = _plan_fulfilment_series([t["period"] for t in trend["productivity"]], grain)
     coverage = _coverage(start, end, names, region, chain, visit_type)
     unserved = _unserved_pos(start, end, names, region)
+    campaigns = _campaigns(start, end, names)
 
     return {
         "period": {"key": period, "label": label, "from": start.isoformat(), "to": end.isoformat(),
@@ -472,6 +474,7 @@ def summary(period: str = "month", year: int | None = None, month: int | None = 
                 "areaReturns": area_top, "problemRegions": regions[:6]},
         "regions": regions,
         "coverage": coverage,
+        "campaigns": campaigns,
         "unservedPos": unserved,
         "trend": trend,
         "peopleCount": len(active_people),
@@ -490,6 +493,64 @@ def _planned_visits(names, start, end) -> int | None:
     if names:
         q += " WHERE pp.technician IN (%s)" % ",".join("?" * len(names)); params += names
     return db.get(q, tuple(params))[0]["c"]
+
+
+def _weeks_for_period(key: str, grain: str) -> list:
+    """ISO week numbers covered by a period key ('YYYY-Www' or 'YYYY-MM')."""
+    if grain == "month":
+        y, m = (int(x) for x in key.split("-"))
+        last = calendar.monthrange(y, m)[1]
+        weeks = sorted({datetime.date(y, m, d).isocalendar()[1] for d in range(1, last + 1)})
+        return weeks
+    return [int(key.split("W")[1])]
+
+
+def _plan_fulfilment_series(period_keys: list, grain: str) -> list:
+    """TourPlan fulfilment % per period (planned POS visited vs planned),
+    reusing plan_reality over the weeks each period covers."""
+    import plan_reality
+    have = db.get("SELECT MIN(week) a, MAX(week) b FROM published_plans")
+    if not have or have[0]["a"] is None:
+        return [{"period": k, "value": None} for k in period_keys]
+    wa, wb = int(have[0]["a"]), int(have[0]["b"])
+    out = []
+    for k in period_keys:
+        weeks = [w for w in _weeks_for_period(k, grain) if wa <= w <= wb]
+        if not weeks:
+            out.append({"period": k, "value": None}); continue
+        f = plan_reality.fulfillment(min(weeks), max(weeks))
+        out.append({"period": k, "value": f.get("fulfilmentPct")})
+    return out
+
+
+def _campaigns(start, end, names) -> list:
+    """Campaigns active in the period, with TourPlan fulfilment over their weeks
+    and how many visibility (Náběh kampaně) visits landed in that window."""
+    if not db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='campaigns'"):
+        return []
+    import plan_reality
+    rs, re = start.isocalendar()[1], end.isocalendar()[1]
+    lo, hi = min(rs, re), max(rs, re)
+    rows = db.get("SELECT name, kind, start_week, end_week FROM campaigns "
+                  "WHERE active=1 AND start_week<=? AND end_week>=? ORDER BY start_week", (hi, lo))
+    out = []
+    for c in rows:
+        wf, wt = max(int(c["start_week"]), lo), min(int(c["end_week"]), hi)
+        if wf > wt:
+            continue
+        f = plan_reality.fulfillment(wf, wt)
+        # visibility visits in this window, scoped to the people in play
+        q = ("SELECT COUNT(*) c FROM salesapp_visits v WHERE v.visit_date IS NOT NULL "
+             "AND lower(v.purpose) LIKE ? "
+             "AND CAST(strftime('%W', v.visit_date) AS INT) BETWEEN ? AND ?")
+        params: list = [f"%{_VISIBILITY_TOKEN}%", wf, wt]
+        if names:
+            q += " AND v.technician IN (%s)" % ",".join("?" * len(names)); params += names
+        vis = db.get(q, tuple(params))[0]["c"]
+        out.append({"name": c["name"], "kind": c["kind"], "weekFrom": wf, "weekTo": wt,
+                    "planned": f.get("planned"), "done": (f.get("done") or 0) + (f.get("doneShifted") or 0),
+                    "fulfilmentPct": f.get("fulfilmentPct"), "visibilityVisits": vis})
+    return out
 
 
 def _period_trends(per_period, per_period_tech, role, fulfil, area_returns, grain) -> dict:

@@ -899,3 +899,12 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .cov-lead { font-size: 12.5px; margin-bottom: 10px; } .cov-lead b { color: var(--text); }
 .cov-chips { display: flex; flex-wrap: wrap; gap: 7px; } .cov-chip { font-size: 11.5px; padding: 3px 9px; border-radius: 20px; background: var(--panel-2); }
 .dl-lg { font-weight: 400; font-size: 10.5px; color: var(--text-3); margin-left: 8px; } .dl-lg i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin: 0 3px 0 8px; vertical-align: middle; }
+/* Kampaně v souhrnu */
+.camp-row { padding: 9px 0; border-top: 1px solid var(--border); }
+.camp-row:first-of-type { border-top: none; }
+.camp-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 5px; }
+.camp-n { font-weight: 600; font-size: 12.5px; } .camp-k { color: var(--text-3); font-size: 11px; white-space: nowrap; }
+.camp-bar { height: 8px; border-radius: 5px; background: var(--panel-2); overflow: hidden; }
+.camp-fill { height: 100%; border-radius: 5px; }
+.camp-fill.hs-ok { background: #0F7C77; } .camp-fill.hs-mid { background: #D9A441; } .camp-fill.hs-bad { background: #C0392B; }
+.camp-x { font-size: 11px; color: var(--text-2); margin-top: 4px; }
