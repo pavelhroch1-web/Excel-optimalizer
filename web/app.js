@@ -2348,13 +2348,42 @@ async function loadCockpitBrief() {
       ...(_BRIEF_KPIS.map((k) => apiJson(`/api/memory/trend?entity_type=${k.et}&metric_key=${k.m}`).catch(() => null))),
     ]);
     el.innerHTML = renderBrief(team, (runsResp && runsResp.runs && runsResp.runs[0]) || null, trends)
-      + `<div id="company-block"></div>` + renderInsightsBlock(insights);
+      + `<div id="health-block"></div><div id="company-block"></div>` + renderInsightsBlock(insights);
   } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+  // Critical cases (Health Score) — the overall weakest technicians. Fast.
+  apiJson("/api/insights/health").then((h) => {
+    const hb = document.getElementById("health-block");
+    if (hb) hb.innerHTML = renderHealthBlock(h);
+  }).catch(() => {});
   // Company "where we lose time" view is heavier (route analysis) — stream it in.
   apiJson("/api/insights/company").then((co) => {
     const cb = document.getElementById("company-block");
     if (cb) cb.innerHTML = renderCompanyBlock(co);
   }).catch(() => {});
+}
+
+// "Kritické případy" — the overall weakest technicians by Health Score, always
+// shown, even without extreme transfers. Each pops with a score gauge + why.
+function renderHealthBlock(h) {
+  const worst = (h && h.worst) || [];
+  if (!worst.length) return "";
+  const cards = worst.map((t) => {
+    const tone = t.healthScore < 70 ? "crit" : (t.healthScore < 80 ? "warn" : "ok");
+    const why = (t.why || []).map((w) => `<span class="hc-why">${esc(w.label)}</span>`).join("");
+    return `<div class="hc-card ${tone}" data-diagnose="${esc(t.technician)}" role="button" tabindex="0">
+      <div class="hc-gauge"><svg viewBox="0 0 40 40"><circle class="hc-bg" cx="20" cy="20" r="16"></circle>
+        <circle class="hc-arc" cx="20" cy="20" r="16"
+          style="stroke-dasharray:${Math.round(t.healthScore)} 100"></circle></svg>
+        <div class="hc-score">${t.healthScore}</div></div>
+      <div class="hc-body"><div class="hc-name">${esc(t.technician)}</div>
+        <div class="hc-facts">${t.visitsPerDay ?? "—"} návšt/den · ${t.workHoursPerDay ?? "—"} h/den · ${t.avgOnPosMin ?? "—"} min na POS</div>
+        <div class="hc-whys">${why}</div></div>
+      <div class="hc-go">Rozbor →</div></div>`;
+  }).join("");
+  return `<section class="health">
+    <div class="health-h">${ico("flame")} Kritické případy <span class="pd-chip">nejnižší Health Score</span>
+      <span class="health-sub">celkově nejslabší technici — ne jen extrémní přejezdy</span></div>
+    ${cards}</section>`;
 }
 
 // Company view in the language of TIME: total lost capacity + where the reserves are.

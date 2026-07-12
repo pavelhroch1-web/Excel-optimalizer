@@ -470,6 +470,29 @@ button.ghost.small { padding: 7px 13px; font-size: 12.5px; margin-left: auto; }
 .lost-recover { margin-top: 8px; font-size: 13px; color: var(--good, #157F5A); }
 .lost-recover b { font-weight: 700; }
 
+/* "Kritické případy" — Health Score cards */
+.health { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 18px 20px; margin-bottom: 18px; box-shadow: var(--shadow-1); }
+.health-h { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; margin-bottom: 12px; }
+.health-h svg { width: 18px; height: 18px; color: #C0392B; }
+.health-sub { font-weight: 500; font-size: 12px; color: var(--text-3); margin-left: auto; }
+.hc-card { display: grid; grid-template-columns: 48px 1fr auto; gap: 14px; align-items: center; padding: 12px 14px; border-radius: var(--r-md); border: 1px solid var(--border); margin-bottom: 8px; background: var(--panel-2); cursor: pointer; transition: .12s; }
+.hc-card:last-child { margin-bottom: 0; }
+.hc-card:hover { border-color: var(--border-2); }
+.hc-card.crit { border-left: 4px solid #C0392B; }
+.hc-card.warn { border-left: 4px solid #B45309; }
+.hc-gauge { position: relative; width: 48px; height: 48px; }
+.hc-gauge svg { width: 48px; height: 48px; transform: rotate(-90deg); }
+.hc-gauge .hc-bg { fill: none; stroke: var(--border); stroke-width: 4; }
+.hc-gauge .hc-arc { fill: none; stroke-width: 4; stroke-linecap: round; pathLength: 100; }
+.hc-card.crit .hc-arc { stroke: #C0392B; } .hc-card.warn .hc-arc { stroke: #B45309; } .hc-card.ok .hc-arc { stroke: var(--good, #157F5A); }
+.hc-score { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-weight: 720; font-size: 15px; }
+.hc-name { font-weight: 660; font-size: 14px; }
+.hc-facts { font-size: 12px; color: var(--text-3); margin: 2px 0 5px; }
+.hc-whys { display: flex; flex-wrap: wrap; gap: 5px; }
+.hc-why { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: color-mix(in srgb, #C0392B 12%, transparent); color: #C0392B; }
+.hc-go { font-size: 12.5px; font-weight: 640; color: var(--accent); white-space: nowrap; }
+@media (max-width: 640px) { .hc-card { grid-template-columns: 44px 1fr; } .hc-go { display: none; } }
+
 /* company "where we lose time" block on the cockpit */
 .company { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 18px 20px; margin-bottom: 18px; box-shadow: var(--shadow-1); }
 .co-top { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; align-items: center; margin-bottom: 16px; }

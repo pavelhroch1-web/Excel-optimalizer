@@ -364,6 +364,94 @@ def combination_analysis(days_back: int = 90) -> dict:
     return out
 
 
+# Health Score components: each is a per-technician metric with the direction
+# that means "worse", a weight, and a short label for the "why". Higher weight =
+# bigger pull on the overall score. Deliberately combines several dimensions so a
+# quietly weak technician (few visits, slow on POS, short day, low utilisation)
+# surfaces even without extreme transfers.
+_HEALTH_COMPS = [
+    ("visitsPerDay", "low", 1.4, "málo návštěv/den"),
+    ("loadPct", "low", 1.3, "nízké využití kapacity"),
+    ("workHoursPerDay", "low", 1.2, "krátká pracovní doba"),
+    ("visitsPerWorkHour", "low", 1.2, "nízká produktivita"),
+    ("avgOnPosMin", "high", 1.0, "dlouhé časy na POS"),
+    ("onPosRatioPct", "low", 0.9, "hodně času na cestě"),
+    ("areaReturnsPerWeek", "high", 0.8, "opakované návraty do oblasti"),
+]
+
+
+def _area_returns_per_week() -> dict:
+    """Light query: how often a technician returns to the same area on different
+    days of the same week (a combining opportunity signal)."""
+    rows = db.get(
+        "SELECT technician, SUM(CASE WHEN dd>=2 THEN 1 ELSE 0 END)*1.0/COUNT(DISTINCT wk) rate FROM ("
+        "  SELECT v.technician technician, COALESCE(p.city, v.store_name) ck, "
+        "  strftime('%Y-%W', v.visit_date) wk, COUNT(DISTINCT v.visit_date) dd "
+        "  FROM salesapp_visits v LEFT JOIN pos_master p ON p.pos_id=v.pos_id "
+        "  WHERE v.visitor_role='TECHNIK' AND v.visit_date IS NOT NULL "
+        "  GROUP BY v.technician, ck, wk) GROUP BY technician")
+    return {r["technician"]: (r["rate"] or 0) for r in rows}
+
+
+def health_scores(days_back: int = 90) -> dict:
+    """A composite 0-100 Health Score per technician (100 = healthy, low =
+    critical). Combines work time, time on POS, visits, travel share, capacity
+    utilisation and repeated area returns - so overall weakest technicians
+    surface, not just single-metric outliers. Fast (no route reconstruction)."""
+    import team_analytics
+    ov = team_analytics.overview(days_back=days_back)
+    # Only real, active technicians — sparse records (a handful of visits, no
+    # timestamps) would otherwise dominate the critical cases with data noise.
+    techs = [dict(t) for t in ov.get("technicians", [])
+             if (t.get("visits") or 0) >= 30 and (t.get("daysWorked") or 0) >= 10]
+    if len(techs) < 5:
+        return {"technicians": [], "insufficient": True}
+    ar = _area_returns_per_week()
+    for t in techs:
+        dw = t.get("daysWorked") or 0
+        t["visitsPerDay"] = round(t["visits"] / dw, 2) if dw else None
+        t["workHoursPerDay"] = round(t["avgWorkHours"] / dw, 2) if (dw and t.get("avgWorkHours")) else None
+        t["areaReturnsPerWeek"] = round(ar.get(t["technician"], 0), 2)
+
+    # peer stats per component
+    stats = {}
+    for field, *_ in _HEALTH_COMPS:
+        vals = [t[field] for t in techs if t.get(field) is not None]
+        if vals:
+            stats[field] = (statistics.median(vals),
+                            statistics.pstdev(vals) if len(vals) > 1 else 0)
+
+    out = []
+    total_w = sum(w for _, _, w, _ in _HEALTH_COMPS)
+    for t in techs:
+        badness = 0.0
+        why = []
+        for field, bad_dir, w, label in _HEALTH_COMPS:
+            if field not in stats or t.get(field) is None:
+                continue
+            med, sd = stats[field]
+            if not sd:
+                continue
+            z = (t[field] - med) / sd
+            z_bad = z if bad_dir == "high" else -z
+            contrib = max(0.0, min(z_bad, 3.0)) / 3.0  # 0..1
+            badness += w * contrib
+            if z_bad >= 1.0:
+                why.append({"label": label, "value": t[field], "peerMedian": round(med, 1)})
+        score = round(100 * (1 - badness / total_w))
+        why.sort(key=lambda x: 0)  # keep insertion (weight) order
+        out.append({
+            "technician": t["technician"], "region": t.get("region"),
+            "healthScore": max(0, min(100, score)),
+            "visits": t["visits"], "visitsPerDay": t.get("visitsPerDay"),
+            "workHoursPerDay": t.get("workHoursPerDay"), "avgOnPosMin": t.get("avgOnPosMin"),
+            "onPosRatioPct": t.get("onPosRatioPct"), "loadPct": t.get("loadPct"),
+            "why": why[:3],
+        })
+    out.sort(key=lambda x: x["healthScore"])
+    return {"technicians": out, "worst": out[:5]}
+
+
 def company_overview(days_back: int = 90) -> dict:
     """The whole-company view in the language of TIME: how much net working-time
     capacity the network is losing to avoidable travel, where the reserves are
