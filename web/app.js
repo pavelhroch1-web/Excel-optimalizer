@@ -2355,8 +2355,30 @@ async function loadCockpitBrief() {
   // Company "where we lose time" view is heavier (route analysis) — stream it in.
   apiJson("/api/insights/company").then((co) => {
     const cb = document.getElementById("company-block");
-    if (cb) cb.innerHTML = renderCompanyBlock(co);
+    if (cb) { cb.innerHTML = renderCompanyBlock(co); initRegionTrends(cb); }
   }).catch(() => {});
+}
+
+// Region (středisko) trend graphs under the company overview: pick a region,
+// filter time, compare its development like a technician.
+async function initRegionTrends(scope) {
+  const host = scope.querySelector("#region-trends");
+  if (!host) return;
+  let regions = [];
+  try { regions = (await apiJson("/api/trends/regions")).regions || []; } catch (e) { return; }
+  if (!regions.length) return;
+  const opts = regions.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+  host.innerHTML = `<div class="co-regs-h">Vývoj střediska v čase</div>
+    <div class="rt-pick"><select class="rt-region">${opts}</select></div>
+    <div class="rt-panel-host"></div>`;
+  const sel = host.querySelector(".rt-region");
+  const mount = () => {
+    const ph = host.querySelector(".rt-panel-host");
+    ph.innerHTML = trendPanelHtml("region", sel.value);
+    bindTrendPanel(ph);
+  };
+  sel.addEventListener("change", mount);
+  mount();
 }
 
 // "Kritické případy" — the overall weakest people by Health Score. Technicians
@@ -2425,6 +2447,7 @@ function renderCompanyBlock(co) {
     </div>
     <div class="co-regs-h">Kde jsou rezervy — ztracená kapacita podle regionu</div>
     <div class="co-regs">${rows}</div>
+    <div class="region-trends" id="region-trends"></div>
   </section>`;
 }
 
@@ -2704,6 +2727,111 @@ function renderTdTab(tab) {
   if (tab === "prehled") el.innerHTML = _tdPrehled(p);
   else if (tab === "anomalie") el.innerHTML = _tdAnomalie(p);
   else if (tab === "dny") { el.innerHTML = _tdDny(p); _tdBindDays(); }
+  else if (tab === "trendy") { el.innerHTML = trendPanelHtml("technician", _td.name); bindTrendPanel(el); }
+}
+
+// ---- Reusable trend graphs (technician or region), offline SVG line charts ----
+const TREND_METRICS = [
+  ["visits", "Návštěvy", "", 0],
+  ["visitsPerDay", "Návštěvy / den", "", 2],
+  ["visitsPerWorkHour", "Produktivita (návštěvy / h)", "", 2],
+  ["workHours", "Odpracované hodiny", " h", 1],
+  ["avgWorkHours", "Ø hodin / den", " h", 1],
+  ["onPosHours", "Hodiny na POS", " h", 1],
+  ["onPosRatioPct", "Podíl času na POS", " %", 0],
+  ["roadKm", "Ujeté km (silnicí)", " km", 0],
+];
+const TREND_RANGES = [["90", "3 měsíce"], ["180", "6 měsíců"], ["365", "12 měsíců"], ["1000", "Vše"]];
+
+function trendPanelHtml(type, entity) {
+  const grainBtns = [["week", "Týden"], ["month", "Měsíc"]]
+    .map(([g, l], i) => `<button class="tp-btn${i === 0 ? " on" : ""}" data-grain="${g}">${l}</button>`).join("");
+  const rangeBtns = TREND_RANGES
+    .map(([v, l], i) => `<button class="tp-btn${i === 1 ? " on" : ""}" data-range="${v}">${l}</button>`).join("");
+  const metricOpts = TREND_METRICS.map(([k, l]) => `<option value="${k}">${l}</option>`).join("");
+  return `<div class="trend-panel" data-type="${type}" data-entity="${esc(entity)}">
+    <div class="tp-controls">
+      <div class="tp-group">${grainBtns}</div>
+      <div class="tp-group">${rangeBtns}</div>
+      <label class="tp-mlabel">Metriky (více naráz)</label>
+      <select class="tp-metric" multiple size="4">${metricOpts}</select>
+    </div>
+    <div class="tp-charts"><p class="pd-sub" style="padding:14px">Načítám…</p></div>
+  </div>`;
+}
+
+function bindTrendPanel(scope) {
+  const panel = scope.querySelector(".trend-panel");
+  if (!panel) return;
+  const sel = panel.querySelector(".tp-metric");
+  // default: show 3 headline metrics
+  ["visits", "visitsPerWorkHour", "roadKm"].forEach((k) => {
+    const o = [...sel.options].find((o) => o.value === k); if (o) o.selected = true;
+  });
+  panel.addEventListener("click", (e) => {
+    const b = e.target.closest(".tp-btn"); if (!b) return;
+    b.parentElement.querySelectorAll(".tp-btn").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on"); loadTrend(panel);
+  });
+  sel.addEventListener("change", () => loadTrend(panel));
+  loadTrend(panel);
+}
+
+async function loadTrend(panel) {
+  const type = panel.dataset.type, entity = panel.dataset.entity;
+  const grain = (panel.querySelector(".tp-btn.on[data-grain]") || {}).dataset?.grain || "week";
+  const range = (panel.querySelector(".tp-btn.on[data-range]") || {}).dataset?.range || "180";
+  const metrics = [...panel.querySelector(".tp-metric").selectedOptions].map((o) => o.value);
+  const host = panel.querySelector(".tp-charts");
+  host.innerHTML = `<p class="pd-sub" style="padding:14px">Načítám…</p>`;
+  try {
+    const d = await apiJson(`/api/trends?entity=${encodeURIComponent(entity)}&type=${type}&grain=${grain}&days_back=${range}`);
+    const s = d.series || [];
+    if (!s.length) { host.innerHTML = `<p class="pd-sub" style="padding:14px">Pro zvolené období nejsou data.</p>`; return; }
+    const picks = metrics.length ? metrics : ["visits"];
+    host.innerHTML = picks.map((m) => {
+      const meta = TREND_METRICS.find((x) => x[0] === m) || [m, m, "", 1];
+      return `<div class="tp-chart"><div class="tp-chart-t">${meta[1]}</div>${_lineChart(s, m, meta[2], meta[3])}</div>`;
+    }).join("");
+  } catch (e) { host.innerHTML = `<p class="result err" style="padding:14px">${esc(e.message)}</p>`; }
+}
+
+// Offline SVG line chart over the period series for one metric.
+function _lineChart(series, key, unit, dec) {
+  const W = 640, H = 190, padL = 46, padR = 14, padT = 14, padB = 34;
+  const vals = series.map((p) => (p[key] == null ? null : +p[key]));
+  const nums = vals.filter((v) => v != null);
+  if (!nums.length) return `<div class="tp-empty">bez dat</div>`;
+  let lo = Math.min(...nums), hi = Math.max(...nums);
+  if (lo === hi) { lo -= 1; hi += 1; } lo = Math.min(lo, 0) === 0 && lo >= 0 ? 0 : lo;
+  const n = series.length;
+  const x = (i) => padL + (n === 1 ? (W - padL - padR) / 2 : i * (W - padL - padR) / (n - 1));
+  const y = (v) => padT + (H - padT - padB) * (1 - (v - lo) / (hi - lo || 1));
+  // gridlines + y labels (3)
+  let grid = "", gl = 3;
+  for (let g = 0; g <= gl; g++) {
+    const v = lo + (hi - lo) * g / gl, yy = y(v).toFixed(1);
+    grid += `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" class="tpc-grid"/>`;
+    grid += `<text x="${padL - 6}" y="${yy}" dy="3" text-anchor="end" class="tpc-ylab">${_fmtNum(+v.toFixed(dec))}</text>`;
+  }
+  // line path over non-null points
+  let dpath = "", started = false;
+  vals.forEach((v, i) => { if (v == null) return; dpath += `${started ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)} `; started = true; });
+  // dots + x labels (thin them if many)
+  const step = Math.ceil(n / 10);
+  let dots = "", xlab = "";
+  vals.forEach((v, i) => {
+    if (v != null) dots += `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3" class="tpc-dot"><title>${esc(series[i].period)}: ${_fmtNum(+v.toFixed(dec))}${unit}</title></circle>`;
+    if (i % step === 0) xlab += `<text x="${x(i).toFixed(1)}" y="${H - 10}" text-anchor="middle" class="tpc-xlab">${esc(_periodShort(series[i].period))}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" class="tp-svg">
+    ${grid}<path d="${dpath.trim()}" fill="none" class="tpc-line"/>${dots}${xlab}</svg>`;
+}
+
+function _periodShort(p) {
+  const m = String(p).match(/^(\d{4})-W(\d+)$/); if (m) return "t" + (+m[2]);
+  const mm = String(p).match(/^(\d{4})-(\d{2})$/); if (mm) return mm[2] + "/" + mm[1].slice(2);
+  return p;
 }
 
 function _tdKpi(label, val, unit) {

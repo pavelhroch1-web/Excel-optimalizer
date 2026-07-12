@@ -1227,6 +1227,20 @@ if LOCAL_MODE:
     def technician_day(name: str, date: str):
         return tech_detail.day(name, date)
 
+    # Time-series trends for a technician or a region (středisko), with flexible
+    # time filtering (week/month grain, any date range).
+    import trends as _trends  # noqa: E402
+
+    @app.get("/api/trends/regions", dependencies=[Depends(require_auth)])
+    def trends_regions():
+        return {"regions": _trends.regions()}
+
+    @app.get("/api/trends", dependencies=[Depends(require_auth)])
+    def trends_series(entity: str, type: str = "technician", grain: str = "week",
+                      days_back: int = 180, date_from: str | None = None,
+                      date_to: str | None = None):
+        return _trends.series(type, entity, grain, days_back, date_from, date_to)
+
     # Settings platform: configure planner/optimization/dashboard/report/map/
     # scoring from the app. Definitions drive a generic admin UI; values override.
     import settings as _settings  # noqa: E402
