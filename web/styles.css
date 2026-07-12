@@ -462,6 +462,41 @@ button.ghost.small { padding: 7px 13px; font-size: 12.5px; margin-left: auto; }
 .combo-ex-row .ce-txt { flex: 1; min-width: 60%; color: var(--text); line-height: 1.45; }
 .combo-ex-row .ce-wk { color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+/* lost-hours headline in the technician panel */
+.lost-headline { background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--r-md); padding: 14px 16px; margin-bottom: 14px; }
+.lost-big { font-size: 26px; font-weight: 760; letter-spacing: -.02em; color: #C0392B; }
+.lost-big span { font-size: 13px; font-weight: 600; color: var(--text-2); letter-spacing: 0; }
+.lost-narr { font-size: 13.5px; line-height: 1.55; margin-top: 8px; color: var(--text); }
+.lost-recover { margin-top: 8px; font-size: 13px; color: var(--good, #157F5A); }
+.lost-recover b { font-weight: 700; }
+
+/* company "where we lose time" block on the cockpit */
+.company { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 18px 20px; margin-bottom: 18px; box-shadow: var(--shadow-1); }
+.co-top { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.co-lead { display: flex; gap: 12px; align-items: center; }
+.co-lead svg { width: 26px; height: 26px; color: #C0392B; }
+.co-lead-big { font-size: 30px; font-weight: 780; letter-spacing: -.02em; color: #C0392B; line-height: 1; }
+.co-lead-sub { font-size: 12.5px; color: var(--text-2); margin-top: 4px; max-width: 52ch; }
+.co-flags { display: flex; gap: 10px; }
+.co-flag { border: 1px solid var(--border); border-radius: var(--r-md); padding: 8px 14px; min-width: 120px; }
+.co-flag span { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); font-weight: 600; }
+.co-flag b { display: block; font-size: 14px; font-weight: 680; margin: 2px 0 1px; }
+.co-flag i { font-style: normal; font-size: 11.5px; color: var(--text-3); }
+.co-flag.bad { background: color-mix(in srgb, #C0392B 8%, transparent); }
+.co-flag.bad b { color: #C0392B; }
+.co-flag.good { background: color-mix(in srgb, #157F5A 8%, transparent); }
+.co-flag.good b { color: var(--good, #157F5A); }
+.co-regs-h { font-size: 12px; font-weight: 640; color: var(--text-3); text-transform: uppercase; letter-spacing: .03em; margin-bottom: 10px; }
+.co-reg { display: grid; grid-template-columns: 190px 1fr auto; gap: 12px; align-items: center; padding: 6px 0; cursor: default; }
+.co-reg-name { font-size: 13px; font-weight: 600; }
+.co-reg-n { font-weight: 500; color: var(--text-3); font-size: 11.5px; }
+.co-reg-bar { height: 8px; background: var(--border); border-radius: 5px; overflow: hidden; }
+.co-reg-fill { height: 100%; background: var(--accent); border-radius: 5px; }
+.co-reg-fill.bad { background: #C0392B; }
+.co-reg-fill.good { background: var(--good, #157F5A); }
+.co-reg-val { font-size: 12px; color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .co-reg { grid-template-columns: 120px 1fr; } .co-reg-val { display: none; } }
+
 /* command bar */
 .ck-bar { display: flex; align-items: center; gap: 16px; margin: 2px 0 20px; }
 .ck-title { font-size: 21px; font-weight: 680; letter-spacing: -0.02em; display: flex; align-items: center; gap: 12px; white-space: nowrap; }

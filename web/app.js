@@ -2348,8 +2348,43 @@ async function loadCockpitBrief() {
       ...(_BRIEF_KPIS.map((k) => apiJson(`/api/memory/trend?entity_type=${k.et}&metric_key=${k.m}`).catch(() => null))),
     ]);
     el.innerHTML = renderBrief(team, (runsResp && runsResp.runs && runsResp.runs[0]) || null, trends)
-      + renderInsightsBlock(insights);
+      + `<div id="company-block"></div>` + renderInsightsBlock(insights);
   } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+  // Company "where we lose time" view is heavier (route analysis) — stream it in.
+  apiJson("/api/insights/company").then((co) => {
+    const cb = document.getElementById("company-block");
+    if (cb) cb.innerHTML = renderCompanyBlock(co);
+  }).catch(() => {});
+}
+
+// Company view in the language of TIME: total lost capacity + where the reserves are.
+function renderCompanyBlock(co) {
+  if (!co || !co.totalLostHours) return "";
+  const regs = (co.regions || []).slice(0, 6);
+  const maxLost = Math.max(...regs.map((r) => r.lostPerTech || 0), 1);
+  const rows = regs.map((r, i) => {
+    const w = Math.round(100 * (r.lostPerTech || 0) / maxLost);
+    const tone = i === 0 ? "bad" : (r.region === co.bestRegion.region ? "good" : "");
+    return `<div class="co-reg" data-region="${esc(r.region)}">
+      <div class="co-reg-name">${esc(r.region)} <span class="co-reg-n">${r.technicians} tech</span></div>
+      <div class="co-reg-bar"><div class="co-reg-fill ${tone}" style="width:${w}%"></div></div>
+      <div class="co-reg-val">${_fmtNum(r.lostPerTech)} h/tech · ${r.efficiencyPct != null ? r.efficiencyPct + "% na POS" : "—"}</div>
+    </div>`;
+  }).join("");
+  return `<section class="company">
+    <div class="co-top">
+      <div class="co-lead">${ico("clock")}<div>
+        <div class="co-lead-big">~${_fmtNum(co.totalLostHours)} h</div>
+        <div class="co-lead-sub">ztracené kapacity sítě za období · ~${_fmtNum(co.totalAvoidableKm)} km zbytečně${co.lostSharePct ? ` · ${co.lostSharePct}% času na cestě` : ""}</div>
+      </div></div>
+      <div class="co-flags">
+        <div class="co-flag bad"><span>Největší rezervy</span><b>${esc(co.worstRegion.region)}</b><i>${_fmtNum(co.worstRegion.lostPerTech)} h/tech</i></div>
+        <div class="co-flag good"><span>Nejefektivnější</span><b>${esc(co.bestRegion.region)}</b><i>${co.bestRegion.efficiencyPct}% na POS</i></div>
+      </div>
+    </div>
+    <div class="co-regs-h">Kde jsou rezervy — ztracená kapacita podle regionu</div>
+    <div class="co-regs">${rows}</div>
+  </section>`;
 }
 
 // "Co bys přehlédl" — ranked anomalies / inefficiencies, each with its why.
@@ -2556,9 +2591,16 @@ async function openDiagnosis(name) {
         <div class="co-h">Největší prostor ke zlepšení</div>
         <div class="co-t">${esc(d.opportunity.note)}</div>${exHtml}</div></div>` : "";
     const p = d.profile || {};
+    const headline = d.narrative
+      ? `<div class="lost-headline">
+           <div class="lost-big">${_fmtNum(d.lostHours)} h <span>ztraceného pracovního času</span></div>
+           <div class="lost-narr">${esc(d.narrative)}</div>
+           ${d.recoverableHours ? `<div class="lost-recover">Získatelná kapacita: <b>~${_fmtNum(d.recoverableHours)} h</b></div>` : ""}
+         </div>`
+      : `<div class="cause-summary">${esc(d.summary)}</div>`;
     bodyEl.innerHTML =
-      `<div class="cause-summary">${esc(d.summary)}</div>
-       ${opp}
+      headline +
+       `${opp}
        <div class="pd-section">Příčiny (seřazené podle síly odchylky)</div>
        ${causes || "<p class='pd-sub'>Bez výrazné příčiny.</p>"}
        <div class="pd-section">Profil práce (${p.days || 0} dní)</div>

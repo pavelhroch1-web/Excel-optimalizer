@@ -1203,6 +1203,12 @@ if LOCAL_MODE:
             raise HTTPException(status_code=404, detail="Pro technika nejsou data trasy")
         return d
 
+    # Company-wide view in the language of time: total lost capacity, where the
+    # reserves are (regions), and the biggest opportunities.
+    @app.get("/api/insights/company", dependencies=[Depends(require_auth)])
+    def insights_company(days_back: int = 90):
+        return diagnostics.company_overview(days_back)
+
     # Settings platform: configure planner/optimization/dashboard/report/map/
     # scoring from the app. Definitions drive a generic admin UI; values override.
     import settings as _settings  # noqa: E402

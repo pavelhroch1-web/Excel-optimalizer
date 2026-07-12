@@ -257,8 +257,37 @@ def diagnose(name: str, days_back: int = 90) -> dict | None:
         opportunity = {"type": "combine",
                        "note": "Spojení jednoúčelových návštěv do společných cest sníží počet přejezdů."}
 
+    # ---- manager narrative: not "could save X km" but "lost ~N hours, here's
+    # the cause, and here's the capacity we'd get back". Time is the headline. ----
+    combo_min = combo["savedMin"] if combo else 0
+    order_min = me.get("savedMinOrdering") or 0
+    lost_hours = round((combo_min + order_min) / 60.0, 1)
+    recoverable_hours = round((combo_min / 2 + order_min / 2) / 60.0, 1)
+    combo_dominant = combo_min >= order_min
+    lever_causes = [c["label"].lower() for c in causes
+                    if c["factor"] in ("missed_visibility_combination", "repeatedAreaReturns",
+                                       "isolatedRate", "avgLegKm")][:2]
+    narrative = None
+    if lost_hours >= 2:
+        parts = [f"{name} za sledované období pravděpodobně ztratil přibližně "
+                 f"{lost_hours:.0f} hodin čistého pracovního času."]
+        if combo_dominant and lever_causes:
+            parts.append(f"Největší příčinou nejsou samotné dlouhé přejezdy, ale "
+                         f"{' a '.join(lever_causes)}.")
+        elif causes:
+            parts.append(f"Hlavní příčinou je {causes[0]['label'].lower()}.")
+        if combo and combo["savedMin"] >= 60:
+            parts.append(f"Kdyby se podařilo spojit alespoň polovinu těchto cest s visibilitními "
+                         f"návštěvami, získali bychom přibližně {round(combo_min/2/60):.0f} hodin "
+                         f"kapacity navíc.")
+        narrative = " ".join(parts)
+
     return {"technician": name, "profile": me, "peerMedians": {k: peer_med(k) for k, *_ in _FACTORS},
             "causes": causes, "combination": combo,
+            "lostHours": lost_hours, "recoverableHours": recoverable_hours,
+            "lostHoursOrdering": round(order_min / 60.0, 1),
+            "lostHoursCombination": round(combo_min / 60.0, 1),
+            "narrative": narrative,
             "summary": (f"Hlavní příčina: {causes[0]['label'].lower()} — {causes[0]['note']}."
                         if causes else "Bez výrazné příčiny v rámci sledovaných faktorů."),
             "opportunity": opportunity}
@@ -333,6 +362,77 @@ def combination_analysis(days_back: int = 90) -> dict:
                          "examples": sorted(missed, key=lambda m: -m["km"])[:5]}
     _combo_cache[days_back] = out
     return out
+
+
+def company_overview(days_back: int = 90) -> dict:
+    """The whole-company view in the language of TIME: how much net working-time
+    capacity the network is losing to avoidable travel, where the reserves are
+    (by region), and which technicians represent the biggest opportunity. Time
+    is the headline metric; km are secondary."""
+    profs = _all_profiles(days_back)
+    combos = combination_analysis(days_back)
+    # Region comes from the SalesApp truth (Agency region on each visit) — the
+    # technicians table isn't reliably filled. Use each technician's most common
+    # region (rows arrive most-frequent first per technician; keep the first).
+    regions: dict = {}
+    for r in db.get(
+            "SELECT technician, region, COUNT(*) n FROM salesapp_visits "
+            "WHERE technician IS NOT NULL AND region IS NOT NULL AND region<>'' "
+            "GROUP BY technician, region ORDER BY technician, n DESC"):
+        regions.setdefault(r["technician"], r["region"] or "—")
+
+    techs = []
+    for name, p in profs.items():
+        combo = combos.get(name)
+        order_min = p.get("savedMinOrdering") or 0
+        combo_min = combo["savedMin"] if combo else 0
+        techs.append({
+            "technician": name, "region": regions.get(name, "—"),
+            "lostHours": round((order_min + combo_min) / 60.0, 1),
+            "avoidableKm": round((p.get("excessKm") or 0) + (combo["savedKm"] if combo else 0), 1),
+            "travelHours": p.get("travelHoursActual") or 0,
+            "onPosHours": p.get("onPosHoursActual") or 0,
+            "travelShare": p.get("travelShare"),
+        })
+    techs.sort(key=lambda t: -t["lostHours"])
+
+    from collections import defaultdict
+    reg = defaultdict(lambda: {"lostHours": 0.0, "avoidableKm": 0.0, "travelHours": 0.0,
+                               "onPosHours": 0.0, "techs": 0, "shares": []})
+    for t in techs:
+        r = reg[t["region"]]
+        r["lostHours"] += t["lostHours"]; r["avoidableKm"] += t["avoidableKm"]
+        r["travelHours"] += t["travelHours"]; r["onPosHours"] += t["onPosHours"]
+        r["techs"] += 1
+        if t["travelShare"] is not None:
+            r["shares"].append(t["travelShare"])
+    region_rows = []
+    for rname, r in reg.items():
+        active = r["travelHours"] + r["onPosHours"]
+        region_rows.append({
+            "region": rname, "technicians": r["techs"],
+            "lostHours": round(r["lostHours"], 1),
+            "lostPerTech": round(r["lostHours"] / r["techs"], 1) if r["techs"] else 0,
+            "avoidableKm": round(r["avoidableKm"], 1),
+            "travelSharePct": round(sum(r["shares"]) / len(r["shares"]), 1) if r["shares"] else None,
+            "efficiencyPct": round(100 * r["onPosHours"] / active, 1) if active else None,
+        })
+    # biggest reserves first (most lost hours per technician)
+    region_rows.sort(key=lambda x: -x["lostPerTech"])
+
+    total_lost = round(sum(t["lostHours"] for t in techs), 1)
+    total_travel = round(sum(t["travelHours"] for t in techs), 1)
+    total_km = round(sum(t["avoidableKm"] for t in techs), 1)
+    return {
+        "daysBack": days_back, "technicianCount": len(techs),
+        "totalLostHours": total_lost, "totalAvoidableKm": total_km,
+        "totalTravelHours": total_travel,
+        "lostSharePct": round(100 * total_lost / total_travel, 1) if total_travel else None,
+        "regions": region_rows,
+        "bestRegion": min(region_rows, key=lambda x: x["lostPerTech"]) if region_rows else None,
+        "worstRegion": region_rows[0] if region_rows else None,
+        "topTechnicians": techs[:8],
+    }
 
 
 def invalidate_cache():
