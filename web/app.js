@@ -2834,6 +2834,211 @@ function _periodShort(p) {
   return p;
 }
 
+// ==================== MĚSÍČNÍ SOUHRN ====================
+const _sum = { dims: null, filters: { period: "month", role: "TECHNIK", active: "active", grain: "week" } };
+const _MONTHS_CZ = ["", "Leden", "Únor", "Březen", "Duben", "Květen", "Červen", "Červenec", "Srpen", "Září", "Říjen", "Listopad", "Prosinec"];
+
+async function initSummary() {
+  try { _sum.dims = await apiJson("/api/summary/dimensions"); }
+  catch (e) { document.getElementById("sum-filters").innerHTML = `<p class="result err">${esc(e.message)}</p>`; return; }
+  // Default to the last COMPLETE month: if the data ends mid-month, step back
+  // one month so KPIs and deltas compare full month vs full month (a partial
+  // month would show scary deltas and too little data to score Health).
+  let dto = _sum.dims.dataTo ? new Date(_sum.dims.dataTo + "T00:00:00") : new Date();
+  const lastDay = new Date(dto.getFullYear(), dto.getMonth() + 1, 0).getDate();
+  if (dto.getDate() < lastDay) dto = new Date(dto.getFullYear(), dto.getMonth() - 1, 1);
+  _sum.filters.year = dto.getFullYear();
+  _sum.filters.month = dto.getMonth() + 1;
+  _sum.filters.quarter = Math.floor(dto.getMonth() / 3) + 1;
+  renderSumFilters();
+  loadSummary();
+}
+
+function renderSumFilters() {
+  const d = _sum.dims, f = _sum.filters;
+  const years = [];
+  const ya = d.dataFrom ? +d.dataFrom.slice(0, 4) : f.year, yb = d.dataTo ? +d.dataTo.slice(0, 4) : f.year;
+  for (let y = yb; y >= ya; y--) years.push(y);
+  const opt = (arr, cur, valfn, labfn) => arr.map((x) => `<option value="${esc(String(valfn(x)))}"${String(valfn(x)) === String(cur) ? " selected" : ""}>${esc(labfn(x))}</option>`).join("");
+  const periodSeg = [["month", "Měsíc"], ["quarter", "Kvartál"], ["year", "Rok"], ["custom", "Vlastní"]]
+    .map(([v, l]) => `<button class="sf-seg${f.period === v ? " on" : ""}" data-period="${v}">${l}</button>`).join("");
+  const roleSeg = [["TECHNIK", "Technici"], ["OZ", "OZ"]]
+    .map(([v, l]) => `<button class="sf-seg${f.role === v ? " on" : ""}" data-role="${v}">${l}</button>`).join("");
+  // period-specific pickers
+  let pick = "";
+  if (f.period === "month")
+    pick = `<select class="sf-i" data-k="month">${opt(_MONTHS_CZ.map((m, i) => i).filter((i) => i > 0), f.month, (i) => i, (i) => _MONTHS_CZ[i])}</select>
+            <select class="sf-i" data-k="year">${opt(years, f.year, (y) => y, (y) => y)}</select>`;
+  else if (f.period === "quarter")
+    pick = `<select class="sf-i" data-k="quarter">${opt([1, 2, 3, 4], f.quarter, (q) => q, (q) => "Q" + q)}</select>
+            <select class="sf-i" data-k="year">${opt(years, f.year, (y) => y, (y) => y)}</select>`;
+  else if (f.period === "year")
+    pick = `<select class="sf-i" data-k="year">${opt(years, f.year, (y) => y, (y) => y)}</select>`;
+  else
+    pick = `<input type="date" class="sf-i" data-k="date_from" value="${esc(f.date_from || d.dataFrom || "")}">
+            <input type="date" class="sf-i" data-k="date_to" value="${esc(f.date_to || d.dataTo || "")}">`;
+  const regionOpts = `<option value="">Všechny regiony</option>` + opt(d.regions, f.region || "", (r) => r, (r) => r);
+  const chainOpts = `<option value="">Všechny řetězce</option>` + opt(d.chains, f.chain || "", (c) => c, (c) => c);
+  const vtOpts = `<option value="">Všechny návštěvy</option>` + opt(d.visitTypes, f.visit_type || "", (v) => v, (v) => v);
+  const techList = d.technicians.filter((t) => t.role === f.role);
+  const techOpts = `<option value="">Všichni</option>` + opt(techList, f.technician || "", (t) => t.name, (t) => t.name);
+  const activeSeg = [["active", "Aktivní"], ["all", "Vše"], ["inactive", "Neaktivní"]]
+    .map(([v, l]) => `<button class="sf-seg${(f.active || "active") === v ? " on" : ""}" data-active="${v}">${l}</button>`).join("");
+  document.getElementById("sum-filters").innerHTML = `
+    <div class="sf-row">
+      <div class="sf-group">${periodSeg}</div>${pick}
+      <div class="sf-group">${roleSeg}</div>
+    </div>
+    <div class="sf-row">
+      <select class="sf-i" data-k="region">${regionOpts}</select>
+      <select class="sf-i" data-k="technician">${techOpts}</select>
+      <select class="sf-i" data-k="chain">${chainOpts}</select>
+      <select class="sf-i" data-k="visit_type">${vtOpts}</select>
+      <div class="sf-group">${activeSeg}</div>
+    </div>`;
+  const host = document.getElementById("sum-filters");
+  host.querySelectorAll(".sf-seg[data-period]").forEach((b) => b.onclick = () => { f.period = b.dataset.period; renderSumFilters(); loadSummary(); });
+  host.querySelectorAll(".sf-seg[data-role]").forEach((b) => b.onclick = () => { f.role = b.dataset.role; f.technician = ""; renderSumFilters(); loadSummary(); });
+  host.querySelectorAll(".sf-seg[data-active]").forEach((b) => b.onclick = () => { f.active = b.dataset.active; renderSumFilters(); loadSummary(); });
+  host.querySelectorAll(".sf-i").forEach((s) => s.onchange = () => { f[s.dataset.k] = s.value; loadSummary(); });
+}
+
+async function loadSummary() {
+  const body = document.getElementById("sum-body");
+  body.innerHTML = `<p class="result" style="padding:24px">Počítám souhrn za období…</p>`;
+  const f = _sum.filters;
+  const qs = new URLSearchParams({ period: f.period, role: f.role, active: f.active || "active",
+    grain: f.period === "month" ? "week" : "month" });
+  ["year", "month", "quarter", "date_from", "date_to", "region", "technician", "chain", "visit_type"]
+    .forEach((k) => { if (f[k]) qs.set(k, f[k]); });
+  try {
+    const s = await apiJson("/api/summary?" + qs.toString());
+    _sum.last = s;
+    body.innerHTML = renderSummary(s);
+    bindSummary(body);
+  } catch (e) { body.innerHTML = `<p class="result err" style="padding:24px">${esc(e.message)}</p>`; }
+}
+
+function _kd(kpi, unit, dec, invert) {  // KPI value + delta (invert: higher=worse)
+  if (!kpi) return "—";
+  const v = kpi.value == null ? "—" : _fmtNum(dec != null ? +(+kpi.value).toFixed(dec) : kpi.value) + (unit || "");
+  let dl = "";
+  if (kpi.delta != null && kpi.delta !== 0) {
+    const up = kpi.delta > 0;
+    const good = invert ? !up : up;   // for cost metrics an increase is bad
+    dl = `<span class="kd-delta ${good ? "up" : "down"}">${up ? "▲" : "▼"} ${_fmtNum(Math.abs(+kpi.delta.toFixed(dec != null ? dec : 1)))}${unit || ""}</span>`;
+  }
+  return `${v}${dl}`;
+}
+
+function renderSummary(s) {
+  const k = s.kpis, t = s.top;
+  const tile = (label, kpi, unit, dec, cls, invert) =>
+    `<div class="sk-tile ${cls || ""}"><div class="sk-l">${label}</div><div class="sk-v">${_kd(kpi, unit, dec, invert)}</div></div>`;
+  const kpis = `<div class="sk-grid">
+    ${tile("Plnění TourPlanu", k.planFulfilmentPct, " %", 0, "hero")}
+    ${tile("Skutečné návštěvy", k.visits, "", 0)}
+    ${tile("Plánované návštěvy", k.plannedVisits, "", 0)}
+    ${tile("Produktivita (návšt./h)", k.productivity, "", 2)}
+    ${tile("Návštěvy / den", k.visitsPerDay, "", 2)}
+    ${tile("Odpracované hodiny", k.workHours, " h", 0)}
+    ${tile("Čas na POS", k.onPosHours, " h", 0)}
+    ${tile("Čas na cestě", k.travelHours, " h", 0, "", true)}
+    ${tile("Ujeté km", k.roadKm, " km", 0, "", true)}
+    ${tile("Podíl času na POS", k.onPosRatioPct, " %", 0)}
+    ${tile("Ztracené hodiny (řazení)", k.savableHours, " h", 0, "warn", true)}
+    ${tile("Ušetřitelné km", k.savableKm, " km", 0, "warn", true)}
+    ${tile("Ø Health Score", k.avgHealthScore, "", 0, "hero")}
+    ${tile("Aktivních pracovníků", { value: k.activePeople }, "", 0)}
+  </div>`;
+
+  const techRow = (p, extra) => `<div class="st-row" data-tech="${esc(p.technician)}">
+    <span class="st-score hs-${_hsBand(p.healthScore)}">${p.healthScore ?? "—"}</span>
+    <span class="st-name">${esc(p.technician)}</span>
+    <span class="st-reg">${esc(p.region || "—")}</span>
+    <span class="st-x">${extra}</span></div>`;
+  const moverRow = (m) => `<div class="st-row" data-tech="${esc(m.technician)}">
+    <span class="st-name">${esc(m.technician)}</span><span class="st-reg">${esc(m.region || "—")}</span>
+    <span class="st-x ${m.delta > 0 ? "up" : "down"}">${m.delta > 0 ? "▲" : "▼"} ${_fmtNum(Math.abs(m.delta))} · ${_fmtNum(m.was)}→${_fmtNum(m.now)}</span></div>`;
+  const tops = `<div class="sk-cols">
+    <div class="sk-card"><div class="sk-ct">🏆 TOP technici</div>${t.best.map((p) => techRow(p, _fmtNum(p.visitsPerWorkHour) + " n/h")).join("") || "—"}</div>
+    <div class="sk-card"><div class="sk-ct">⚠️ Nejslabší</div>${t.weakest.map((p) => techRow(p, (p.planFulfilmentPct != null ? _fmtNum(p.planFulfilmentPct) + "% plán" : "—"))).join("") || "—"}</div>
+    <div class="sk-card"><div class="sk-ct">📈 Největší zlepšení</div>${t.improved.map(moverRow).join("") || "—"}</div>
+    <div class="sk-card"><div class="sk-ct">📉 Největší propad</div>${t.dropped.map(moverRow).join("") || "—"}</div>
+  </div>`;
+
+  const regRow = (r) => `<div class="st-row" data-region="${esc(r.region)}">
+    <span class="st-name">${esc(r.region)}</span>
+    <span class="st-reg">${r.techs} tech · ${_fmtNum(r.visits)} návšt.</span>
+    <span class="st-x warn">${_fmtNum(r.savableHoursPerTech)} h/tech ztráty · ${r.onPosRatioPct ?? "—"}% na POS</span></div>`;
+  const regions = `<div class="sk-cols">
+    <div class="sk-card"><div class="sk-ct">🗺️ Problémové regiony (rezervy)</div>${t.problemRegions.map(regRow).join("") || "—"}</div>
+    <div class="sk-card"><div class="sk-ct">🔁 Opakované návraty do oblasti</div>${(t.areaReturns || []).map((p) => techRow(p, _fmtNum(p.areaReturnsPerWeek) + "×/týd")).join("") || "—"}</div>
+  </div>`;
+
+  const cov = s.coverage || {};
+  const chains = (cov.chains || []).map((c) => `<span class="cov-chip">${esc(c.chain)} <b>${_fmtNum(c.visits)}</b></span>`).join("");
+  const coverage = `<div class="sk-card"><div class="sk-ct">🎯 Visibilita a řetězce</div>
+    <div class="cov-lead">Náběh kampaně (visibilita): <b>${cov.visibilitySharePct ?? "—"} %</b> ze všech návštěv (${_fmtNum(cov.visibilityVisits || 0)} z ${_fmtNum(cov.visitsTotal || 0)})</div>
+    <div class="cov-chips">${chains}</div></div>`;
+
+  const unserved = `<div class="sk-card"><div class="sk-ct">🚫 Nejčastěji neobsloužené POS</div>
+    ${(s.unservedPos || []).map((u) => `<div class="st-row" data-pos="${esc(u.pos)}">
+      <span class="st-name">${esc(u.name)}</span><span class="st-reg">${esc(u.city || "")} · ${esc(u.technician || "")}</span>
+      <span class="st-x warn">${u.plannedWeeks}× plánováno, 0 návštěv</span></div>`).join("") || "—"}</div>`;
+
+  const tr = s.trend || {};
+  const chart = (title, series, unit, dec) => `<div class="tp-chart"><div class="tp-chart-t">${title}</div>${_lineChart(series || [], "value", unit, dec)}</div>`;
+  const trends = `<div class="sk-ct" style="margin-top:6px">Vývoj v čase</div><div class="tp-charts">
+    ${chart("Produktivita (návšt./h)", tr.productivity, "", 2)}
+    ${chart("Health Score", tr.health, "", 0)}
+    ${chart("Plnění plánu → návštěvy", tr.visits, "", 0)}
+    ${chart("Odpracované hodiny", tr.workHours, " h", 0)}
+    ${_dualChart("Čas na POS vs. na cestě", tr.onPosHours, tr.travelHours)}
+  </div>`;
+
+  return `<div class="sum-period">Období <b>${esc(s.period.label)}</b> · ${esc(s.period.from)} – ${esc(s.period.to)}
+      <span class="sum-vs">vs. minulé ${esc(s.period.prevFrom)} – ${esc(s.period.prevTo)}</span></div>
+    ${kpis}${tops}${regions}
+    <div class="sk-cols">${coverage}${unserved}</div>
+    ${trends}`;
+}
+
+// Two-line chart (on-POS vs travel) reusing the line-chart scale.
+function _dualChart(title, sA, sB) {
+  const merged = (sA || []).map((p, i) => ({ period: p.period, a: p.value, b: (sB || [])[i] ? (sB || [])[i].value : null }));
+  const W = 640, H = 190, padL = 46, padR = 14, padT = 14, padB = 34;
+  const vals = merged.flatMap((p) => [p.a, p.b]).filter((v) => v != null);
+  if (!vals.length) return `<div class="tp-chart"><div class="tp-chart-t">${title}</div><div class="tp-empty">bez dat</div></div>`;
+  const lo = 0, hi = Math.max(...vals) || 1, n = merged.length;
+  const x = (i) => padL + (n === 1 ? (W - padL - padR) / 2 : i * (W - padL - padR) / (n - 1));
+  const y = (v) => padT + (H - padT - padB) * (1 - (v - lo) / (hi - lo || 1));
+  const path = (key, color, dash) => {
+    let dp = "", started = false;
+    merged.forEach((p, i) => { const v = p[key]; if (v == null) return; dp += `${started ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)} `; started = true; });
+    return `<path d="${dp.trim()}" fill="none" stroke="${color}" stroke-width="2.2"${dash ? ` stroke-dasharray="6 5"` : ""}/>`;
+  };
+  let grid = "";
+  for (let g = 0; g <= 3; g++) { const v = lo + (hi - lo) * g / 3, yy = y(v).toFixed(1);
+    grid += `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" class="tpc-grid"/><text x="${padL - 6}" y="${yy}" dy="3" text-anchor="end" class="tpc-ylab">${_fmtNum(Math.round(v))}</text>`; }
+  const step = Math.ceil(n / 10); let xlab = "";
+  merged.forEach((p, i) => { if (i % step === 0) xlab += `<text x="${x(i).toFixed(1)}" y="${H - 10}" text-anchor="middle" class="tpc-xlab">${esc(_periodShort(p.period))}</text>`; });
+  return `<div class="tp-chart"><div class="tp-chart-t">${title} <span class="dl-lg"><i style="background:#0F7C77"></i>na POS <i style="background:#C0392B"></i>cesta</span></div>
+    <svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" class="tp-svg">${grid}${path("a", "#0F7C77")}${path("b", "#C0392B", true)}${xlab}</svg></div>`;
+}
+
+function _hsBand(v) { return v == null ? "na" : v >= 80 ? "ok" : v >= 65 ? "mid" : "bad"; }
+
+function bindSummary(scope) {
+  scope.querySelectorAll("[data-tech]").forEach((el) => el.onclick = () => openTechDetail(el.dataset.tech));
+  scope.querySelectorAll("[data-region]").forEach((el) => el.onclick = () => {
+    _sum.filters.region = el.dataset.region; renderSumFilters(); loadSummary();
+  });
+  scope.querySelectorAll("[data-pos]").forEach((el) => el.onclick = () => {
+    const inp = document.getElementById("pos-search"); if (inp) { inp.value = el.dataset.pos; inp.dispatchEvent(new Event("input")); inp.focus(); }
+  });
+}
+
 function _tdKpi(label, val, unit) {
   return `<div class="td-kpi"><div class="tk-l">${esc(label)}</div><div class="tk-v">${val == null ? "—" : _fmtNum(val)}${unit || ""}</div></div>`;
 }
@@ -3167,7 +3372,7 @@ async function boot() {
 }
 
 // ---- navigation shell -----------------------------------------------------
-const _NAV_TITLES = { dashboard: "Přehled", import: "Import dat", tourplan: "TourPlan", analytics: "Analytika", settings: "Nastavení" };
+const _NAV_TITLES = { dashboard: "Přehled", import: "Import dat", tourplan: "TourPlan", analytics: "Analytika", summary: "Měsíční souhrn", settings: "Nastavení" };
 let _navReady = {};
 
 function showView(name) {
@@ -3187,6 +3392,7 @@ function showView(name) {
       loadSettingsTabs && loadSettingsTabs();
     }
     if (name === "analytics" && typeof loadRactTechnicians === "function") loadRactTechnicians();
+    if (name === "summary" && typeof initSummary === "function") initSummary();
     if (name === "tourplan" && typeof loadStrategyModes === "function") { loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); }
   }
   window.scrollTo(0, 0);

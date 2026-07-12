@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<link rel="stylesheet" href="styles.css?v=44">
+<link rel="stylesheet" href="styles.css?v=47">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -26,12 +26,13 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v44</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v47</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard"><span class="si-ico" data-ico="grid"></span> Přehled</button>
       <button class="side-item" data-nav="import"><span class="si-ico" data-ico="upload"></span> Import dat</button>
       <button class="side-item" data-nav="tourplan"><span class="si-ico" data-ico="route"></span> TourPlan</button>
       <button class="side-item" data-nav="analytics"><span class="si-ico" data-ico="chart"></span> Analytika</button>
+      <button class="side-item" data-nav="summary"><span class="si-ico" data-ico="chart"></span> Měsíční souhrn</button>
       <button class="side-item" data-nav="settings"><span class="si-ico" data-ico="gear"></span> Nastavení</button>
     </nav>
     <div class="side-foot"><button id="logout" class="btn-ghost">Odhlásit</button></div>
@@ -465,6 +466,16 @@
       </section>
     </div>
 
+    <!-- ==================== VIEW: MĚSÍČNÍ SOUHRN ==================== -->
+    <div class="view hidden" data-view="summary">
+      <div class="view-head">
+        <h1>Měsíční souhrn</h1>
+        <p>Manažerský přehled sítě za zvolené období. Vyfiltruj cokoliv, srovnej s minulým obdobím a proklikni se z libovolného čísla až na konkrétního technika, den nebo POS.</p>
+      </div>
+      <div id="sum-filters" class="sum-filters"></div>
+      <div id="sum-body"><p class="pd-sub" style="padding:24px">Vyber období a filtry…</p></div>
+    </div>
+
     <!-- ==================== VIEW: NASTAVENÍ ==================== -->
     <div class="view hidden" data-view="settings">
       <div class="view-head">
@@ -561,6 +572,6 @@
   </div>
 </div>
 
-<script src="app.js?v=44"></script>
+<script src="app.js?v=47"></script>
 </body>
 </html>

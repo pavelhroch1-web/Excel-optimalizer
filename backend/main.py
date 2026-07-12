@@ -1241,6 +1241,26 @@ if LOCAL_MODE:
                       date_to: str | None = None):
         return _trends.series(type, entity, grain, days_back, date_from, date_to)
 
+    # Monthly Summary: management overview for a chosen period, with filters and
+    # drill-down. Heavy (route reconstruction across the scope) — the frontend
+    # calls it once per filter change.
+    import summary as _summary  # noqa: E402
+
+    @app.get("/api/summary/dimensions", dependencies=[Depends(require_auth)])
+    def summary_dimensions():
+        return _summary.dimensions()
+
+    @app.get("/api/summary", dependencies=[Depends(require_auth)])
+    def summary_overview(period: str = "month", year: int | None = None,
+                         month: int | None = None, quarter: int | None = None,
+                         date_from: str | None = None, date_to: str | None = None,
+                         role: str = "TECHNIK", region: str | None = None,
+                         technician: str | None = None, chain: str | None = None,
+                         visit_type: str | None = None, active: str | None = "active",
+                         grain: str = "week"):
+        return _summary.summary(period, year, month, quarter, date_from, date_to,
+                                role, region, technician, chain, visit_type, active, grain)
+
     # Settings platform: configure planner/optimization/dashboard/report/map/
     # scoring from the app. Definitions drive a generic admin UI; values override.
     import settings as _settings  # noqa: E402
