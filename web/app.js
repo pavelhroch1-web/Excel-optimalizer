@@ -3227,26 +3227,42 @@ async function openTechDay(name, date, radius) {
       <b>· ušetřit ${o.savedKm} km, ${o.savedMin} min</b></div>` : "";
     let posSeq = 0;
     const kindLabel = { break: "pauza", office: "středisko", prospect: "akvizice", other: "ostatní" };
+    const gapBySeq = {}; ((d.gaps || {}).legs || []).forEach((g) => { gapBySeq[g.toSeq] = g; });
+    const gapRow = (g) => {
+      if (!g || g.band === "green" || g.actualMin == null) return "";
+      const lbl = g.band === "red" ? "velká neobvyklá prodleva" : "podezřelá prodleva";
+      return `<div class="td-gap gap-${g.band}"><span class="gap-dot"></span>
+        <span class="gap-txt">${lbl}: odhad jízdy ${_fmtHM(g.estMin)} · skutečně ${_fmtHM(g.actualMin)} <b>(+${_fmtHM(g.excessMin)})</b></span></div>`;
+    };
     const tl = d.stops.map((s) => {
       const isPos = (s.kind || "pos") === "pos";
-      const seq = isPos ? `<span class="ttl-seq">${++posSeq}</span>` : `<span class="ttl-seq ttl-seq-x">•</span>`;
+      let gap = "";
+      if (isPos) { posSeq++; gap = gapRow(gapBySeq[posSeq]); }
+      const seq = isPos ? `<span class="ttl-seq">${posSeq}</span>` : `<span class="ttl-seq ttl-seq-x">•</span>`;
       const tag = isPos ? "" : `<span class="ttl-kind ttl-${s.kind}">${kindLabel[s.kind] || s.kind}</span>`;
-      return `<div class="td-tl-row ${isPos ? "" : "td-tl-x"}">${seq}
+      return `${gap}<div class="td-tl-row ${isPos ? "" : "td-tl-x"}">${seq}
         <span class="ttl-time">${_hm(s.started)}–${_hm(s.finished)}</span>
         <span class="ttl-name">${esc(s.name || s.pos)}${tag}</span>
         <span class="ttl-on">${s.onPosMin != null ? Math.round(s.onPosMin) + " min" : ""}</span></div>`;
     }).join("");
     const posCount = d.stops.filter((s) => (s.kind || "pos") === "pos").length;
-    const missedNear = (d.missedPlanned || []).filter((m) => m.drovePast).length;
+    const ms = d.managerSummary;
+    const mgr = ms ? `<div class="td-verdict v-${ms.verdict === "efektivní" ? "ok" : "warn"}">
+      <span class="tv-badge">${ms.verdict === "efektivní" ? "✓ efektivní den" : "⚠ den s rezervou"}</span>
+      <span class="tv-text">${esc(ms.text)}</span></div>` : "";
+    const cost = d.missedNearCost || {};
+    const missedNear = cost.count || 0;
     const proof = `<div class="td-proof">
-      <span class="tp-b bad">${(d.missedPlanned || []).length} naplánovaných minul${missedNear ? ` (${missedNear} projel do ${_tdDay.radius} m)` : ""}</span>
+      <span class="tp-b bad">${(d.missedPlanned || []).length} naplánovaných minul${missedNear ? ` (${missedNear} projel do ${_tdDay.radius} m → +${_fmtHM(cost.addedMin)}, +${cost.addedKm} km)` : ""}</span>
       <span class="tp-b warn">${(d.nearbyPos || []).length} POS projel do ${_tdDay.radius} m, ale nenavštívil</span>
+      ${(d.gaps || {}).suspicious ? `<span class="tp-b warn">${d.gaps.suspicious}× prodleva mezi návštěvami (${_fmtHM(d.gaps.unexplainedMin)})</span>` : ""}
       ${d.road && d.road.source === "osrm" ? `<span class="tp-b ok">trasa po silnicích ${d.road.km} km</span>` : ""}</div>`;
     const radBtns = [100, 250, 500, 1000].map((r) => `<button class="rad-btn${_tdDay.radius === r ? " on" : ""}" data-rad="${r}">${r} m</button>`).join("");
     const controls = `<div class="td-mapctl">
       <label class="mc-tog"><input type="checkbox" id="td-nearby-tog"${_tdDay.showNearby ? " checked" : ""}> POS v okolí trasy</label>
       <span class="mc-rad">Okruh: <span class="rad-seg">${radBtns}</span></span></div>`;
     host.innerHTML = `<div class="td-day-head">${esc(date)} · ${posCount} POS · ${roadKm ?? "—"} km silnicí · ${d.workHours ?? "—"} h v terénu</div>
+      ${mgr}
       ${_tdTimeBar(d)}
       ${optLine}${proof}${controls}
       <div id="td-map" class="td-map td-map-lg"></div>

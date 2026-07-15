@@ -154,7 +154,23 @@ def _nn_savings(pts: list) -> tuple:
 def _blank_tot():
     return {"visits": 0, "daysWorked": 0, "workHours": 0.0, "onPosHours": 0.0,
             "drivingHours": 0.0, "roadKm": 0.0, "savableKm": 0.0, "savableMin": 0.0,
-            "onPosMinSum": 0.0}
+            "onPosMinSum": 0.0, "gapExcessMin": 0.0}
+
+
+def _day_gap_excess(d) -> float:
+    """Sum of unexplained (yellow/red) minutes between consecutive visits on a
+    day: measured travel time vs. the modelled drive estimate for each leg."""
+    tot = 0.0
+    for lg in d.get("legs", []):
+        km = lg.get("km")
+        actual = lg.get("travelMin")
+        if km is None or actual is None:
+            continue
+        est = travel_model.estimate_minutes(km)
+        # yellow/red bands (mirrors gis._classify_gap)
+        if actual > est * 1.5 + 10:
+            tot += max(actual - est, 0.0)
+    return tot
 
 
 def _aggregate(names: list, start, end, grain: str):
@@ -180,6 +196,7 @@ def _aggregate(names: list, start, end, grain: str):
             pts = [GeoPoint(x["lat"], x["lon"]) for x in d.get("stops", [])
                    if x.get("kind", "pos") == "pos" and x.get("lat") is not None]
             sav_km, sav_min = _nn_savings(pts)
+            gap_excess = _day_gap_excess(d)
             for bucket in (per_tech[name], per_period[pk], per_period_tech[pk][name]):
                 bucket["visits"] += pos
                 bucket["daysWorked"] += 1
@@ -190,6 +207,7 @@ def _aggregate(names: list, start, end, grain: str):
                 bucket["roadKm"] += road
                 bucket["savableKm"] += sav_km
                 bucket["savableMin"] += sav_min
+                bucket["gapExcessMin"] += gap_excess
     return per_tech, per_period, per_period_tech
 
 
@@ -210,6 +228,8 @@ def _derive(tot: dict) -> dict:
         "roadKm": round(tot["roadKm"], 1),
         "savableKm": round(tot["savableKm"], 1),
         "savableHours": round(tot["savableMin"] / 60.0, 1),
+        "suspiciousGapPerDay": round(tot["gapExcessMin"] / dw, 1) if dw else None,
+        "unexplainedGapMin": round(tot["gapExcessMin"], 1),
     }
 
 

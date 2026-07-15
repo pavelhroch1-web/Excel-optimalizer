@@ -381,6 +381,7 @@ _HEALTH_COMPS_TECHNIK = [
     ("visitsPerWorkHour", "low", 0.6, "nízká produktivita"),
     ("onPosRatioPct", "low", 0.4, "hodně času na cestě"),
     ("areaReturnsPerWeek", "high", 0.4, "opakované návraty do oblasti"),
+    ("suspiciousGapPerDay", "high", 0.6, "neobvyklé prodlevy mezi návštěvami"),
 ]
 
 # OZ (sales reps) play by different rules: no merch visits, no TourPlan
@@ -393,6 +394,7 @@ _HEALTH_COMPS_OZ = [
     ("workHoursPerDay", "low", 1.4, "krátký pracovní den"),
     ("visitsPerWorkHour", "low", 1.0, "nízká efektivita dne"),
     ("loadPct", "low", 0.7, "nízké využití dne"),
+    ("suspiciousGapPerDay", "high", 0.9, "neobvyklé prodlevy mezi návštěvami"),
 ]
 
 _HEALTH_PROFILES = {"TECHNIK": _HEALTH_COMPS_TECHNIK, "OZ": _HEALTH_COMPS_OZ}

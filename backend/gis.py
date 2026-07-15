@@ -196,7 +196,98 @@ def technician_day(name: str, date: str, radius_m: int = 250) -> dict:
     base["missedPlanned"] = missed
     base["nearbyPos"] = nearby
     base["radiusM"] = radius_m
+
+    # gap validation between consecutive visits (green / yellow / red)
+    gaps = _gap_analysis(stops)
+    base["gaps"] = gaps
+    # quantified cost of the planned POS the technician drove right past
+    base["missedNearCost"] = _missed_near_cost([m for m in missed if m.get("drovePast")], stops)
+    base["managerSummary"] = _day_summary(base, gaps)
     return base
+
+
+import travel_model  # noqa: E402
+
+
+def _min_between(a, b):
+    if not a or not b:
+        return None
+    try:
+        ta = datetime.datetime.fromisoformat(str(a))
+        tb = datetime.datetime.fromisoformat(str(b))
+        return round((tb - ta).total_seconds() / 60.0, 1)
+    except (ValueError, TypeError):
+        return None
+
+
+def _classify_gap(est, actual):
+    """est = modelled drive minutes, actual = elapsed minutes between visits.
+    green = normal, yellow = suspicious, red = large unexplained gap."""
+    if actual is None or est is None:
+        return "na", 0.0
+    excess = round(actual - est, 1)
+    if actual <= est * 1.5 + 10:
+        return "green", excess
+    if actual <= est * 2.5 + 30:
+        return "yellow", excess
+    return "red", excess
+
+
+def _gap_analysis(stops):
+    """For each consecutive pair of visits: real straight->road drive estimate
+    vs. the actual elapsed time, classified. Aggregates the unexplained time."""
+    out = []
+    unexplained = 0.0
+    for i in range(len(stops) - 1):
+        a, b = stops[i], stops[i + 1]
+        km = distance_km(a["lat"], a["lon"], b["lat"], b["lon"]) if None not in (a["lat"], a["lon"], b["lat"], b["lon"]) else None
+        est = travel_model.estimate_minutes(km) if km is not None else None
+        actual = _min_between(a.get("finished"), b.get("started"))
+        band, excess = _classify_gap(est, actual)
+        if band in ("yellow", "red") and excess > 0:
+            unexplained += excess
+        out.append({"fromSeq": i + 1, "toSeq": i + 2, "roadKm": round(travel_model.road_km(km), 1) if km else None,
+                    "estMin": est, "actualMin": actual, "band": band, "excessMin": excess,
+                    "from": a.get("name"), "to": b.get("name")})
+    return {"legs": out, "unexplainedMin": round(unexplained, 1),
+            "suspicious": sum(1 for g in out if g["band"] in ("yellow", "red"))}
+
+
+def _missed_near_cost(drove_past_planned, stops):
+    """Management proof: how much visiting the planned POS the technician drove
+    past would have added. Detour = there-and-back from the nearest route point,
+    turned into road km and driving minutes."""
+    if not drove_past_planned or not stops:
+        return {"count": 0, "addedKm": 0.0, "addedMin": 0.0}
+    route = [(s["lat"], s["lon"]) for s in stops]
+    detour_km = 0.0
+    for m in drove_past_planned:
+        nearest = min(distance_km(m["lat"], m["lon"], rx, ry) for rx, ry in route)
+        detour_km += 2 * nearest                      # there and back
+    added_km = travel_model.road_km(detour_km)
+    added_min = travel_model.minutes_for_legs([2 * min(distance_km(m["lat"], m["lon"], rx, ry) for rx, ry in route)
+                                               for m in drove_past_planned])
+    return {"count": len(drove_past_planned), "addedKm": round(added_km, 1), "addedMin": round(added_min)}
+
+
+def _day_summary(base, gaps):
+    """One manager sentence explaining WHY the day reads efficient or not."""
+    cost = base.get("missedNearCost") or {}
+    opt = base.get("optimal") or {}
+    parts = []
+    verdict = "efektivní"
+    if cost.get("count"):
+        parts.append(f"projel do {base['radiusM']} m kolem {cost['count']} naplánovaných POS — zajet k nim by přidalo jen ~{cost['addedMin']} min a ~{cost['addedKm']} km")
+        verdict = "s rezervou"
+    if gaps.get("suspicious"):
+        parts.append(f"{gaps['suspicious']}× neobvyklá prodleva mezi návštěvami (~{round(gaps['unexplainedMin'])} min bez vysvětlení)")
+        verdict = "s rezervou"
+    if opt.get("savedKm", 0) > 5:
+        parts.append(f"lepší pořadí zastávek by ušetřilo {opt['savedKm']} km / {opt.get('savedMin', 0)} min")
+        verdict = "s rezervou"
+    if not parts:
+        return {"verdict": "efektivní", "text": "Den bez zjevných rezerv — trasa i časy sedí, žádné velké prodlevy ani minuté naplánované POS poblíž."}
+    return {"verdict": verdict, "text": "Den " + verdict + ": " + "; ".join(parts) + "."}
 
 
 def _iso_week(date_str):
