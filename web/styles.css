@@ -941,3 +941,21 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .gap-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .gap-yellow .gap-dot { background: #D9A441; } .gap-red .gap-dot { background: #C0392B; }
 .gap-yellow .gap-txt { color: #9A6D12; } .gap-red .gap-txt { color: #C0392B; }
+/* GIS granularita + rich popup + POS detail */
+.gis-gran { display: inline-flex; align-items: center; gap: 8px; }
+.gg-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.gg-btn { border: none; background: var(--panel); color: var(--text-2); padding: 5px 12px; font-size: 12px; cursor: pointer; border-right: 1px solid var(--border); }
+.gg-seg .gg-btn:last-child { border-right: none; } .gg-btn.on { background: var(--accent,#0F7C77); color: #fff; font-weight: 600; }
+.gg-sub { padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); font-size: 12px; max-width: 200px; }
+.pos-pop .pp-h { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+.pp-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; padding: 2px 0; }
+.pp-row span { color: var(--text-3); } .pp-row b { text-align: right; }
+.pp-detail { margin-top: 8px; width: 100%; border: none; background: var(--accent,#0F7C77); color: #fff; padding: 6px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.pd-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 6000; display: flex; align-items: center; justify-content: center; }
+.pd-overlay.hidden { display: none; }
+.pd-panel { background: var(--panel); border-radius: var(--r-lg,12px); width: min(620px,92vw); max-height: 86vh; overflow: auto; padding: 22px 24px; position: relative; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+.pd-close { position: absolute; top: 14px; right: 14px; border: none; background: var(--panel-2); border-radius: 6px; width: 30px; height: 30px; cursor: pointer; font-size: 14px; }
+.pd-title { font-size: 18px; font-weight: 720; } .pd-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 20px; margin: 12px 0; }
+.pd-planned { font-size: 13px; color: var(--text-2); }
+.pv-row { display: grid; grid-template-columns: 92px 1fr auto; gap: 10px; font-size: 12px; padding: 5px 0; border-top: 1px solid var(--border); }
+.pv-d { color: var(--text-2); font-variant-numeric: tabular-nums; } .pv-on { color: var(--text-3); white-space: nowrap; }

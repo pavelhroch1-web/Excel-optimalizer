@@ -423,6 +423,8 @@ def summary(period: str = "month", year: int | None = None, month: int | None = 
     total_visits = sum(p["visits"] for p in active_people)
     prev_visits = sum(p["visits"] for p in prev_people)
     planned_visits = _planned_visits(names, start, end)
+    _gap_cur = round(sum(p.get("unexplainedGapMin") or 0 for p in active_people) / 60.0, 1)
+    _gap_prev = round(sum(p.get("unexplainedGapMin") or 0 for p in prev_people) / 60.0, 1) if prev_people else None
 
     kpis = {
         "visits": {"value": total_visits, "prev": prev_visits,
@@ -437,6 +439,8 @@ def summary(period: str = "month", year: int | None = None, month: int | None = 
         "roadKm": _kpi("roadKm", "sum"),
         "savableHours": _kpi("savableHours", "sum"),
         "savableKm": _kpi("savableKm", "sum"),
+        "unexplainedGapHours": {"value": _gap_cur, "prev": _gap_prev,
+                                "delta": round(_gap_cur - _gap_prev, 1) if _gap_prev is not None else None},
         "onPosRatioPct": _kpi("onPosRatioPct", "avg"),
         "avgHealthScore": {"value": _avg_health(health), "prev": _avg_health(prev_health),
                            "delta": (round(_avg_health(health) - _avg_health(prev_health), 1)
@@ -576,7 +580,7 @@ def _campaigns(start, end, names) -> list:
 def _period_trends(per_period, per_period_tech, role, fulfil, area_returns, grain) -> dict:
     """Build the development series over the periods present in the range."""
     keys = sorted(per_period)
-    prod, workh, visits, onpos, travel, health_ser, fulser = [], [], [], [], [], [], []
+    prod, workh, visits, onpos, travel, health_ser, gap_ser = [], [], [], [], [], [], []
     for k in keys:
         b = per_period[k]
         wh, v = b["workHours"], b["visits"]
@@ -585,6 +589,7 @@ def _period_trends(per_period, per_period_tech, role, fulfil, area_returns, grai
         visits.append({"period": k, "value": v})
         onpos.append({"period": k, "value": round(b["onPosHours"], 1)})
         travel.append({"period": k, "value": round(b["drivingHours"], 1)})
+        gap_ser.append({"period": k, "value": round(b["gapExcessMin"] / 60.0, 1)})
         # health per period (score that period's population with the same weights)
         pplist = []
         for name, tot in per_period_tech[k].items():
@@ -600,4 +605,5 @@ def _period_trends(per_period, per_period_tech, role, fulfil, area_returns, grai
         vals = [x["healthScore"] for x in hs.values()]
         health_ser.append({"period": k, "value": round(statistics.mean(vals), 1) if vals else None})
     return {"productivity": prod, "workHours": workh, "visits": visits,
-            "onPosHours": onpos, "travelHours": travel, "health": health_ser}
+            "onPosHours": onpos, "travelHours": travel, "health": health_ser,
+            "unexplainedGap": gap_ser}

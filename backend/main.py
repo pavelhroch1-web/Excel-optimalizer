@@ -1257,13 +1257,18 @@ if LOCAL_MODE:
     def gis_network(period: str = "month", year: int | None = None, month: int | None = None,
                     quarter: int | None = None, date_from: str | None = None, date_to: str | None = None,
                     role: str = "TECHNIK", region: str | None = None, technician: str | None = None,
-                    chain: str | None = None, visit_type: str | None = None, active: str | None = "active"):
+                    chain: str | None = None, visit_type: str | None = None, active: str | None = "active",
+                    include_optimal: bool = False):
         return _gis.network(period, year, month, quarter, date_from, date_to,
-                            role, region, technician, chain, visit_type, active)
+                            role, region, technician, chain, visit_type, active, include_optimal)
 
     @app.get("/api/gis/technician/{name}/day/{date}", dependencies=[Depends(require_auth)])
     def gis_day(name: str, date: str, radius_m: int = 250):
         return _gis.technician_day(name, date, radius_m)
+
+    @app.get("/api/gis/pos/{pos_id}", dependencies=[Depends(require_auth)])
+    def gis_pos(pos_id: str):
+        return _gis.pos_detail(pos_id)
 
     @app.get("/api/summary", dependencies=[Depends(require_auth)])
     def summary_overview(period: str = "month", year: int | None = None,

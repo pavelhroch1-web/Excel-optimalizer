@@ -41,7 +41,7 @@ def _visit_where(start, end, names, region, chain, visit_type):
 
 def network(period="month", year=None, month=None, quarter=None, date_from=None, date_to=None,
             role="TECHNIK", region=None, technician=None, chain=None, visit_type=None,
-            active="active", max_points=6000) -> dict:
+            active="active", include_optimal=False, max_points=6000) -> dict:
     start, end, label, *_ = _summary.resolve_period(period, year, month, quarter, date_from, date_to)
     region_map = _summary._tech_region_map()
     names = _summary._people((role or "TECHNIK").upper(), region, active, technician, region_map)
@@ -50,37 +50,52 @@ def network(period="month", year=None, month=None, quarter=None, date_from=None,
     # visited POS (aggregated) — powers markers + heatmap
     visited = db.get(
         f"SELECT v.pos_id pos, p.gps_x lat, p.gps_y lon, COALESCE(p.name,v.store_name) nm, "
-        f"p.city city, COUNT(*) visits FROM salesapp_visits v JOIN pos_master p ON p.pos_id=v.pos_id "
+        f"p.city city, p.street street, p.house_number hn, p.market chain, COUNT(*) visits, "
+        f"SUM(CASE WHEN lower(v.purpose) LIKE '%náběh kampaně%' THEN 1 ELSE 0 END) vis "
+        f"FROM salesapp_visits v JOIN pos_master p ON p.pos_id=v.pos_id "
         f"WHERE {where} GROUP BY v.pos_id ORDER BY visits DESC LIMIT ?", tuple(params + [max_points]))
     visitedPos = [{"pos": str(r["pos"]), "lat": r["lat"], "lon": r["lon"], "name": r["nm"],
-                   "city": r["city"], "visits": r["visits"]} for r in visited]
+                   "city": r["city"], "address": _addr(r["street"], r["hn"], r["city"]),
+                   "chain": r["chain"], "visits": r["visits"], "visibility": r["vis"],
+                   "status": "visited"} for r in visited]
     heat = [[r["lat"], r["lon"], r["visits"]] for r in visited]
+    visibility = [p for p in visitedPos if p["visibility"]]
 
     # planned but not visited in the period
     unvisited = _planned_unvisited(start, end, names)
+    # planned AND visited (for the TourPlan-completion layer)
+    plannedVisited = _planned_visited(start, end, names)
+    # near-missed: planned-unvisited POS in a city where the same technician DID
+    # work that period (drove-past proxy at network scale)
+    nearMissed = _near_missed(unvisited, names, start, end)
 
-    # region centroids (click -> filter dashboard)
     regions = _region_centroids(where, params)
-
-    # technician centroids (click -> open detail)
     techs = _tech_centroids(where, params)
-
-    # repeated-area-return hotspots (weighted by how often a tech came back)
     returns = _area_return_hotspots(start, end, names)
+    capacity = _capacity_hotspots(unvisited)
 
-    # real road route only when a single technician is in focus (else too much)
-    routes = []
+    # real road routes only when a single technician is in focus; optimal
+    # ordering is heavier (extra routing) so it's fetched only on demand
+    routes, optimalRoutes = [], []
     if technician:
-        routes = _tech_routes(technician, start, end)
+        routes, optimalRoutes = _tech_routes(technician, start, end, include_optimal=include_optimal)
 
     allpts = [(p["lat"], p["lon"]) for p in visitedPos] + [(p["lat"], p["lon"]) for p in unvisited]
     bounds = _bounds(allpts)
     return {"period": {"label": label, "from": start.isoformat(), "to": end.isoformat()},
-            "visitedPos": visitedPos, "unvisitedPos": unvisited, "heat": heat,
+            "visitedPos": visitedPos, "unvisitedPos": unvisited, "plannedVisited": plannedVisited,
+            "nearMissed": nearMissed, "visibility": visibility, "heat": heat,
             "regions": regions, "technicians": techs, "areaReturns": returns,
-            "routes": routes, "bounds": bounds,
+            "capacity": capacity, "routes": routes, "optimalRoutes": optimalRoutes, "bounds": bounds,
             "counts": {"visited": len(visitedPos), "unvisited": len(unvisited),
-                       "regions": len(regions), "technicians": len(techs)}}
+                       "regions": len(regions), "technicians": len(techs),
+                       "visibility": len(visibility), "nearMissed": len(nearMissed)}}
+
+
+def _addr(street, hn, city):
+    parts = [x for x in [(str(street).strip() if street else "") + ((" " + str(hn).strip()) if hn else ""),
+                         str(city).strip() if city else ""] if x and x.strip()]
+    return ", ".join(parts) or None
 
 
 def _bounds(pts):
@@ -95,7 +110,8 @@ def _planned_unvisited(start, end, names, limit=6000):
     if not wk or wk[0]["a"] is None:
         return []
     q = ("SELECT pp.pos_id pos, p.gps_x lat, p.gps_y lon, COALESCE(pp.name,p.name) nm, "
-         "COALESCE(pp.city,p.city) city, pp.technician tech FROM published_plans pp "
+         "COALESCE(pp.city,p.city) city, p.street street, p.house_number hn, p.market chain, "
+         "pp.technician tech FROM published_plans pp "
          "JOIN plan_lifecycle pl ON pl.week=pp.week AND pl.snapshot_id=pp.snapshot_id AND pl.status='Published' "
          "LEFT JOIN pos_master p ON p.pos_id=pp.pos_id "
          "WHERE p.gps_x IS NOT NULL AND NOT EXISTS (SELECT 1 FROM salesapp_visits v "
@@ -105,7 +121,59 @@ def _planned_unvisited(start, end, names, limit=6000):
         q += "AND pp.technician IN (%s) " % ",".join("?" * len(names)); params += names
     q += "GROUP BY pp.pos_id LIMIT ?"; params.append(limit)
     return [{"pos": str(r["pos"]), "lat": r["lat"], "lon": r["lon"], "name": r["nm"],
-             "city": r["city"], "technician": r["tech"]} for r in db.get(q, tuple(params))]
+             "city": r["city"], "address": _addr(r["street"], r["hn"], r["city"]),
+             "chain": r["chain"], "technician": r["tech"], "status": "missed"}
+            for r in db.get(q, tuple(params))]
+
+
+def _planned_visited(start, end, names, limit=6000):
+    """Planned POS that WERE visited in the period (green side of TourPlan
+    completion)."""
+    wk = db.get("SELECT MIN(week) a, MAX(week) b FROM published_plans")
+    if not wk or wk[0]["a"] is None:
+        return []
+    q = ("SELECT pp.pos_id pos, p.gps_x lat, p.gps_y lon, COALESCE(pp.name,p.name) nm, "
+         "COALESCE(pp.city,p.city) city, p.market chain, pp.technician tech FROM published_plans pp "
+         "JOIN plan_lifecycle pl ON pl.week=pp.week AND pl.snapshot_id=pp.snapshot_id AND pl.status='Published' "
+         "LEFT JOIN pos_master p ON p.pos_id=pp.pos_id "
+         "WHERE p.gps_x IS NOT NULL AND EXISTS (SELECT 1 FROM salesapp_visits v "
+         "  WHERE v.pos_id=pp.pos_id AND v.visit_date>=? AND v.visit_date<=?) ")
+    params = [start.isoformat(), end.isoformat()]
+    if names:
+        q += "AND pp.technician IN (%s) " % ",".join("?" * len(names)); params += names
+    q += "GROUP BY pp.pos_id LIMIT ?"; params.append(limit)
+    return [{"pos": str(r["pos"]), "lat": r["lat"], "lon": r["lon"], "name": r["nm"],
+             "city": r["city"], "chain": r["chain"], "technician": r["tech"], "status": "done"}
+            for r in db.get(q, tuple(params))]
+
+
+def _near_missed(unvisited, names, start, end):
+    """Planned-unvisited POS in a city where their planned technician DID work
+    that period — a network-scale 'drove past the area but skipped it' proxy."""
+    if not unvisited:
+        return []
+    worked = set()
+    for r in db.get(
+            "SELECT DISTINCT v.technician tech, p.city city FROM salesapp_visits v "
+            "JOIN pos_master p ON p.pos_id=v.pos_id WHERE v.visit_date>=? AND v.visit_date<=? "
+            "AND p.city IS NOT NULL", (start.isoformat(), end.isoformat())):
+        worked.add((r["tech"], r["city"]))
+    return [p for p in unvisited if (p.get("technician"), p.get("city")) in worked]
+
+
+def _capacity_hotspots(unvisited, limit=120):
+    """Cities with the most planned-but-unvisited POS — where the biggest
+    unrealised coverage capacity sits."""
+    from collections import defaultdict
+    agg = defaultdict(lambda: {"n": 0, "la": 0.0, "lo": 0.0})
+    for p in unvisited:
+        if not p.get("city"):
+            continue
+        a = agg[p["city"]]; a["n"] += 1; a["la"] += p["lat"]; a["lo"] += p["lon"]
+    out = [{"city": c, "count": a["n"], "lat": a["la"] / a["n"], "lon": a["lo"] / a["n"]}
+           for c, a in agg.items() if a["n"] >= 3]
+    out.sort(key=lambda x: -x["count"])
+    return out[:limit]
 
 
 def _region_centroids(where, params):
@@ -145,20 +213,66 @@ def _area_return_hotspots(start, end, names, limit=200):
             for r in db.get(q, tuple(params))]
 
 
-def _tech_routes(name, start, end, max_days=45):
-    """Real road routes for a technician over the period, one per worked day."""
+def _tech_routes(name, start, end, max_days=45, include_optimal=False):
+    """Real road routes (+ optionally optimal ordering) for a technician over the
+    period, one per worked day. Returns (actualRoutes, optimalRoutes)."""
     import route_actual
+    import diagnostics
+    from desktop_client.engines.core_logic import GeoPoint
     data = route_actual.technician_route(name, start.isoformat(), end.isoformat())
-    out = []
+    actual, optimal = [], []
     for d in sorted(data.get("days", []), key=lambda x: x["date"], reverse=True)[:max_days]:
         pts = [(s["lat"], s["lon"]) for s in d.get("stops", [])
                if s.get("kind", "pos") == "pos" and s.get("lat") is not None]
         if len(pts) < 2:
             continue
         rr = osrm.road_route(pts)
-        out.append({"date": d["date"], "geometry": rr["geometry"], "km": rr["km"],
-                    "source": rr["source"], "stops": len(pts)})
-    return out
+        actual.append({"date": d["date"], "geometry": rr["geometry"], "km": rr["km"],
+                       "source": rr["source"], "stops": len(pts)})
+        if include_optimal:
+            order = diagnostics._nn_order([GeoPoint(a, b) for a, b in pts])
+            opt = osrm.road_route([pts[i] for i in order])
+            optimal.append({"date": d["date"], "geometry": opt["geometry"], "km": opt["km"]})
+    return actual, optimal
+
+
+def pos_detail(pos_id: str, days_back: int = 180) -> dict:
+    """Everything about one POS: master record + full visit history (who, when,
+    on-POS time) + which weeks it was planned. Drill target from the map."""
+    p = db.get("SELECT pos_id, name, city, street, house_number, market, category, "
+               "classification, terminal_type, gps_x, gps_y, technician, active "
+               "FROM pos_master WHERE pos_id=?", (str(pos_id),))
+    if not p:
+        return {"found": False, "pos": str(pos_id)}
+    r = p[0]
+    end = datetime.datetime.now().date()
+    start = end - datetime.timedelta(days=days_back)
+    visits = db.get(
+        "SELECT visit_date d, technician tech, visitor_role role, started_at st, finished_at fin, "
+        "real_duration dur, purpose FROM salesapp_visits WHERE pos_id=? AND visit_date>=? "
+        "ORDER BY visit_date DESC LIMIT 60", (str(pos_id), start.isoformat()))
+    hist = []
+    for v in visits:
+        onmin = _min_between(v["st"], v["fin"])
+        if onmin is None and v["dur"] not in (None, ""):
+            try:
+                onmin = round(float(v["dur"]) * 60, 1)
+            except (ValueError, TypeError):
+                onmin = None
+        hist.append({"date": str(v["d"])[:10], "technician": v["tech"], "role": v["role"],
+                     "started": v["st"], "finished": v["fin"], "onPosMin": onmin,
+                     "visibility": "náběh kampaně" in (v["purpose"] or "").lower()})
+    planned = db.get(
+        "SELECT DISTINCT pp.week wk, pp.technician tech FROM published_plans pp "
+        "JOIN plan_lifecycle pl ON pl.week=pp.week AND pl.snapshot_id=pp.snapshot_id AND pl.status='Published' "
+        "WHERE pp.pos_id=? ORDER BY pp.week", (str(pos_id),))
+    return {"found": True, "pos": str(r["pos_id"]), "name": r["name"], "city": r["city"],
+            "address": _addr(r["street"], r["house_number"], r["city"]),
+            "chain": r["market"], "category": r["category"], "classification": r["classification"],
+            "terminalType": r["terminal_type"], "technician": r["technician"],
+            "lat": r["gps_x"], "lon": r["gps_y"], "active": bool(r["active"]),
+            "visits": hist, "visitCount": len(hist),
+            "plannedWeeks": [{"week": pw["wk"], "technician": pw["tech"]} for pw in planned]}
 
 
 # ------------------------------------------------------------------ day view
@@ -319,7 +433,7 @@ def _nearby_pos(route_geo, visited_ids, radius_m, limit=120):
     la = [p[0] for p in route_geo]; lo = [p[1] for p in route_geo]
     pad = radius_m / 111000.0 + 0.02
     rows = db.get(
-        "SELECT pos_id pos, name nm, city, gps_x lat, gps_y lon, market FROM pos_master "
+        "SELECT pos_id pos, name nm, city, street, house_number hn, gps_x lat, gps_y lon, market FROM pos_master "
         "WHERE active=1 AND gps_x BETWEEN ? AND ? AND gps_y BETWEEN ? AND ?",
         (min(la) - pad, max(la) + pad, min(lo) - pad, max(lo) + pad))
     rad_km = radius_m / 1000.0
@@ -330,7 +444,8 @@ def _nearby_pos(route_geo, visited_ids, radius_m, limit=120):
         d = min(distance_km(r["lat"], r["lon"], gx, gy) for gx, gy in route_geo)
         if d <= rad_km:
             out.append({"pos": str(r["pos"]), "name": r["nm"], "city": r["city"],
-                        "lat": r["lat"], "lon": r["lon"], "market": r["market"],
+                        "address": _addr(r["street"], r["hn"], r["city"]),
+                        "lat": r["lat"], "lon": r["lon"], "market": r["market"], "chain": r["market"],
                         "distM": round(d * 1000)})
     out.sort(key=lambda x: x["distM"])
     return out[:limit]

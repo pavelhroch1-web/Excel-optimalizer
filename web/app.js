@@ -2948,6 +2948,7 @@ function renderSummary(s) {
     ${tile("Podíl času na POS", k.onPosRatioPct, " %", 0)}
     ${tile("Ztracené hodiny (řazení)", k.savableHours, " h", 0, "warn", true)}
     ${tile("Ušetřitelné km", k.savableKm, " km", 0, "warn", true)}
+    ${tile("Nevysvětlený čas", k.unexplainedGapHours, " h", 0, "warn", true)}
     ${tile("Ø Health Score", k.avgHealthScore, "", 0, "hero")}
     ${tile("Aktivních pracovníků", { value: k.activePeople }, "", 0)}
   </div>`;
@@ -3007,6 +3008,7 @@ function renderSummary(s) {
     ${chart("Health Score", tr.health, "", 0)}
     ${chart("Návštěvy", tr.visits, "", 0)}
     ${chart("Odpracované hodiny", tr.workHours, " h", 0)}
+    ${chart("Nevysvětlený čas mezi návštěvami (h)", tr.unexplainedGap, " h", 1)}
     ${_dualChart("Čas na POS vs. na cestě", tr.onPosHours, tr.travelHours)}
   </div>`;
 
@@ -3057,21 +3059,29 @@ function bindSummary(scope) {
 }
 
 // ==================== GIS SÍŤOVÁ MAPA ====================
-const _gis = { map: null, groups: {}, data: null,
-  layers: { visited: true, unvisited: true, heat: false, regions: true, techs: false, returns: false, routes: true } };
+const _gis = { map: null, groups: {}, data: null, grain: "month", sub: null,
+  layers: { visited: true, unvisited: true, nearMissed: false, tourplan: false, visibility: false,
+            heat: false, regions: true, techs: false, returns: false, capacity: false,
+            routes: true, optimal: false } };
 const _GIS_LAYERS = [
-  ["visited", "Navštívené POS"], ["unvisited", "Nenavštívené (TourPlan)"], ["heat", "Heatmapa návštěv"],
-  ["regions", "Regiony"], ["techs", "Technici"], ["returns", "Opakované návraty"], ["routes", "Skutečné trasy"],
+  ["visited", "Navštívené POS"], ["unvisited", "Nenavštívené (TourPlan)"], ["nearMissed", "Near-missed"],
+  ["tourplan", "Plnění TourPlanu"], ["visibility", "Visibilita"], ["heat", "Heatmapa"],
+  ["regions", "Regiony"], ["techs", "Technici"], ["returns", "Opakované návraty"],
+  ["capacity", "Ušetřitelná kapacita"], ["routes", "Skutečné trasy"], ["optimal", "Optimalizace tras"],
 ];
 
 function _gisMapHtml() {
   const toggles = _GIS_LAYERS.map(([k, l]) =>
     `<label class="gl-tog"><input type="checkbox" data-layer="${k}"${_gis.layers[k] ? " checked" : ""}> ${l}</label>`).join("");
+  const grains = [["month", "Měsíc"], ["week", "Týden"], ["day", "Den"]]
+    .map(([g, l]) => `<button class="gg-btn${_gis.grain === g ? " on" : ""}" data-grain="${g}">${l}</button>`).join("");
   return `<div class="gis-wrap">
-    <div class="gis-bar"><div class="gis-title">Mapa sítě <span class="gis-meta" id="gis-meta"></span></div>
+    <div class="gis-bar">
+      <div class="gis-title">Mapa sítě <span class="gis-meta" id="gis-meta"></span></div>
+      <div class="gis-gran"><span class="gg-seg">${grains}</span><select class="gg-sub" id="gis-sub" style="display:none"></select></div>
       <div class="gis-legend">${toggles}</div></div>
     <div id="gis-map" class="gis-map"></div>
-    <div class="gis-hint" id="gis-hint">Klikni na region → přefiltruje dashboard · klikni na technika → otevře jeho detail. Trasy po silnicích se ukážou po zvolení konkrétního technika.</div>
+    <div class="gis-hint">Region → přefiltruje dashboard · technik → jeho detail · POS → detail POS · trasa → přehrání dne. Přepni Měsíc/Týden/Den a mapa se překreslí na daný úsek.</div>
   </div>`;
 }
 
@@ -3083,23 +3093,60 @@ function initGisMap() {
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(_gis.map);
   const bar = document.querySelector(".gis-legend");
   if (bar) bar.querySelectorAll("input[data-layer]").forEach((cb) => cb.onchange = () => {
-    _gis.layers[cb.dataset.layer] = cb.checked; _applyGisLayer(cb.dataset.layer);
+    _gis.layers[cb.dataset.layer] = cb.checked;
+    if (cb.dataset.layer === "optimal" && cb.checked && !(_gis.data || {}).optimalRoutes?.length && _sum.filters.technician) { loadGisNetwork(); return; }
+    _applyGisLayer(cb.dataset.layer);
   });
+  document.querySelectorAll(".gg-btn").forEach((b) => b.onclick = () => _gisSetGrain(b.dataset.grain));
+  const sub = document.getElementById("gis-sub");
+  if (sub) sub.onchange = () => { _gis.sub = sub.value ? JSON.parse(sub.value) : null; loadGisNetwork(); };
   setTimeout(() => _gis.map && _gis.map.invalidateSize(), 200);
+}
+
+// Month / week / day switch — narrows only the MAP to a sub-range while keeping
+// all layers and the rest of the dashboard on the chosen month.
+function _gisSetGrain(grain) {
+  _gis.grain = grain; _gis.sub = null;
+  document.querySelectorAll(".gg-btn").forEach((b) => b.classList.toggle("on", b.dataset.grain === grain));
+  const sub = document.getElementById("gis-sub");
+  if (grain === "month") { sub.style.display = "none"; loadGisNetwork(); return; }
+  // build week/day options from the summary period
+  const per = (_sum.last || {}).period || {};
+  const from = per.from, to = per.to;
+  if (!from) { sub.style.display = "none"; return; }
+  const opts = grain === "week" ? _weeksBetween(from, to) : _daysBetween(from, to);
+  sub.innerHTML = `<option value="">— celé období —</option>` + opts.map((o) => `<option value='${JSON.stringify(o.range)}'>${o.label}</option>`).join("");
+  sub.style.display = ""; _gis.sub = null; loadGisNetwork();
+}
+
+function _daysBetween(from, to) {
+  const out = []; let d = new Date(from + "T00:00:00"); const e = new Date(to + "T00:00:00");
+  while (d <= e) { const iso = d.toISOString().slice(0, 10); out.push({ label: iso, range: { date_from: iso, date_to: iso } }); d.setDate(d.getDate() + 1); }
+  return out;
+}
+function _weeksBetween(from, to) {
+  const out = []; let d = new Date(from + "T00:00:00"); const e = new Date(to + "T00:00:00");
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));   // back to Monday
+  while (d <= e) { const s = new Date(d); const w = new Date(d); w.setDate(w.getDate() + 6);
+    out.push({ label: `${s.toISOString().slice(5, 10)} – ${w.toISOString().slice(5, 10)}`, range: { date_from: s.toISOString().slice(0, 10), date_to: w.toISOString().slice(0, 10) } });
+    d.setDate(d.getDate() + 7); }
+  return out;
 }
 
 async function loadGisNetwork() {
   if (!_gis.map) return;
   const f = _sum.filters;
-  const qs = new URLSearchParams({ period: f.period, role: f.role, active: f.active || "active" });
-  ["year", "month", "quarter", "date_from", "date_to", "region", "technician", "chain", "visit_type"]
-    .forEach((k) => { if (f[k]) qs.set(k, f[k]); });
+  const qs = new URLSearchParams({ role: f.role, active: f.active || "active" });
+  if (_gis.sub) { qs.set("period", "custom"); qs.set("date_from", _gis.sub.date_from); qs.set("date_to", _gis.sub.date_to); }
+  else { qs.set("period", f.period); ["year", "month", "quarter", "date_from", "date_to"].forEach((k) => { if (f[k]) qs.set(k, f[k]); }); }
+  ["region", "technician", "chain", "visit_type"].forEach((k) => { if (f[k]) qs.set(k, f[k]); });
+  if (_gis.layers.optimal && f.technician) qs.set("include_optimal", "1");
   const meta = document.getElementById("gis-meta");
   if (meta) meta.textContent = "načítám…";
   try {
     const d = await apiJson("/api/gis/network?" + qs.toString());
     _gis.data = d;
-    if (meta) meta.textContent = `${_fmtNum(d.counts.visited)} navštívených · ${_fmtNum(d.counts.unvisited)} nenavštívených · ${d.counts.regions} regionů`;
+    if (meta) meta.textContent = `${_fmtNum(d.counts.visited)} navštívených · ${_fmtNum(d.counts.unvisited)} minutých · ${_fmtNum(d.counts.nearMissed || 0)} near-missed · ${d.counts.regions} regionů`;
     Object.keys(_gis.layers).forEach((k) => _applyGisLayer(k));
     if (d.bounds) _gis.map.fitBounds(d.bounds, { padding: [24, 24] });
   } catch (e) { if (meta) meta.textContent = "chyba: " + e.message; }
@@ -3107,38 +3154,68 @@ async function loadGisNetwork() {
 
 function _clearGroup(k) { if (_gis.groups[k]) { _gis.map.removeLayer(_gis.groups[k]); delete _gis.groups[k]; } }
 
+// Rich POS popup — everything a manager needs without opening a table.
+function _posPopup(p, extra) {
+  const rows = [
+    ["POS", p.pos], ["Název", p.name], ["Město", p.city], ["Adresa", p.address],
+    ["Řetězec", p.chain || p.market], ["Technik", p.technician],
+  ].filter((r) => r[1]).map((r) => `<div class="pp-row"><span>${r[0]}</span><b>${esc(String(r[1]))}</b></div>`).join("");
+  return `<div class="pos-pop"><div class="pp-h">${esc(p.name || p.pos)}</div>${rows}${extra || ""}
+    <button class="pp-detail" onclick="openPosDetail('${esc(p.pos)}')">Detail POS →</button></div>`;
+}
+
 function _applyGisLayer(k) {
   if (!_gis.map || !_gis.data) return;
   _clearGroup(k);
   if (!_gis.layers[k]) return;
   const d = _gis.data, g = L.layerGroup();
+  const posMarker = (p, opts, extra) => L.circleMarker([p.lat, p.lon], opts).bindPopup(_posPopup(p, extra), { minWidth: 220 }).addTo(g);
   if (k === "visited") {
-    d.visitedPos.forEach((p) => L.circleMarker([p.lat, p.lon], { radius: Math.min(3 + Math.log2(p.visits + 1), 9), color: "#0F7C77", weight: 1, fillColor: "#12A594", fillOpacity: 0.75 })
-      .bindPopup(`<b>${esc(p.name || p.pos)}</b><br>${esc(p.city || "")}<br>${p.visits}× navštíveno`).addTo(g));
+    d.visitedPos.forEach((p) => posMarker(p, { radius: Math.min(3 + Math.log2(p.visits + 1), 9), color: "#0F7C77", weight: 1, fillColor: "#12A594", fillOpacity: 0.75 },
+      `<div class="pp-row"><span>Stav</span><b style="color:#0F7C77">${p.visits}× navštíveno</b></div>`));
   } else if (k === "unvisited") {
-    d.unvisitedPos.forEach((p) => L.circleMarker([p.lat, p.lon], { radius: 4, color: "#C0392B", weight: 1, fillColor: "#E5484D", fillOpacity: 0.7 })
-      .bindPopup(`<b>${esc(p.name || p.pos)}</b><br>${esc(p.city || "")}<br>plánováno, 0 návštěv${p.technician ? "<br>" + esc(p.technician) : ""}`).addTo(g));
+    d.unvisitedPos.forEach((p) => posMarker(p, { radius: 4, color: "#C0392B", weight: 1, fillColor: "#E5484D", fillOpacity: 0.7 },
+      `<div class="pp-row"><span>Stav</span><b style="color:#C0392B">plánováno, 0 návštěv</b></div>`));
+  } else if (k === "nearMissed") {
+    (d.nearMissed || []).forEach((p) => posMarker(p, { radius: 6, color: "#B9600E", weight: 2, fillColor: "#F39C12", fillOpacity: 0.9 },
+      `<div class="pp-row"><span>Stav</span><b style="color:#B9600E">near-missed — technik byl v oblasti, ale nenavštívil</b></div>`));
+  } else if (k === "tourplan") {
+    (d.plannedVisited || []).forEach((p) => posMarker(p, { radius: 4, color: "#0F7C77", weight: 1, fillColor: "#12A594", fillOpacity: 0.8 },
+      `<div class="pp-row"><span>TourPlan</span><b style="color:#0F7C77">splněno</b></div>`));
+    d.unvisitedPos.forEach((p) => posMarker(p, { radius: 4, color: "#C0392B", weight: 1, fillColor: "#E5484D", fillOpacity: 0.8 },
+      `<div class="pp-row"><span>TourPlan</span><b style="color:#C0392B">nesplněno</b></div>`));
+  } else if (k === "visibility") {
+    (d.visibility || []).forEach((p) => posMarker(p, { radius: Math.min(4 + Math.log2(p.visibility + 1), 9), color: "#6A1B9A", weight: 1, fillColor: "#8E24AA", fillOpacity: 0.75 },
+      `<div class="pp-row"><span>Visibilita</span><b style="color:#6A1B9A">${p.visibility}× náběh kampaně</b></div>`));
   } else if (k === "heat") {
     const mx = Math.max(...d.heat.map((h) => h[2]), 1);
     d.heat.forEach((h) => { const t = h[2] / mx; L.circleMarker([h[0], h[1]], { radius: 10 + 22 * t, stroke: false, fillColor: t > 0.6 ? "#B71C1C" : t > 0.3 ? "#F57C00" : "#FBC02D", fillOpacity: 0.14 }).addTo(g); });
   } else if (k === "regions") {
-    d.regions.forEach((r) => {
-      L.circleMarker([r.lat, r.lon], { radius: 16, color: "#5B7DB1", weight: 2, fillColor: "#5B7DB1", fillOpacity: 0.25 })
-        .bindTooltip(`${esc(r.region)} · ${_fmtNum(r.visits)} návštěv`, { permanent: false })
-        .on("click", () => { _sum.filters.region = r.region; renderSumFilters(); loadSummary(); }).addTo(g);
-    });
+    d.regions.forEach((r) => L.circleMarker([r.lat, r.lon], { radius: 16, color: "#5B7DB1", weight: 2, fillColor: "#5B7DB1", fillOpacity: 0.25 })
+      .bindTooltip(`${esc(r.region)} · ${_fmtNum(r.visits)} návštěv · klikni pro filtr`)
+      .on("click", () => { _sum.filters.region = r.region; renderSumFilters(); loadSummary(); }).addTo(g));
   } else if (k === "techs") {
-    d.technicians.forEach((t) => L.marker([t.lat, t.lon]).bindTooltip(esc(t.technician))
+    d.technicians.forEach((t) => L.marker([t.lat, t.lon]).bindTooltip(`${esc(t.technician)} · ${_fmtNum(t.visits)} návštěv`)
       .on("click", () => openTechDetail(t.technician)).addTo(g));
   } else if (k === "returns") {
     d.areaReturns.forEach((r) => L.circleMarker([r.lat, r.lon], { radius: 6 + Math.min(r.returns, 10) * 2, color: "#7B3FA0", weight: 1, fillColor: "#8E44AD", fillOpacity: 0.5 })
-      .bindPopup(`<b>${esc(r.city || "")}</b><br>${r.returns}× opakovaný návrat`).addTo(g));
+      .bindPopup(`<b>${esc(r.city || "")}</b><br>${r.returns}× opakovaný návrat do oblasti`).addTo(g));
+  } else if (k === "capacity") {
+    (d.capacity || []).forEach((c) => L.circleMarker([c.lat, c.lon], { radius: 6 + Math.min(c.count, 30) * 0.7, color: "#B45309", weight: 1, fillColor: "#D97706", fillOpacity: 0.45 })
+      .bindPopup(`<b>${esc(c.city || "")}</b><br>${c.count} naplánovaných neobslouženo — nevyužitá kapacita`).addTo(g));
   } else if (k === "routes") {
     (d.routes || []).forEach((rt) => L.polyline(rt.geometry, { color: "#C0392B", weight: 2.5, opacity: 0.7 })
-      .bindTooltip(`${esc(rt.date)} · ${rt.km} km${rt.source === "osrm" ? " (po silnici)" : ""}`).addTo(g));
+      .bindTooltip(`${esc(rt.date)} · ${rt.km} km${rt.source === "osrm" ? " (po silnici)" : ""} · klikni pro přehrání dne`)
+      .on("click", () => openTechDay(_sum.filters.technician, rt.date)).addTo(g));
+  } else if (k === "optimal") {
+    (d.optimalRoutes || []).forEach((rt) => L.polyline(rt.geometry, { color: "#0F7C77", weight: 2.5, opacity: 0.7, dashArray: "7 6" })
+      .bindTooltip(`optimální pořadí ${esc(rt.date)} · ${rt.km} km`).addTo(g));
   }
   g.addTo(_gis.map); _gis.groups[k] = g;
 }
+
+// POS drill-down reuses the app's existing rich POS detail overlay
+// (openPosDetail defined earlier) — the map's "Detail POS →" button calls it.
 
 function _tdKpi(label, val, unit) {
   return `<div class="td-kpi"><div class="tk-l">${esc(label)}</div><div class="tk-v">${val == null ? "—" : _fmtNum(val)}${unit || ""}</div></div>`;
