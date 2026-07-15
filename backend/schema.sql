@@ -706,6 +706,17 @@ CREATE TABLE IF NOT EXISTS planner_runs (
 );
 CREATE INDEX IF NOT EXISTS ix_planner_runs_at ON planner_runs(ran_at);
 
+-- Road-route geometry cache (OSRM). Keyed by the ordered coordinates so a route
+-- is fetched at most once, then served instantly and offline.
+CREATE TABLE IF NOT EXISTS route_geometry (
+    cache_key   TEXT PRIMARY KEY,
+    geometry    TEXT NOT NULL,        -- JSON [[lat,lon], ...] along roads
+    road_km     REAL,
+    road_min    REAL,
+    source      TEXT,                 -- osrm | straight
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- The memory is append-only: history is never rewritten or edited. Each
 -- import / publish / planner run / config change adds a NEW row, so time can
 -- always be rewound and periods compared. (Mirrors the published-plan guarantee.)

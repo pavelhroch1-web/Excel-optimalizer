@@ -908,3 +908,13 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .camp-fill { height: 100%; border-radius: 5px; }
 .camp-fill.hs-ok { background: #0F7C77; } .camp-fill.hs-mid { background: #D9A441; } .camp-fill.hs-bad { background: #C0392B; }
 .camp-x { font-size: 11px; color: var(--text-2); margin-top: 4px; }
+/* ==================== GIS SÍŤOVÁ MAPA ==================== */
+.gis-wrap { margin-bottom: 20px; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; background: var(--panel); }
+.gis-bar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.gis-title { font-weight: 700; font-size: 14px; } .gis-meta { color: var(--text-3); font-weight: 400; font-size: 12px; margin-left: 8px; }
+.gis-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.gl-tog { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-2); cursor: pointer; user-select: none; }
+.gl-tog input { accent-color: var(--accent, #0F7C77); }
+.gis-map { height: 520px; width: 100%; background: var(--panel-2); }
+.gis-hint { font-size: 11.5px; color: var(--text-3); padding: 8px 16px; border-top: 1px solid var(--border); }
+.leaflet-popup-content { font-size: 12.5px; }

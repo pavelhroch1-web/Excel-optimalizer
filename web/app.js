@@ -3010,7 +3010,8 @@ function renderSummary(s) {
     ${_dualChart("Čas na POS vs. na cestě", tr.onPosHours, tr.travelHours)}
   </div>`;
 
-  return `<div class="sum-period">Období <b>${esc(s.period.label)}</b> · ${esc(s.period.from)} – ${esc(s.period.to)}
+  return `${_gisMapHtml()}
+    <div class="sum-period">Období <b>${esc(s.period.label)}</b> · ${esc(s.period.from)} – ${esc(s.period.to)}
       <span class="sum-vs">vs. minulé ${esc(s.period.prevFrom)} – ${esc(s.period.prevTo)}</span></div>
     ${kpis}${tops}${regions}
     <div class="sk-cols">${coverage}${campaigns}</div>
@@ -3051,6 +3052,92 @@ function bindSummary(scope) {
   scope.querySelectorAll("[data-pos]").forEach((el) => el.onclick = () => {
     const inp = document.getElementById("pos-search"); if (inp) { inp.value = el.dataset.pos; inp.dispatchEvent(new Event("input")); inp.focus(); }
   });
+  initGisMap();
+  loadGisNetwork();
+}
+
+// ==================== GIS SÍŤOVÁ MAPA ====================
+const _gis = { map: null, groups: {}, data: null,
+  layers: { visited: true, unvisited: true, heat: false, regions: true, techs: false, returns: false, routes: true } };
+const _GIS_LAYERS = [
+  ["visited", "Navštívené POS"], ["unvisited", "Nenavštívené (TourPlan)"], ["heat", "Heatmapa návštěv"],
+  ["regions", "Regiony"], ["techs", "Technici"], ["returns", "Opakované návraty"], ["routes", "Skutečné trasy"],
+];
+
+function _gisMapHtml() {
+  const toggles = _GIS_LAYERS.map(([k, l]) =>
+    `<label class="gl-tog"><input type="checkbox" data-layer="${k}"${_gis.layers[k] ? " checked" : ""}> ${l}</label>`).join("");
+  return `<div class="gis-wrap">
+    <div class="gis-bar"><div class="gis-title">Mapa sítě <span class="gis-meta" id="gis-meta"></span></div>
+      <div class="gis-legend">${toggles}</div></div>
+    <div id="gis-map" class="gis-map"></div>
+    <div class="gis-hint" id="gis-hint">Klikni na region → přefiltruje dashboard · klikni na technika → otevře jeho detail. Trasy po silnicích se ukážou po zvolení konkrétního technika.</div>
+  </div>`;
+}
+
+function initGisMap() {
+  const el = document.getElementById("gis-map");
+  if (!el || typeof L === "undefined") { if (el) el.innerHTML = "<p class='pd-sub' style='padding:20px'>Mapa vyžaduje připojení (dlaždice OpenStreetMap).</p>"; return; }
+  if (_gis.map) { _gis.map.remove(); _gis.map = null; }
+  _gis.map = L.map(el, { preferCanvas: true, scrollWheelZoom: true }).setView([49.8, 15.5], 7);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(_gis.map);
+  const bar = document.querySelector(".gis-legend");
+  if (bar) bar.querySelectorAll("input[data-layer]").forEach((cb) => cb.onchange = () => {
+    _gis.layers[cb.dataset.layer] = cb.checked; _applyGisLayer(cb.dataset.layer);
+  });
+  setTimeout(() => _gis.map && _gis.map.invalidateSize(), 200);
+}
+
+async function loadGisNetwork() {
+  if (!_gis.map) return;
+  const f = _sum.filters;
+  const qs = new URLSearchParams({ period: f.period, role: f.role, active: f.active || "active" });
+  ["year", "month", "quarter", "date_from", "date_to", "region", "technician", "chain", "visit_type"]
+    .forEach((k) => { if (f[k]) qs.set(k, f[k]); });
+  const meta = document.getElementById("gis-meta");
+  if (meta) meta.textContent = "načítám…";
+  try {
+    const d = await apiJson("/api/gis/network?" + qs.toString());
+    _gis.data = d;
+    if (meta) meta.textContent = `${_fmtNum(d.counts.visited)} navštívených · ${_fmtNum(d.counts.unvisited)} nenavštívených · ${d.counts.regions} regionů`;
+    Object.keys(_gis.layers).forEach((k) => _applyGisLayer(k));
+    if (d.bounds) _gis.map.fitBounds(d.bounds, { padding: [24, 24] });
+  } catch (e) { if (meta) meta.textContent = "chyba: " + e.message; }
+}
+
+function _clearGroup(k) { if (_gis.groups[k]) { _gis.map.removeLayer(_gis.groups[k]); delete _gis.groups[k]; } }
+
+function _applyGisLayer(k) {
+  if (!_gis.map || !_gis.data) return;
+  _clearGroup(k);
+  if (!_gis.layers[k]) return;
+  const d = _gis.data, g = L.layerGroup();
+  if (k === "visited") {
+    d.visitedPos.forEach((p) => L.circleMarker([p.lat, p.lon], { radius: Math.min(3 + Math.log2(p.visits + 1), 9), color: "#0F7C77", weight: 1, fillColor: "#12A594", fillOpacity: 0.75 })
+      .bindPopup(`<b>${esc(p.name || p.pos)}</b><br>${esc(p.city || "")}<br>${p.visits}× navštíveno`).addTo(g));
+  } else if (k === "unvisited") {
+    d.unvisitedPos.forEach((p) => L.circleMarker([p.lat, p.lon], { radius: 4, color: "#C0392B", weight: 1, fillColor: "#E5484D", fillOpacity: 0.7 })
+      .bindPopup(`<b>${esc(p.name || p.pos)}</b><br>${esc(p.city || "")}<br>plánováno, 0 návštěv${p.technician ? "<br>" + esc(p.technician) : ""}`).addTo(g));
+  } else if (k === "heat") {
+    const mx = Math.max(...d.heat.map((h) => h[2]), 1);
+    d.heat.forEach((h) => { const t = h[2] / mx; L.circleMarker([h[0], h[1]], { radius: 10 + 22 * t, stroke: false, fillColor: t > 0.6 ? "#B71C1C" : t > 0.3 ? "#F57C00" : "#FBC02D", fillOpacity: 0.14 }).addTo(g); });
+  } else if (k === "regions") {
+    d.regions.forEach((r) => {
+      L.circleMarker([r.lat, r.lon], { radius: 16, color: "#5B7DB1", weight: 2, fillColor: "#5B7DB1", fillOpacity: 0.25 })
+        .bindTooltip(`${esc(r.region)} · ${_fmtNum(r.visits)} návštěv`, { permanent: false })
+        .on("click", () => { _sum.filters.region = r.region; renderSumFilters(); loadSummary(); }).addTo(g);
+    });
+  } else if (k === "techs") {
+    d.technicians.forEach((t) => L.marker([t.lat, t.lon]).bindTooltip(esc(t.technician))
+      .on("click", () => openTechDetail(t.technician)).addTo(g));
+  } else if (k === "returns") {
+    d.areaReturns.forEach((r) => L.circleMarker([r.lat, r.lon], { radius: 6 + Math.min(r.returns, 10) * 2, color: "#7B3FA0", weight: 1, fillColor: "#8E44AD", fillOpacity: 0.5 })
+      .bindPopup(`<b>${esc(r.city || "")}</b><br>${r.returns}× opakovaný návrat`).addTo(g));
+  } else if (k === "routes") {
+    (d.routes || []).forEach((rt) => L.polyline(rt.geometry, { color: "#C0392B", weight: 2.5, opacity: 0.7 })
+      .bindTooltip(`${esc(rt.date)} · ${rt.km} km${rt.source === "osrm" ? " (po silnici)" : ""}`).addTo(g));
+  }
+  g.addTo(_gis.map); _gis.groups[k] = g;
 }
 
 function _tdKpi(label, val, unit) {
