@@ -3211,13 +3211,18 @@ function _tdBindDays() {
     }));
 }
 
-async function openTechDay(name, date) {
+const _tdDay = { name: null, date: null, radius: 250, showNearby: true, map: null };
+
+async function openTechDay(name, date, radius) {
   const host = document.getElementById("td-day-detail");
-  host.innerHTML = `<p class="result" style="padding:20px">Načítám trasu…</p>`;
+  _tdDay.name = name; _tdDay.date = date; _tdDay.radius = radius || _tdDay.radius || 250;
+  host.innerHTML = `<p class="result" style="padding:20px">Načítám trasu po silnicích…</p>`;
   try {
-    const d = await apiJson(`/api/technician/${encodeURIComponent(name)}/day/${date}`);
+    const d = await apiJson(`/api/gis/technician/${encodeURIComponent(name)}/day/${date}?radius_m=${_tdDay.radius}`);
     if (!d.found) { host.innerHTML = `<p class="pd-sub" style="padding:20px">Pro tento den nejsou data trasy.</p>`; return; }
+    _tdDay.data = d;
     const o = d.optimal;
+    const roadKm = d.road && d.road.source === "osrm" ? d.road.km : d.totalKm;
     const optLine = o ? `<div class="td-day-opt ${o.savedKm > 5 ? "warn" : ""}">Optimální pořadí: skutečně ${o.actualKm} km / ${_fmtHM(o.actualTravelMin)} → optimum ${o.optimalKm} km / ${_fmtHM(o.optimalTravelMin)}
       <b>· ušetřit ${o.savedKm} km, ${o.savedMin} min</b></div>` : "";
     let posSeq = 0;
@@ -3232,13 +3237,55 @@ async function openTechDay(name, date) {
         <span class="ttl-on">${s.onPosMin != null ? Math.round(s.onPosMin) + " min" : ""}</span></div>`;
     }).join("");
     const posCount = d.stops.filter((s) => (s.kind || "pos") === "pos").length;
-    host.innerHTML = `<div class="td-day-head">${esc(date)} · ${posCount} POS · ${d.totalKm ?? "—"} km silnicí · ${d.workHours ?? "—"} h v terénu</div>
+    const missedNear = (d.missedPlanned || []).filter((m) => m.drovePast).length;
+    const proof = `<div class="td-proof">
+      <span class="tp-b bad">${(d.missedPlanned || []).length} naplánovaných minul${missedNear ? ` (${missedNear} projel do ${_tdDay.radius} m)` : ""}</span>
+      <span class="tp-b warn">${(d.nearbyPos || []).length} POS projel do ${_tdDay.radius} m, ale nenavštívil</span>
+      ${d.road && d.road.source === "osrm" ? `<span class="tp-b ok">trasa po silnicích ${d.road.km} km</span>` : ""}</div>`;
+    const radBtns = [100, 250, 500, 1000].map((r) => `<button class="rad-btn${_tdDay.radius === r ? " on" : ""}" data-rad="${r}">${r} m</button>`).join("");
+    const controls = `<div class="td-mapctl">
+      <label class="mc-tog"><input type="checkbox" id="td-nearby-tog"${_tdDay.showNearby ? " checked" : ""}> POS v okolí trasy</label>
+      <span class="mc-rad">Okruh: <span class="rad-seg">${radBtns}</span></span></div>`;
+    host.innerHTML = `<div class="td-day-head">${esc(date)} · ${posCount} POS · ${roadKm ?? "—"} km silnicí · ${d.workHours ?? "—"} h v terénu</div>
       ${_tdTimeBar(d)}
-      ${optLine}
-      <div id="td-map" class="td-map"></div>
+      ${optLine}${proof}${controls}
+      <div id="td-map" class="td-map td-map-lg"></div>
       <div class="td-sec">Timeline dne</div><div class="td-timeline">${tl}</div>`;
-    _tdDrawMap(d);
+    host.querySelectorAll(".rad-btn").forEach((b) => b.onclick = () => openTechDay(name, date, +b.dataset.rad));
+    const tog = document.getElementById("td-nearby-tog");
+    if (tog) tog.onchange = () => { _tdDay.showNearby = tog.checked; _tdDrawDayMap(d); };
+    _tdDrawDayMap(d);
   } catch (e) { host.innerHTML = `<p class="result err" style="padding:20px">${esc(e.message)}</p>`; }
+}
+
+// Full GIS day map (Leaflet + OSM): road route, optimal ordering, visited /
+// missed-planned / drove-past-nearby POS. Falls back to the offline SVG.
+function _tdDrawDayMap(d) {
+  const host = document.getElementById("td-map");
+  if (!host) return;
+  if (typeof L === "undefined") { _tdDrawMap(d); return; }
+  const stops = (d.stops || []).filter((s) => (s.kind || "pos") === "pos" && s.lat != null);
+  if (_tdDay.map) { _tdDay.map.remove(); _tdDay.map = null; }
+  const m = L.map(host, { preferCanvas: true }).setView([49.8, 15.5], 8);
+  _tdDay.map = m;
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(m);
+  // optimal road route (dashed green) under the actual
+  if (d.optimalRoad && d.optimalRoad.geometry) L.polyline(d.optimalRoad.geometry, { color: "#0F7C77", weight: 3, opacity: 0.7, dashArray: "8 7" }).addTo(m);
+  // actual road route (solid red)
+  const road = d.road && d.road.geometry && d.road.geometry.length > 1 ? d.road.geometry : stops.map((s) => [s.lat, s.lon]);
+  L.polyline(road, { color: "#C0392B", weight: 4, opacity: 0.85 }).addTo(m);
+  // nearby drove-past POS (orange)
+  if (_tdDay.showNearby) (d.nearbyPos || []).forEach((p) => L.circleMarker([p.lat, p.lon], { radius: 4, color: "#E67E22", weight: 1, fillColor: "#F39C12", fillOpacity: 0.7 })
+    .bindPopup(`<b>${esc(p.name || p.pos)}</b><br>${esc(p.city || "")}<br>projel do ${p.distM} m, nenavštívil`).addTo(m));
+  // missed planned POS (red diamonds via marker)
+  (d.missedPlanned || []).forEach((p) => L.circleMarker([p.lat, p.lon], { radius: p.drovePast ? 9 : 6, color: "#fff", weight: 2, fillColor: p.drovePast ? "#C0392B" : "#E5484D", fillOpacity: 1 })
+    .bindPopup(`<b>${esc(p.name || p.pos)}</b><br>${esc(p.city || "")}<br>naplánováno, nenavštíveno${p.drovePast ? "<br><b>projel kolem!</b>" : ""}`).addTo(m));
+  // visited stops (numbered green)
+  stops.forEach((s, i) => L.circleMarker([s.lat, s.lon], { radius: 11, color: "#fff", weight: 2, fillColor: "#0F7C77", fillOpacity: 1 })
+    .bindPopup(`<b>${i + 1}. ${esc(s.name || s.pos)}</b><br>${_hm(s.started)}–${_hm(s.finished)} · ${s.onPosMin != null ? Math.round(s.onPosMin) + " min na POS" : ""}`).addTo(m));
+  const pts = road.concat(stops.map((s) => [s.lat, s.lon]));
+  if (pts.length) m.fitBounds(pts, { padding: [28, 28] });
+  setTimeout(() => m.invalidateSize(), 150);
 }
 
 // Day time budget as a single stacked bar that adds up to the workday.
