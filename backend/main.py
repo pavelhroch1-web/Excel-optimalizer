@@ -1270,6 +1270,24 @@ if LOCAL_MODE:
     def gis_pos(pos_id: str):
         return _gis.pos_detail(pos_id)
 
+    # Planner Phase 1: predictive visit duration (collective, nationwide).
+    import duration as _duration  # noqa: E402
+
+    @app.get("/api/planner/duration/overview", dependencies=[Depends(require_auth)])
+    def duration_overview():
+        ov = _duration.overview()
+        if not ov.get("national"):
+            _duration.rebuild(); ov = _duration.overview()
+        return ov
+
+    @app.post("/api/planner/duration/rebuild", dependencies=[Depends(require_auth)])
+    def duration_rebuild():
+        return _duration.rebuild()
+
+    @app.get("/api/planner/duration/pos/{pos_id}", dependencies=[Depends(require_auth)])
+    def duration_pos(pos_id: str):
+        return _duration.predict(pos_id)
+
     @app.get("/api/summary", dependencies=[Depends(require_auth)])
     def summary_overview(period: str = "month", year: int | None = None,
                          month: int | None = None, quarter: int | None = None,

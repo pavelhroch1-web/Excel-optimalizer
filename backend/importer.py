@@ -445,6 +445,11 @@ def import_workbook(path: str, filename: str | None = None) -> dict:
         diagnostics.invalidate_cache()  # fresh data -> recompute peer baselines
     except Exception:  # noqa: BLE001
         pass
+    try:
+        import duration
+        duration.rebuild()  # refresh the collective visit-duration model
+    except Exception:  # noqa: BLE001
+        pass
     return result
 
 

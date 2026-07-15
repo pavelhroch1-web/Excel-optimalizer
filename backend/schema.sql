@@ -706,6 +706,20 @@ CREATE TABLE IF NOT EXISTS planner_runs (
 );
 CREATE INDEX IF NOT EXISTS ix_planner_runs_at ON planner_runs(ran_at);
 
+-- Predicted visit duration (planner Phase 1). Collective, nationwide model:
+-- hierarchical p50/p75 per (category > +chain > +region > +technician), with
+-- extreme-trimming + shrinkage toward the parent level. Recomputable cache
+-- (rebuilt from history), not append-only history.
+CREATE TABLE IF NOT EXISTS duration_model (
+    level      INTEGER NOT NULL,     -- 0 national .. 4 technician
+    ckey       TEXT NOT NULL,        -- 'category|market|region|technician' (trailing blanks dropped)
+    n          INTEGER NOT NULL,
+    p50        REAL,
+    p75        REAL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (level, ckey)
+);
+
 -- Road-route geometry cache (OSRM). Keyed by the ordered coordinates so a route
 -- is fetched at most once, then served instantly and offline.
 CREATE TABLE IF NOT EXISTS route_geometry (

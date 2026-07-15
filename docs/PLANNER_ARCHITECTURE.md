@@ -234,12 +234,14 @@ Draft → Optimalizace → Kontrola → Publikace → Monitoring → Nový Draft
                           IMMUTABLE (nikdy se nepřepisuje)
 ```
 
-- Publikovaný TourPlan = **závazný pracovní plán**. Nové PPT / SalesApp / business
-  vstupy **nikdy** automaticky nemění publikovanou verzi.
-- Planner po publikaci pouze: hlídá plnění, porovnává plán vs. realitu (už máme),
-  upozorňuje na nové povinnosti/rizika, a **na vyžádání připraví návrh nové verze**.
-- Změnu vždy potvrzuje uživatel. (Navazuje na stávající immutable snapshot +
-  `plan_lifecycle` — publikace je append-only, historii nepřepisujeme.)
+- Publikovaný TourPlan = **závazný, neměnný pracovní plán**. Jakmile je publikován
+  technikovi, nové PPT ani nová data ze SalesApp ho **nikdy** automaticky nezmění —
+  za žádných okolností.
+- Planner po publikaci pouze: hlídá plnění (plan vs. realita, už máme), upozorňuje
+  na nové povinnosti/rizika, a **na vyžádání připraví nový Draft TourPlanu**.
+- O publikaci nové verze **vždy rozhoduje uživatel**. Nový Draft nikdy nepřepíše
+  běžící publikovaný plán — vzniká vedle něj jako nová verze. (Navazuje na stávající
+  immutable snapshot + `plan_lifecycle` — publikace je append-only.)
 
 ---
 
@@ -293,9 +295,11 @@ Vše append-only, v souladu se zbytkem operační paměti.
 
 1. **Definice povinnosti / prahy kadence** — napojit přesně na `business_rules`;
    doptat se u nejednoznačných případů (per kategorie / řetězec).
-2. **Přetečení povinností v období** — když se povinné POS nevejdou nebo jsou
-   neobjetelné: navrhnout posun nejméně urgentních + **upozornit manažera**
-   (měkká povinnost s prioritou). Potvrdit finální chování.
+2. **Přetečení povinností v období** — planner má **primárně rozplánovat všechny
+   povinnosti v rámci celého horizontu** (proto plánujeme na celé období, ne po
+   dnech). Automatický posun **není** výchozí chování. Teprve když skutečně
+   neexistuje proveditelné řešení, planner navrhne změnu nebo upozorní manažera —
+   nikdy nerozhodne sám.
 3. **Kvalita GPS / párování POS** — ~71 % návštěv má GPS; učení a clustering na
    tom stojí. Průběžně zlepšovat pokrytí.
 4. **Realizovaná hodnota** — v1 běží na proxy (PPT + recency + pravidla); datový

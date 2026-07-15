@@ -705,6 +705,16 @@ function renderPosCard(c) {
     tile("Další návštěva", c.daysRemaining != null ? _cd(c.daysRemaining) : "—", dc[0],
       c.dueStatus === "overdue" ? "bad" : (c.dueStatus === "dueSoon" ? "warn" : "")) + `</div>`;
 
+  // predicted visit duration (planner Phase 1 — collective model)
+  if (c.predictedDuration && c.predictedDuration.p50 != null) {
+    const d = c.predictedDuration;
+    const lvl = { "národní": "národní průměr", category: "typ POS", market: "řetězec", region: "region", technician: "technik" }[d.levelName] || d.levelName;
+    html += `<div class="pd-section">Predikce délky návštěvy <span class="pd-chip">model ČR</span></div><div class="pl-tiles">` +
+      tile("Typicky (p50)", d.p50 + " min", "podle: " + lvl) +
+      tile("Rezerva (p75)", d.p75 + " min", "kapacitní rezerva") +
+      tile("Vzorek", d.n + "×", "návštěv v modelu") + `</div>`;
+  }
+
   // technician vs OZ frequency
   html += `<div class="pd-section">Četnost návštěv</div><div class="pl-tiles">` +
     tile("Technik", c.technicianVisits ?? 0, c.lastTechnicianVisit ? "naposledy " + String(c.lastTechnicianVisit).slice(0, 10) : "nikdy") +
@@ -735,7 +745,11 @@ async function openPosDetail(posId, week) {
     } catch (e) { /* fall back to card only */ }
   }
   try {
-    const c = await apiJson("/api/pos/" + encodeURIComponent(posId) + "/card");
+    const [c, dur] = await Promise.all([
+      apiJson("/api/pos/" + encodeURIComponent(posId) + "/card"),
+      apiJson("/api/planner/duration/pos/" + encodeURIComponent(posId)).catch(() => null),
+    ]);
+    if (dur && dur.p50 != null) c.predictedDuration = dur;
     document.getElementById("pd-title").textContent = "POS " + posId + (c.name ? " · " + c.name : "");
     bodyEl.innerHTML = renderPosCard(c) + (head ? `<div class="pd-section" style="margin-top:22px">Plánování</div>` + head : "");
   } catch (err) {
