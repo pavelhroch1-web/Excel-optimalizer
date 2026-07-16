@@ -261,8 +261,8 @@ Advisor -> Reporting. Confirmed:
 - The full pipeline runs cleanly end-to-end from a fresh workbook with no
   manual intervention, including graceful no-op handling at every stage
   when upstream data (e.g. SalesApp) isn't present yet.
-- Output matches known real V10.5.5 production output for a spot-checked
-  row (POS 81902616 / Myslivec Jan / week 31 / PPT 369174.88).
+- Output matches known V10.5.5 production output for a spot-checked
+  row (a POS / technician / week / PPT tuple, verified during development).
 - Multi-run simulation (two sequential Compliance Engine runs, one week
   apart) confirmed Plan Lifecycle correctly advances Published -> Closed
   once all planned visits resolve, and caught a real bug: **AdvisorEngine.ts
