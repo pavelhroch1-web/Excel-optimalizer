@@ -34,6 +34,12 @@
   --fs-3xl: 30px;  /* hero / display number */
   /* Weight scale — 5 steps only. */
   --fw-normal: 400; --fw-medium: 500; --fw-semibold: 600; --fw-display: 650; --fw-bold: 700;
+  /* Spacing — 4px base grid. Use these for padding/margin/gap so the whole
+     app shares one vertical + horizontal rhythm and it stays tunable. */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 40px;
+  --card-pad: 20px 22px;   /* one padding for every card-like panel */
+  --card-gap: 18px;        /* one vertical gap between cards/sections */
   --mono: ui-monospace, "Cascadia Code", "SF Mono", "Consolas", monospace;
   --grot: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
 }
@@ -195,7 +201,7 @@ header h1 { font-size: 19px; font-weight: 650; margin: 0; letter-spacing: -0.01e
 
 .card {
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg);
-  padding: 24px 26px; margin-bottom: 18px; box-shadow: var(--shadow-1);
+  padding: var(--card-pad); margin-bottom: var(--card-gap); box-shadow: var(--shadow-1);
 }
 .card h2 {
   font-size: var(--fs-lg); font-weight: var(--fw-display); letter-spacing: -0.01em; text-transform: none;
@@ -218,7 +224,7 @@ th {
 }
 
 .hint { color: var(--text-3); font-size: 12px; line-height: 1.5; margin: 0 0 16px; max-width: 76ch; }
-.rules-block { margin-bottom: 18px; }
+.rules-block { margin-bottom: var(--card-gap); }
 .rules-block h3 {
   font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim);
   margin: 0 0 8px; font-family: var(--mono); font-weight: 600;
@@ -442,12 +448,12 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 #ract-map { background: var(--bg); }
 
 /* ===== Cockpit (main working screen) ===== */
-.cockpit { margin-bottom: 18px; }
+.cockpit { margin-bottom: var(--card-gap); }
 .ico { flex: none; vertical-align: middle; }
 
 /* ===== morning operational brief ===== */
 .brief { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg);
-  padding: 20px 22px; margin-bottom: 18px; box-shadow: var(--shadow-1); }
+  padding: var(--card-pad); margin-bottom: var(--card-gap); box-shadow: var(--shadow-1); }
 .brief-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
 .brief-title { font-weight: 700; font-size: 17px; letter-spacing: -.01em; }
 .brief-date { font-size: 12px; color: var(--text-3); text-transform: capitalize; margin-top: 2px; }
@@ -496,7 +502,7 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 
 /* insight discovery block ("co bys přehlédl") */
 .ins-block { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg);
-  padding: 18px 20px; margin-bottom: 18px; box-shadow: var(--shadow-1); }
+  padding: var(--card-pad); margin-bottom: var(--card-gap); box-shadow: var(--shadow-1); }
 .ins-h { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; margin-bottom: 12px; }
 .ins-h svg { width: 18px; height: 18px; color: var(--warn); }
 .ins-sub { font-weight: 500; font-size: 12px; color: var(--text-3); margin-left: auto; }
@@ -521,7 +527,7 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 /* cause panel (drill-down: why + opportunity) */
 .cause-summary { font-size: 14px; font-weight: 600; line-height: 1.5; padding: 12px 14px;
   background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--r-md); margin-bottom: 12px; }
-.cause-opp { display: flex; gap: 11px; align-items: flex-start; padding: 13px 15px; border-radius: var(--r-md);
+.cause-opp { display: flex; gap: 12px; align-items: flex-start; padding: 13px 15px; border-radius: var(--r-md);
   background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); margin-bottom: 14px; }
 .cause-opp svg { width: 18px; height: 18px; color: var(--accent); flex: none; margin-top: 1px; }
 .cause-opp .co-h { font-weight: 650; font-size: 13px; color: var(--accent); }
@@ -550,7 +556,7 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 .lost-recover b { font-weight: 700; }
 
 /* "Kritické případy" — Health Score cards */
-.health { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 18px 20px; margin-bottom: 18px; box-shadow: var(--shadow-1); }
+.health { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--card-pad); margin-bottom: var(--card-gap); box-shadow: var(--shadow-1); }
 .health-h { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; margin-bottom: 12px; }
 .health-h svg { width: 18px; height: 18px; color: var(--bad); }
 .health-toggle { display: inline-flex; gap: 2px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px; }
@@ -670,7 +676,7 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 @media (max-width: 760px) { .td-days-wrap { grid-template-columns: 1fr; } .td-days-list { border-right: none; border-bottom: 1px solid var(--border); max-height: 200px; } }
 
 /* company "where we lose time" block on the cockpit */
-.company { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 18px 20px; margin-bottom: 18px; box-shadow: var(--shadow-1); }
+.company { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--card-pad); margin-bottom: var(--card-gap); box-shadow: var(--shadow-1); }
 .co-top { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .co-lead { display: flex; gap: 12px; align-items: center; }
 .co-lead svg { width: 26px; height: 26px; color: var(--bad); }
@@ -729,7 +735,7 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 
 /* KPI cards — big, iconed */
 .ck-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-bottom: 16px; }
-.kpi { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-1); padding: 18px 20px; }
+.kpi { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-1); padding: var(--card-pad); }
 .kpi-ico { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); margin-bottom: 12px; }
 .kpi.bad .kpi-ico { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); }
 .kpi.warn .kpi-ico { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }
@@ -744,7 +750,7 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 .kpi-ring::before { content:""; position:absolute; width:58px; height:58px; border-radius:50%; background: var(--panel); }
 
 /* insight cards */
-.ck-insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.ck-insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; margin-bottom: var(--card-gap); }
 .insight { display: flex; gap: 14px; padding: 16px 18px; border-radius: var(--r-lg); background: var(--panel);
   border: 1px solid var(--border); box-shadow: var(--shadow-1); }
 .insight[role=button] { cursor: pointer; transition: box-shadow .12s, transform .06s; }
@@ -911,7 +917,7 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .prompt-field input, .prompt-field select { display: block; width: 100%; margin-top: 6px; box-sizing: border-box; }
 .confirm-box .result.err { margin: -8px 0 14px; }
 
-.cfg-level { margin-bottom: 18px; }
+.cfg-level { margin-bottom: var(--card-gap); }
 .cfg-level-body.hidden { display: none; }
 
 /* planning-model configurator */
@@ -973,7 +979,7 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 }
 
 /* ==================== MĚSÍČNÍ SOUHRN ==================== */
-.sum-filters { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
+.sum-filters { display: flex; flex-direction: column; gap: 10px; margin-bottom: var(--card-gap); }
 .sf-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .sf-group { display: inline-flex; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
 .sf-seg { border: none; background: var(--panel); color: var(--text-2); padding: 7px 14px; font-size: 12px; cursor: pointer; border-right: 1px solid var(--border); }
@@ -982,7 +988,7 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .sf-i { padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--panel); color: var(--text); font-size: 12px; min-width: 110px; }
 .sum-period { font-size: 13px; color: var(--text-2); margin-bottom: 14px; } .sum-period b { color: var(--text); }
 .sum-vs { color: var(--text-3); margin-left: 8px; }
-.sk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.sk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: var(--card-gap); }
 .sk-tile { border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px; background: var(--panel); }
 .sk-tile.hero { border-color: color-mix(in srgb, var(--accent, #0F7C77) 45%, var(--border)); }
 .sk-tile.warn { border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); }
@@ -990,7 +996,7 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .sk-v { font-size: 21px; font-weight: 700; letter-spacing: -.02em; }
 .kd-delta { font-size: 11px; font-weight: 600; margin-left: 7px; }
 .kd-delta.up { color: #0F7C77; } .kd-delta.down { color: var(--bad); }
-.sk-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.sk-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin-bottom: var(--card-gap); }
 .sk-card { border: 1px solid var(--border); border-radius: var(--r-md); padding: 14px 16px; background: var(--panel); }
 .sk-ct { font-size: 13px; font-weight: 650; margin-bottom: 10px; }
 .st-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px 10px; align-items: center; padding: 7px 0; border-top: 1px solid var(--border); font-size: 12px; cursor: pointer; }
