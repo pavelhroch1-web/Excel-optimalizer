@@ -2745,7 +2745,34 @@ function renderBrief(team, lastRun, trends) {
   const plannerCol = `<div class="brief-col"><div class="brief-col-h">${ico("route")} Poslední rozhodnutí planneru</div>` +
     (lastRun ? _renderLastRun(lastRun) : `<div class="brief-empty">Zatím žádný běh planneru.</div>`) + `</div>`;
 
-  return hi + leadHtml + kpiHtml + `<div class="brief-cols">${techCol}${posCol}${plannerCol}</div>`;
+  return hi + leadHtml + kpiHtml + `<div class="brief-cols">${techCol}${posCol}${plannerCol}</div>`
+    + _briefWorkload(techs);
+}
+
+// Vytížení techniků: naplánovaná kapacita vs. limit — kdo je přetížený, kdo má rezervu.
+function _briefWorkload(techs) {
+  const active = (techs || []).filter((t) => (t.capacityPerWeek || 0) > 0 || (t.visits || 0) > 0);
+  if (!active.length) return "";
+  const sorted = [...active].sort((a, b) => (b.loadPct || 0) - (a.loadPct || 0));
+  const over = active.filter((t) => (t.loadPct || 0) > 100).length;
+  const tight = active.filter((t) => (t.loadPct || 0) <= 100 && (t.loadPct || 0) >= 85).length;
+  const slack = active.filter((t) => (t.loadPct || 0) < 50).length;
+  const hasPlan = active.some((t) => (t.planLoad || 0) > 0);
+  const colorFor = (p) => p > 100 ? "var(--bad)" : p >= 85 ? "var(--warn)" : p >= 50 ? "var(--good)" : "var(--text-3)";
+  const rows = sorted.slice(0, 8).map((t) => {
+    const p = Math.round(t.loadPct || 0), col = colorFor(p);
+    return `<div class="wl-row" data-tech="${esc(t.technician)}" role="button" tabindex="0">
+      <div class="wl-name">${esc(t.technician)}</div>
+      <div class="wl-bar"><div class="wl-fill" style="width:${Math.min(p, 100)}%; background:${col}"></div>
+        ${p > 100 ? `<div class="wl-over" style="background:${col}"></div>` : ""}</div>
+      <div class="wl-pct" style="color:${col}">${p} %</div>
+      <div class="wl-cap">${t.planLoad ?? 0}/${t.capacityPerWeek ?? "—"}</div></div>`;
+  }).join("");
+  const summ = hasPlan
+    ? `<span class="wl-s over">${over} přetížených</span> · <span class="wl-s tight">${tight} na hraně</span> · <span class="wl-s slack">${slack} s rezervou</span>`
+    : `žádný publikovaný plán — vytížení se zobrazí po vygenerování TourPlanu`;
+  return `<section class="brief-workload"><div class="brief-col-h">${ico("user")} Vytížení techniků
+      <span class="wl-summary">${summ}</span></div>${rows}</section>`;
 }
 
 function _techIssue(a) {
