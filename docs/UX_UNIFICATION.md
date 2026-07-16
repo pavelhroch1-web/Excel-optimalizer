@@ -226,3 +226,25 @@ podle tvých reálných připomínek při testování.
 
 > Nic z toho nemění Planning Engine ani byznys logiku — jde čistě o prezentační
 > a interakční vrstvu. Core testy zůstávají 120/0.
+
+---
+
+## Provedeno (kanón pro další moduly)
+
+Tohle je už v kódu a **každý nový modul to má používat** místo vlastního řešení:
+
+- **Tabulky** → prostý `<table>` (žádná vlastní třída) obalený scrollovatelným
+  wrapperem; vzhled je jednotný globálně.
+- **Zpětná vazba** → `toast(msg, "ok" | "err" | "info")`. Žádné nativní `alert`.
+- **Potvrzení nevratných akcí** → `await confirmDialog({ title, body,
+  confirmText, danger })` (Promise<bool>, zavírá Esc/Enter/klik mimo). Žádné
+  nativní `confirm`. Pravidlo: potvrzuj **jen** nevratné/hromadné akce.
+- **Stavy panelu** → `showState(el, "loading" | "empty" | "error", msg)` nebo
+  `stateHTML(...)`. Jeden vzhled pro „načítám / prázdno / chyba" všude.
+- **Zavírání detailů** → ✕ i klik mimo i **Esc** (platí pro POS i technik detail).
+- **Názvosloví + slovesa** → viz §4 a §5 (TourPlan, Návrh, Obnovit/Spustit/…).
+
+### Zbývá (další kola)
+- C (toolbar karet), D (taby), E (filter-bary), F (sjednocení hlaviček detailů).
+- Drobnost: 1× nativní `prompt()` (přehození POS na technika z fix-banneru) →
+  nahradit malým input-modalem ve stylu `confirmDialog`.

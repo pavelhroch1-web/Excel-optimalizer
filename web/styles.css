@@ -86,6 +86,15 @@ button.ghost:hover, .btn-ghost:hover { background: var(--bg-2); border-color: va
 .result.ok { color: var(--good, #2e7d32); }
 .result.err { color: #B3453A; }
 
+/* unified panel states — one look for loading / empty / error everywhere */
+.state { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 34px 20px; text-align: center; color: var(--text-3); font-size: 13px; }
+.state-ico { font-size: 24px; line-height: 1; opacity: .55; }
+.state-error { color: var(--bad, #B3453A); }
+.state-spinner { width: 22px; height: 22px; border: 2px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%; animation: state-spin .7s linear infinite; }
+@keyframes state-spin { to { transform: rotate(360deg); } }
+
 /* file inputs (upload step) */
 .filelabel { display: block; margin: 10px 0; font-size: 13px; color: var(--text-dim); }
 .filelabel input[type="file"] { display: block; margin-top: 6px; color: var(--text); }

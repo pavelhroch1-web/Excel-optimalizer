@@ -84,6 +84,19 @@ function setResult(id, msg, kind) {
   el.className = "result" + (kind ? " " + kind : "");
 }
 
+// ---- unified panel states: loading / empty / error ------------------------
+// One markup + look for "waiting", "nothing here" and "failed" across all
+// panels, so every screen signals state the same way.
+function stateHTML(kind, msg) {
+  if (kind === "loading") return `<div class="state"><div class="state-spinner"></div><div>${esc(msg || "Načítám…")}</div></div>`;
+  if (kind === "error") return `<div class="state state-error"><div class="state-ico">✕</div><div>${esc(msg || "Něco se nepovedlo.")}</div></div>`;
+  return `<div class="state"><div class="state-ico">∅</div><div>${esc(msg || "Nic tu zatím není.")}</div></div>`;
+}
+function showState(el, kind, msg) {
+  const n = typeof el === "string" ? document.getElementById(el) : el;
+  if (n) n.innerHTML = stateHTML(kind, msg);
+}
+
 // ---- unified feedback: one toast + one confirm dialog ---------------------
 // Replaces scattered native alert()/confirm() and ad-hoc toasts so success/
 // error feedback and confirmations look and behave the same everywhere.
@@ -716,6 +729,14 @@ on("pd-close", "click", closePosDetail);
 on("pos-detail-overlay", "click", (e) => {
   if (e.target.id === "pos-detail-overlay") closePosDetail();
 });
+// Esc closes any open detail overlay — same close behavior everywhere.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  ["pos-detail-overlay", "tech-detail-overlay"].forEach((id) => {
+    const ov = document.getElementById(id);
+    if (ov && !ov.classList.contains("hidden")) ov.classList.add("hidden");
+  });
+});
 
 const _ROLE_LABEL = { TECHNIK: "Technik", OZ: "OZ", ADMIN: "Admin", MANAGER: "Manažer" };
 const _TONE_CLS = { good: "st-done", warn: "st-due", bad: "st-overdue", info: "st-upcoming" };
@@ -811,7 +832,7 @@ async function openPosDetail(posId, week) {
   const overlay = document.getElementById("pos-detail-overlay");
   const bodyEl = document.getElementById("pd-body");
   document.getElementById("pd-title").textContent = "POS " + posId;
-  bodyEl.innerHTML = "<p class='pd-sub'>Načítám…</p>";
+  bodyEl.innerHTML = stateHTML("loading");
   overlay.classList.remove("hidden");
   let head = "";
   // Engine "proč vybráno / nevybráno" (only with a planning week context).
@@ -1527,7 +1548,7 @@ async function loadBusinessRules() {
       .filter((r) => r.scope === "global" && _WIRED_RULES.includes(r.code))
       .filter((r) => !seen.has(r.code) && seen.add(r.code));
     rules.sort((a, z) => _WIRED_RULES.indexOf(a.code) - _WIRED_RULES.indexOf(z.code));
-    if (!rules.length) { el.innerHTML = `<p class="pd-sub">Žádná business pravidla.</p>`; return; }
+    if (!rules.length) { el.innerHTML = stateHTML("empty", "Žádná business pravidla."); return; }
     el.innerHTML = rules.map((r) => {
       const params = r.params || {};
       const inputs = Object.entries(params).map(([k, v]) =>
@@ -1612,7 +1633,7 @@ async function loadCadence() {
   if (!el) return;
   try {
     const rules = (await apiJson("/api/cadence")).rules;
-    if (!rules.length) { el.innerHTML = `<p class="pd-sub">Žádná cadence pravidla (nejdřív nahraj data).</p>`; return; }
+    if (!rules.length) { el.innerHTML = stateHTML("empty", "Žádná cadence pravidla — nejdřív nahraj data."); return; }
     el.innerHTML = rules.map((r) => {
       const on = String(r.active).toUpperCase() === "YES";
       const scope = `${r.scope || ""}${r.matchValue ? " = " + r.matchValue : ""}`;
@@ -1643,10 +1664,10 @@ const _MODEL_ICON = { terminals: "grid", partners: "user", categories: "target",
 async function loadModel() {
   const el = document.getElementById("model-out");
   if (!el) return;
-  el.innerHTML = `<p class="pd-sub">Načítám…</p>`;
+  el.innerHTML = stateHTML("loading");
   try {
     const sections = (await apiJson("/api/model")).sections;
-    if (!sections.length) { el.innerHTML = `<p class="pd-sub">Žádná konfigurace (nejdřív nahraj data).</p>`; return; }
+    if (!sections.length) { el.innerHTML = stateHTML("empty", "Žádná konfigurace — nejdřív nahraj data."); return; }
     el.innerHTML = sections.map((s) => {
       const boolFields = s.fields.filter((f) => f.type === "bool");
       const isChecklist = s.fields.length === 1 && boolFields.length === 1;
@@ -1705,7 +1726,7 @@ const _INV_GROUPS = { scoring: "Skóre POS (na čem stojí výběr)", engine: "E
 async function loadEngineInventory() {
   const el = document.getElementById("engine-inventory-out");
   if (!el) return;
-  el.innerHTML = `<p class="pd-sub">Načítám…</p>`;
+  el.innerHTML = stateHTML("loading");
   try {
     const params = (await apiJson("/api/engine/inventory")).parameters;
     if (!params.length) { el.innerHTML = `<p class="pd-sub">—</p>`; return; }
@@ -2270,7 +2291,7 @@ function renderInsights(techStops, cur) {
 
 function renderStops(vis) {
   const el = document.getElementById("live-board");
-  if (!vis.length) { el.innerHTML = `<p class="pd-sub">Žádné zastávky pro tento filtr.</p>`; return; }
+  if (!vis.length) { el.innerHTML = stateHTML("empty", "Žádné zastávky pro tento filtr."); return; }
   const CAP = 150;
   const shown = vis.slice(0, CAP);
   // group by "T{week} · {planDate}"
@@ -2314,7 +2335,7 @@ function renderDuePanel() {
     Object.entries(_DUE_STATUS).map(([st, m]) =>
       _pill(st, "due", _live.dueStatus === st, m.label, c[st] || 0, m.cls)).join("");
   let list = _live.dueStatus === "all" ? list0 : list0.filter((p) => p.status === _live.dueStatus);
-  if (!list.length) { el.innerHTML = `<p class="pd-sub">Žádné POS v tomto stavu.</p>`; return; }
+  if (!list.length) { el.innerHTML = stateHTML("empty", "Žádné POS v tomto stavu."); return; }
   const CAP = 120;
   el.innerHTML = `<div class="stop-list">` + list.slice(0, CAP).map((p) => {
     const m = _DUE_STATUS[p.status] || { cls: "" };
@@ -2405,7 +2426,7 @@ document.addEventListener("click", async (e) => {
 async function loadLive() {
   const el = document.getElementById("live-board");
   if (!el) return;
-  el.innerHTML = `<p class="result">Načítám…</p>`;
+  el.innerHTML = stateHTML("loading");
   // Board first (fast) → render immediately. Cadence countdown is heavier
   // (loads the snapshot's rules) so it streams in afterwards and re-renders.
   try {
@@ -3629,7 +3650,7 @@ async function openPlannerRun(runId) {
   const overlay = document.getElementById("pos-detail-overlay");
   const bodyEl = document.getElementById("pd-body");
   document.getElementById("pd-title").textContent = "Běh planneru #" + runId;
-  bodyEl.innerHTML = "<p class='pd-sub'>Načítám…</p>";
+  bodyEl.innerHTML = stateHTML("loading");
   overlay.classList.remove("hidden");
   try {
     const r = await apiJson("/api/memory/planner-run/" + encodeURIComponent(runId));
