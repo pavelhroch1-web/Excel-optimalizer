@@ -24,10 +24,34 @@ import openpyxl
 import db
 
 
-def _rows(ws):
+# Raw client exports vary: some have a blank leading row (header on row 2) and
+# localized column names. _rows finds the real header row (first row with enough
+# non-empty cells) and, given an alias map, translates raw column names to the
+# normalized keys the importers use — so files import with no manual edits.
+def _norm_header(h) -> str:
+    return " ".join(str(h).strip().upper().split())
+
+
+def _rows(ws, aliases: dict | None = None, min_cells: int = 2):
     it = ws.iter_rows(values_only=True)
-    header = next(it, None) or []
-    hidx = {str(h): i for i, h in enumerate(header)}
+    header = []
+    for row in it:
+        if sum(1 for c in row if c not in (None, "")) >= min_cells:
+            header = list(row)
+            break  # `it` is now positioned on the first data row
+    hidx: dict = {}
+    for i, h in enumerate(header):
+        if h in (None, ""):
+            continue
+        raw = str(h).strip()
+        hidx.setdefault(raw, i)  # exact raw name always resolvable
+        if aliases:
+            key = _norm_header(h)
+            alias = aliases.get(key)
+            if alias is None:  # tolerate truncated/variant headers via prefix
+                alias = next((v for k, v in aliases.items() if key.startswith(k) or k.startswith(key)), None)
+            if alias:
+                hidx.setdefault(alias, i)
     return hidx, it, header
 
 
@@ -40,6 +64,29 @@ def _g(row, hidx, name):
 
 
 # ---------------------------------------------------------------------------
+
+# Raw client POS export ("Základní údaje o prodejních místech") column names ->
+# the normalized keys _POS_MAP consumes. Keys are upper-cased/space-collapsed
+# (see _norm_header). The app's own template/scaffold already uses the
+# normalized names, so those pass through unchanged.
+_POS_HEADER_ALIASES = {
+    "ČÍSLO TERMINÁLU": "terminalId",
+    "POS": "posId",
+    "TYP TERMINÁLU": "terminalType",
+    "MARKET": "market",
+    "KATEGORIE": "category",
+    "KATEGORIZACE": "classification",
+    "NAZEV PROVOZOVNY": "nazev", "NÁZEV PROVOZOVNY": "nazev",
+    "ULICE": "street",
+    "ČÍSLO POPISNÉ/ORIENTAČNÍ": "houseNumber",
+    "MĚSTO": "city",
+    "OBLAST": "area",
+    "POS AREA": "posArea",
+    "TECHNIK": "assignedTechnician",
+    "X": "gpsX", "Y": "gpsY",
+    "PTT": "ppt", "PPT": "ppt",
+    "STATUS": "status",
+}
 
 _POS_MAP = {
     "posId": "pos_id", "terminalId": "terminal_id",
@@ -56,7 +103,7 @@ def import_pos_master(conn, ws) -> dict:
     status) is recorded to pos_master_history, and POS absent from this import
     are marked inactive (not deleted). Returns a diff summary for the UI."""
     import history
-    hidx, it, _ = _rows(ws)
+    hidx, it, _ = _rows(ws, _POS_HEADER_ALIASES)
     # Preload the tracked fields of every existing POS once, so we can diff
     # without a SELECT per row (11k+ POS).
     existing = {str(r["pos_id"]): dict(r) for r in db.get(

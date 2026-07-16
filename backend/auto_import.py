@@ -31,9 +31,16 @@ def _classify(ws) -> str | None:
     if "TYPE" in h and "ACTIVITY" in h and "START_WEEK" in h:
         return "activity_plan"
     hu = {str(x).strip().upper() for x in h}
+    # Tourplan and the raw POS master export share most columns; a Tourplan file
+    # additionally carries a week column ("TOURPLAN"/"WEEK"), so check it first.
     if ("WEEK" in hu or "TÝDEN" in hu or "TYDEN" in hu or "TOURPLAN" in hu) and \
        ("TECHNICIAN" in hu or "TECHNIK" in hu) and "POS" in hu:
         return "tourplan"
+    # Raw client POS master ("Základní údaje o prodejních místech"): Czech
+    # headers, no week column.
+    if "ČÍSLO TERMINÁLU" in hu and "POS" in hu and \
+       ("PTT" in hu or "PPT" in hu or "NAZEV PROVOZOVNY" in hu or "POS AREA" in hu):
+        return "pos_master"
     return None
 
 
@@ -108,7 +115,14 @@ def import_file(path: str, filename: str | None = None, force_kind: str | None =
         return {"detected": t, "sheet": det["sheet"], "counts": counts, "recomputed": rec}
 
     if t == "salesapp":
-        importer.derive_technicians(db.connect())  # refresh roles (own conn)
+        # Register visit executors as technicians (+refresh roles) so team/health
+        # analytics can match visits. Must commit — a throwaway connection rolls back.
+        conn2 = db.connect()
+        try:
+            counts["technicians"] = importer.derive_technicians(conn2)
+            conn2.commit()
+        finally:
+            conn2.close()
     importer.sync_rules_from_config()
     rec = _recompute_after(counts)
     return {"detected": t, "sheet": det["sheet"], "counts": counts, "recomputed": rec}
