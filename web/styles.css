@@ -1072,6 +1072,9 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .tg-li.on { border-color: var(--border-2); background: var(--panel-2); color: var(--text); font-weight: 600; }
 .tg-li .tg-sw { width: 16px; height: 3px; border-radius: 2px; flex-shrink: 0; }
 .tg-li b { font-weight: 500; color: var(--text-3); font-size: 11px; }
+.tg-li .tg-open { font-size: 10px; color: var(--accent); font-weight: 600; opacity: 0; transition: opacity .12s; margin-left: 2px; }
+.tg-li:hover .tg-open { opacity: 1; }
+.tgline { transition: opacity .12s, stroke-width .12s; }
 
 /* typed / template-based import */
 .imp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 12px; }

@@ -4128,21 +4128,28 @@ function _tgRender() {
   periods.forEach((p, i) => { if (i % step === 0) xlab += `<text x="${x(i).toFixed(1)}" y="${H - 10}" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--text-3)">${esc(_periodShort(p))}</text>`; });
   let lines = "";
   top.forEach((t, ti) => {
-    const dim = _tg.highlight && _tg.highlight !== t.name;
     let dpath = "", started = false;
     periods.forEach((p, i) => { const v = val(t, p); if (v == null) return; dpath += `${started ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)} `; started = true; });
-    lines += `<path d="${dpath.trim()}" fill="none" stroke="${_TG_COLORS[ti % _TG_COLORS.length]}" stroke-width="${_tg.highlight === t.name ? 3.2 : 2}" opacity="${dim ? 0.15 : 1}"/>`;
+    lines += `<path class="tgline" data-tech="${esc(t.name)}" d="${dpath.trim()}" fill="none" stroke="${_TG_COLORS[ti % _TG_COLORS.length]}" stroke-width="2" opacity="1"/>`;
   });
   chart.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block">${grid}${lines}${xlab}</svg>`;
-  // legend (click to highlight, click name to open technician detail)
+  // legend: hover highlights the line, click opens the technician's detail (day/route/deviations)
   const leg = document.getElementById("tg-legend");
   leg.innerHTML = top.map((t, ti) =>
-    `<span class="tg-li ${_tg.highlight === t.name ? "on" : ""}" data-tech="${esc(t.name)}">
+    `<span class="tg-li" data-tech="${esc(t.name)}" title="Otevřít detail – den, trasa, odchylky">
        <span class="tg-sw" style="background:${_TG_COLORS[ti % _TG_COLORS.length]}"></span>${esc(t.name)}
-       <b>${t.region ? esc(t.region) : ""}</b></span>`).join("")
+       <b>${t.region ? esc(t.region) : ""}</b><span class="tg-open">detail →</span></span>`).join("")
     + (d.technicians.length > 10 ? `<span class="tg-li" style="color:var(--text-3)">+ ${d.technicians.length - 10} dalších</span>` : "");
+  const paths = chart.querySelectorAll(".tgline");
+  const setHi = (name) => paths.forEach((p) => {
+    const on = !name || p.dataset.tech === name;
+    p.setAttribute("opacity", on ? "1" : "0.12");
+    p.setAttribute("stroke-width", name && p.dataset.tech === name ? "3.2" : "2");
+  });
   leg.querySelectorAll(".tg-li[data-tech]").forEach((el) => {
-    el.addEventListener("click", () => { _tg.highlight = _tg.highlight === el.dataset.tech ? null : el.dataset.tech; _tgRender(); });
+    el.addEventListener("mouseenter", () => setHi(el.dataset.tech));
+    el.addEventListener("mouseleave", () => setHi(null));
+    el.addEventListener("click", () => openTechDetail(el.dataset.tech));
   });
 }
 
