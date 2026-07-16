@@ -1,8 +1,8 @@
 # TourPlan Planner — Architektura
 
-> **Stav:** v0.1 — návrh k připomínkování. Vznikl ze společné diskuze
-> (management + engineering). Slouží jako závazný podklad **před** implementací.
-> Kód se začne psát až po schválení tohoto dokumentu.
+> **Stav:** v0.2 — schválená architektura, Fáze 1 (predikce trvání) hotová.
+> Vznikl ze společné diskuze (management + engineering). Slouží jako závazný
+> podklad pro implementaci; doplňuje se s každým dalším rozhodnutím.
 
 ---
 
@@ -81,8 +81,13 @@ Vstupy (PPT, Activity Plan, config, business rules)
                      ▼
 [D] Mikro-clustering  (stejné centrum / pár desítek metrů = 1 jednotka)
                      ▼
-[E0] Kostra období    (rozřež POVINNÉ POS do dní tak, aby každý den
-                       tvořil souvislý okruh a všechny povinnosti se stihly)
+[M] Manažerský pre-load  (PŘED optimalizací):
+      - rezervace kapacity (schůzky, školení, inventura, admin, „30 % volné")
+      - ruční fixní úkoly (POS, priorita, odhad trvání, časové okno)
+                     ▼
+[E0] Kostra období    (rozřež POVINNÉ POS + ruční úkoly do dní tak, aby každý
+                       den tvořil souvislý okruh, vešel se do VOLNÉ kapacity
+                       (po rezervacích) a všechny povinnosti se stihly)
                      ▼
 [E] Stavba dne        (kotva = první povinný POS → okruh → dofill kapacity)
                      ▼
@@ -124,10 +129,43 @@ priorita(POS) =  w_ppt   · PPT_norm
 
 ---
 
-## 5. [A] Kolektivní učení (ne z jednotlivce)
+## 5. [A] Učení = kontinuální firemní standard (ne adaptace na jednotlivce)
+
+**Cíl učení není přizpůsobit se lidem — je vytvořit firemní standard.** Planner se
+nesmí učit chování konkrétního technika ani normalizovat slabý výkon nebo
+flexibilní pracovní dobu. Místo toho po **každém importu SalesApp** přepočítává
+agregované firemní statistiky a postupně zlepšuje své porozumění businessu.
+
+Rodina naučených firemních standardů (všechny z agregovaných dat celé ČR):
+
+- typická **délka návštěvy** podle typu POS (Fáze 1 — hotovo),
+- průměrné **jízdní časy** (po silnici, OSRM),
+- **reálná denní produktivní kapacita** (viz upřesnění níže),
+- **sezónní vzorce**,
+- **dopad kampaní**,
+- **business priority**,
+- **frekvence návštěv**,
+- další operační metriky.
+
+Každý nový Draft TourPlanu tak těží ze všeho, co se firma za poslední měsíce
+naučila. `duration_model` (Fáze 1) je první instancí tohoto vzoru; ostatní
+statistiky používají **stejný mechanismus** (agregace → ořez extrémů → shrinkage
+hierarchie → kvantily), jen nad jinou veličinou.
 
 Model reprezentuje **kolektivní zkušenost celé firmy**, cílí na běžného až mírně
 nadprůměrného technika a **ignoruje extrémy**.
+
+> **Challenge — „reálná denní kapacita" je normativní, ne popisná.** Kdybychom
+> kapacitu učili jako *průměr toho, co se reálně děje*, zahrneme do ní 3hodinové
+> dny a slabý výkon — a planner by se přizpůsobil přesně tomu, co nechceš.
+> Kapacita pro plánování proto musí být **standard kompetentního dne**, ne popis
+> skutečnosti:
+>   - základ = **konfigurovaná pracovní doba** (manažer nastaví, např. 8 h),
+>   - naučená distribuce slouží jen jako *informace* (např. „kompetentní den =
+>     ~p50–p60 produktivních minut napříč firmou po vyřazení absencí a extrémů"),
+>     nikdy jako průměr tažený dolů slabými/krátkými dny.
+> Stejná logika jako u trvání: učíme se z normálu až mírného nadprůměru, ne z
+> extrémů — a u kapacity necháváme finální slovo konfiguraci.
 
 **Metoda — empirical Bayes / shrinkage s ořezem extrémů:**
 
@@ -172,6 +210,33 @@ nadprůměrného technika a **ignoruje extrémy**.
   čas). Předpočítané a uložené (viz §14).
 - Pravidlo „už tam jedu, co ještě přibalím?" je zabudované na dvou úrovních:
   mikro-cluster (pěší docházka) a dofill dne (blízké vysoko-hodnotné POS v [E]).
+
+---
+
+## 7b. [M] Manažerský pre-load — rezervace a ruční úkoly PŘED optimalizací
+
+Manažer musí mít možnost **zarezervovat kapacitu a vložit fixní úkoly ještě
+předtím, než planner začne optimalizovat.** Planner pak staví zbytek TourPlanu
+*kolem* nich.
+
+**A) Rezervace kapacity** — ubírá dostupný čas dne/týdne dřív, než ho planner
+naplní:
+- regionální schůzky, školení, inventura, speciální projekty, administrativa,
+- nebo jednoduše „nech ~30 % týdne volných".
+- Rozsah: konkrétní den/blok, nebo procento kapacity období.
+
+**B) Ruční fixní úkoly** — ad-hoc business úkoly, u kterých manažer předem zná:
+- POS ID, prioritu, odhad trvání, preferované časové okno.
+- Planner je bere jako **fixní kotvy** (jako povinné POS, ale zadané ručně a
+  případně s časovým oknem) a staví den kolem nich.
+
+**C) Absence a schůzky se nepredikují.** Pokud jsou známé před plánováním,
+zadá je manažer ručně jako rezervaci. Planner nikdy nehádá dovolené ani budoucí
+schůzky — vytvoří nejlepší možný plán z informací dostupných v čase plánování.
+
+Pořadí je klíčové: **[M] běží před [E0].** Nejdřív se odečte rezervovaná kapacita
+a umístí ruční úkoly, teprve do zbývajícího prostoru planner rozvrhne povinnosti
+a dofilluje hodnotu.
 
 ---
 
@@ -271,10 +336,13 @@ Draft → Optimalizace → Kontrola → Publikace → Monitoring → Nový Draft
 
 | Tabulka | Účel |
 |---------|------|
-| `duration_model` | Hierarchické odhady trvání (p50/p75) per typ × řetězec × region × (tech), přepočítávané z historie. |
+| `duration_model` | Hierarchické odhady trvání (p50/p75) per typ × řetězec × region × (tech), přepočítávané z historie. **(Fáze 1 — hotovo.)** |
+| `learned_stats` | Rodina firemních standardů stejným vzorem (jízdní časy, sezónnost, dopad kampaní, frekvence…). `duration_model` je první instancí. |
 | `pos_priors` | Naučené hodnotové priory + objem/jistota dat (pro shrinkage). |
 | `pos_clusters` | Předpočítané mikro-clustery (stejné centrum / pěší docházka). |
-| `plan_rationale` | Proč byl každý POS vybrán (kotva / dofill / cluster) — vysvětlitelnost + audit. |
+| `capacity_reservations` | Manažerské rezervace kapacity (schůzky, školení, inventura, „30 % volné") — den/blok nebo % období. |
+| `manual_tasks` | Ruční fixní úkoly (POS, priorita, odhad trvání, časové okno) vkládané před optimalizací. |
+| `plan_rationale` | Proč byl každý POS vybrán (kotva / ruční úkol / dofill / cluster) — vysvětlitelnost + audit. |
 | (rozšíření [G]) | Vazba realizované hodnoty návštěvy zpět do učení (připravit teď, plnit později). |
 
 Vše append-only, v souladu se zbytkem operační paměti.
@@ -304,19 +372,25 @@ Vše append-only, v souladu se zbytkem operační paměti.
    tom stojí. Průběžně zlepšovat pokrytí.
 4. **Realizovaná hodnota** — v1 běží na proxy (PPT + recency + pravidla); datový
    model připravit na pozdější učení z výsledků (prodej / instalace visibility).
+5. **Denní kapacita = normativní standard, ne popis.** Základ je konfigurovaná
+   pracovní doba; naučená distribuce je jen informace (kompetentní den ~p50–p60
+   po vyřazení absencí/extrémů), nikdy průměr tažený dolů slabými dny. Potvrdit
+   výchozí hodnotu standardní pracovní doby.
 
 ---
 
 ## 17. Fázování implementace (návrh)
 
-1. **[A] Predikce trvání** — kolektivní model p50/p75 + hierarchie. (Samostatně
-   testovatelné, hned viditelná hodnota v kapacitě.)
+1. **[A] Predikce trvání** — kolektivní model p50/p75 + hierarchie. **(Hotovo.)**
 2. **[D] Mikro-clustering** — předpočet clusterů.
-3. **[C] Business priorita** — skóre + zdůvodnění nad existujícími pravidly.
-4. **[E0] Kostra období** — rozvržení povinností do dní.
-5. **[E] Stavba dne** — kotva + okruh + dofill + OSRM proveditelnost.
-6. **[F] Lifecycle** — draft → publikace (immutable) → monitoring → nový draft.
-7. **Mapa** — plánovací režim nad GIS vrstvou.
+3. **[M] Manažerský pre-load** — rezervace kapacity + ruční fixní úkoly.
+4. **[C] Business priorita** — skóre + zdůvodnění nad existujícími pravidly.
+5. **[A+] Další firemní standardy** — jízdní časy, kapacita (normativní),
+   sezónnost, frekvence — stejným vzorem jako Fáze 1.
+6. **[E0] Kostra období** — rozvržení povinností + ručních úkolů do dní.
+7. **[E] Stavba dne** — kotva + okruh + dofill + OSRM proveditelnost.
+8. **[F] Lifecycle** — draft → publikace (immutable) → monitoring → nový draft.
+9. **Mapa** — plánovací režim nad GIS vrstvou.
 
 Každá fáze má vlastní testy a nechává engine pravidel [B] beze změny.
 
