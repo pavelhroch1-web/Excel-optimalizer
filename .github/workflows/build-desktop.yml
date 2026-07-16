@@ -1,0 +1,48 @@
+name: build-desktop-portable
+
+# Sestaví PORTABLE Windows aplikaci (bez instalace, bez Pythonu na cílovém PC)
+# a nahraje ji jako stažitelný ZIP artefakt. Spusť ručně (Actions -> tento
+# workflow -> Run workflow) nebo tagem v*. Na cílovém firemním PC pak jen
+# rozbalíš ZIP a spustíš FieldForceOptimizer.exe — nic se neinstaluje.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r desktop_client/requirements-desktop.txt pyinstaller requests
+
+      - name: Build portable app (PyInstaller --onedir, self-contained)
+        run: >
+          python -m PyInstaller --onedir --windowed --noconfirm
+          --name FieldForceOptimizer
+          --contents-directory _internal
+          --paths backend --paths tools --paths desktop_client --paths .
+          --collect-all uvicorn --collect-all webview
+          --hidden-import PIL._tkinter_finder
+          --add-data "web;web"
+          --add-data "backend/schema.sql;."
+          --add-data "workbook/FieldForceOptimizer_V11_scaffold.xlsx;workbook"
+          desktop_app.py
+
+      - name: Zip portable folder
+        run: Compress-Archive -Path dist/FieldForceOptimizer/* -DestinationPath FieldForceOptimizer-portable.zip -Force
+
+      - name: Upload portable ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FieldForceOptimizer-portable
+          path: FieldForceOptimizer-portable.zip
+          retention-days: 30

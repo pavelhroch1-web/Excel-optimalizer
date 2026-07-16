@@ -80,16 +80,39 @@ def main() -> None:
         sys.exit(1)
 
     url = f"http://{HOST}:{port}/"
+    # Preferováno: nativní okno přes pywebview (WebView2). Na zamčeném firemním
+    # PC ale WebView2 nemusí být — pak BEZ jakékoli instalace spadneme na
+    # výchozí prohlížeč (ten má každý Windows) + malé kontrolní okno (tkinter je
+    # ve standardní knihovně Pythonu, zabalí se do .exe, nic se neinstaluje).
     try:
-        import webview  # pywebview
+        import webview  # pywebview -> WebView2
         webview.create_window("Field Force Optimizer", url,
                               width=1280, height=860, min_size=(900, 600))
         webview.start()
-    except Exception:
-        # Nouzově: když pywebview není k dispozici, otevři v prohlížeči.
-        import webbrowser
-        webbrowser.open(url)
-        print(f"UI běží na {url} — okno zavři ukončením tohoto programu.")
+        return
+    except Exception:  # noqa: BLE001 - WebView2 chybí / selhalo
+        pass
+    _run_in_browser(url)
+
+
+def _run_in_browser(url: str) -> None:
+    """Zero-install fallback: otevři výchozí prohlížeč a drž aplikaci naživu
+    malým oknem, kterým ji lze ukončit. Vše jen ze standardní knihovny."""
+    import webbrowser
+    webbrowser.open(url)
+    try:
+        import tkinter as tk
+        root = tk.Tk()
+        root.title("Field Force Optimizer")
+        tk.Label(root, justify="center", padx=24, pady=18,
+                 text=("Field Force Optimizer běží.\n\nAplikace je otevřená v prohlížeči:\n"
+                       f"{url}\n\nToto okno nechte otevřené — jeho zavřením\naplikaci ukončíte.")
+                 ).pack()
+        tk.Button(root, text="Otevřít znovu v prohlížeči",
+                  command=lambda: webbrowser.open(url)).pack(pady=(0, 16))
+        root.mainloop()
+    except Exception:  # noqa: BLE001 - i tkinter nedostupné: drž běh
+        print(f"UI běží na {url} — aplikaci ukončíš zavřením tohoto okna.")
         try:
             while True:
                 time.sleep(1)
