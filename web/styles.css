@@ -1123,3 +1123,39 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .imp-d { font-size: 12px; color: var(--text-3); line-height: 1.45; flex: 1; }
 .imp-acts { display: flex; flex-direction: column; gap: 8px; }
 .imp-up { margin: 0; font-size: 12.5px; }
+
+/* ============================================================================
+   Responsive shell — the app never scrolls horizontally as a whole; the
+   sidebar collapses to an icon rail, the topbar reflows, wide tables keep
+   their own scroll. Desktop-first (the app runs in a laptop window), but a
+   narrow/split window stays usable and tidy.
+   ============================================================================ */
+.si-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-shell, .app-main { max-width: 100%; }
+
+/* medium window / split-screen: sidebar → compact icon rail */
+@media (max-width: 1000px) {
+  .sidebar { width: 62px; padding: 18px 8px; }
+  .side-item { justify-content: center; padding: 11px 0; gap: 0; }
+  .si-label { display: none; }
+  .side-logo { justify-content: center; padding: 6px 0 18px; font-size: 0; }
+  .side-logo .side-mark { font-size: 20px; }
+  .side-logo .ver { display: none; }
+  .side-foot button { font-size: 0; padding: 10px 0; }
+  .side-foot button::before { content: "⎋"; font-size: 16px; }
+}
+
+/* narrow window: topbar reflows, live status drops to save the search room */
+@media (max-width: 720px) {
+  .topbar { flex-wrap: wrap; gap: 10px 16px; }
+  .topbar .ck-search { order: 3; flex-basis: 100%; max-width: none; }
+  .tb-status { gap: 14px; }
+  .app-main { padding-left: 14px; padding-right: 14px; }
+  .card { padding: 18px 16px; }
+  .view-head h1 { font-size: 21px; }
+}
+@media (max-width: 520px) {
+  .tb-status { display: none; }  /* same numbers live on the dashboard tiles */
+  .row { gap: 8px; }
+  .row > label { flex: 1 1 100%; }
+}
