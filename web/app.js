@@ -3507,6 +3507,13 @@ function renderSummary(s) {
     ${tile("Ø Health Score", k.avgHealthScore, "", 0, "hero")}
     ${tile("Aktivních pracovníků", { value: k.activePeople }, "", 0)}
   </div>`;
+  // Health Score is relative to peers and needs enough data to be meaningful;
+  // a partial/current month rarely qualifies, so explain the "—" instead of
+  // leaving a bare blank that reads as broken.
+  const healthNA = !k.avgHealthScore || (k.avgHealthScore.value == null);
+  const healthNote = healthNA
+    ? `<p class="sk-note">Ø Health Score se pro toto období nepočítá — je relativní vůči kolegům a potřebuje dost dat (min. 30 návštěv a 10 odpracovaných dní u alespoň 5 pracovníků). Vyber uzavřený měsíc pro plné skóre.</p>`
+    : "";
 
   const techRow = (p, extra) => `<div class="st-row" data-tech="${esc(p.technician)}">
     <span class="st-score hs-${_hsBand(p.healthScore)}">${p.healthScore ?? "—"}</span>
@@ -3571,6 +3578,7 @@ function renderSummary(s) {
     <div class="sum-period">Období <b>${esc(s.period.label)}</b> · ${esc(s.period.from)} – ${esc(s.period.to)}
       <span class="sum-vs">vs. minulé ${esc(s.period.prevFrom)} – ${esc(s.period.prevTo)}</span></div>
     ${kpis}
+    ${healthNote}
     <div id="sum-coverage"></div>
     ${tops}${regions}
     <div class="sk-cols">${coverage}${campaigns}</div>

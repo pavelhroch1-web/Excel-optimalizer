@@ -589,6 +589,8 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 .ts-grid .hc-card { margin-bottom: 0; }
 .hc-reg { font-weight: var(--fw-medium); font-size: var(--fs-2xs); color: var(--text-3); }
 .hc-why.ok { background: color-mix(in srgb, var(--good) 12%, transparent); color: var(--good); }
+.sk-note { font-size: var(--fs-xs); color: var(--text-3); background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 10px var(--sp-3); margin: -4px 0 var(--sp-4); line-height: 1.5; }
 
 /* ===== deep technician detail (full screen) ===== */
 .td-overlay { position: fixed; inset: 0; background: rgba(12,18,17,.55); z-index: 200; display: flex; padding: 24px; }
