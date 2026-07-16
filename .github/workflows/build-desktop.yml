@@ -25,17 +25,33 @@ jobs:
           pip install -r desktop_client/requirements-desktop.txt pyinstaller requests
 
       - name: Build portable app (PyInstaller --onedir, self-contained)
-        run: >
-          python -m PyInstaller --onedir --windowed --noconfirm
-          --name FieldForceOptimizer
-          --contents-directory _internal
-          --paths backend --paths tools --paths desktop_client --paths .
-          --collect-all uvicorn --collect-all webview
-          --hidden-import PIL._tkinter_finder
-          --add-data "web;web"
-          --add-data "backend/schema.sql;."
-          --add-data "workbook/FieldForceOptimizer_V11_scaffold.xlsx;workbook"
-          desktop_app.py
+        shell: pwsh
+        run: |
+          # Many backend modules are imported dynamically (inside functions),
+          # which PyInstaller's static analysis misses -> they'd be silently
+          # left out of the .exe and features (e.g. task_bridge) would break at
+          # runtime. Force-include every backend + tools module as a hidden
+          # import so the frozen app has the whole backend. Future-proof: new
+          # modules are picked up automatically.
+          $pyargs = @(
+            '--onedir','--windowed','--noconfirm',
+            '--name','FieldForceOptimizer',
+            '--contents-directory','_internal',
+            '--paths','backend','--paths','tools','--paths','desktop_client','--paths','.',
+            '--collect-all','uvicorn','--collect-all','webview',
+            '--collect-submodules','desktop_client',
+            '--hidden-import','PIL._tkinter_finder'
+          )
+          Get-ChildItem -Path backend,tools -Filter *.py | ForEach-Object {
+            if ($_.BaseName -ne '__init__') { $pyargs += '--hidden-import'; $pyargs += $_.BaseName }
+          }
+          $pyargs += @(
+            '--add-data','web;web',
+            '--add-data','backend/schema.sql;.',
+            '--add-data','workbook/FieldForceOptimizer_V11_scaffold.xlsx;workbook',
+            'desktop_app.py'
+          )
+          python -m PyInstaller @pyargs
 
       - name: Zip portable folder
         run: Compress-Archive -Path dist/FieldForceOptimizer/* -DestinationPath FieldForceOptimizer-portable.zip -Force
