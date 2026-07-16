@@ -1805,6 +1805,52 @@ function _initDropZone() {
   ["dragenter", "dragover"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("over"); }));
   ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("over"); }));
   dz.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) importFile(f); });
+  _initTypedImport();
+}
+
+// Explicit, template-based import: pick the type, download a template, upload it.
+function _initTypedImport() {
+  document.querySelectorAll("[data-tmpl]").forEach((btn) => {
+    if (btn.disabled) return;
+    btn.addEventListener("click", () =>
+      downloadFile("/api/import/template/" + btn.dataset.tmpl, "sablona_" + btn.dataset.tmpl + ".xlsx"));
+  });
+  document.querySelectorAll("[data-imp]").forEach((inp) => {
+    inp.addEventListener("change", async () => {
+      const f = inp.files[0]; if (!f) return;
+      const kind = inp.dataset.imp;
+      setResult("typed-import-result", `Nahrávám ${f.name}…`, "");
+      try {
+        const fd = new FormData(); fd.append("file", f);
+        const res = await apiFetch("/api/import/" + kind, { method: "POST", body: fd });
+        const r = await res.json();
+        if (!res.ok) throw new Error(r.detail || ("Chyba " + res.status));
+        const c = r.counts || {};
+        const msg = c.pos_master != null ? `POS: ${c.pos_master} (nových ${c.pos_diff?.new ?? 0})`
+          : c.salesapp_visits != null ? `Návštěvy: ${c.salesapp_visits}`
+          : c.campaigns != null ? `Kampaně: ${c.campaigns}` : "Hotovo";
+        setResult("typed-import-result", "✓ Naimportováno — " + msg, "ok");
+        toast("Import hotový: " + msg, "ok");
+      } catch (e) { setResult("typed-import-result", "Chyba: " + e.message, "err"); toast("Import selhal: " + e.message, "err"); }
+      inp.value = "";
+    });
+  });
+  const sample = document.getElementById("load-sample");
+  if (sample) sample.addEventListener("click", async () => {
+    if (!await confirmDialog({ title: "Načíst ukázkovou síť?",
+      body: "Naimportuje 11 605 POS + návštěvy + konfiguraci. Může chvíli trvat (~30–60 s). Použij jen pro vyzkoušení.",
+      confirmText: "Načíst" })) return;
+    sample.disabled = true; const orig = sample.textContent; sample.textContent = "Načítám ukázková data…";
+    setResult("typed-import-result", "Načítám ukázkovou síť (~30–60 s)…", "");
+    try {
+      const res = await apiFetch("/api/import/sample", { method: "POST" });
+      const r = await res.json();
+      if (!res.ok) throw new Error(r.detail || ("Chyba " + res.status));
+      setResult("typed-import-result", `✓ Načteno ${r.counts?.pos_master ?? "?"} POS. Přejdi na Přehled.`, "ok");
+      toast("Ukázková síť načtena", "ok");
+    } catch (e) { setResult("typed-import-result", "Chyba: " + e.message, "err"); toast("Načtení selhalo: " + e.message, "err"); }
+    finally { sample.disabled = false; sample.textContent = orig; }
+  });
 }
 
 function renderAlerts(list) {

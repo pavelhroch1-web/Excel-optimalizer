@@ -52,10 +52,25 @@ def detect(path: str) -> dict:
         wb.close()
 
 
-def import_file(path: str, filename: str | None = None) -> dict:
-    """Detect + import one file. Returns {detected, counts, recomputed}."""
+def import_file(path: str, filename: str | None = None, force_kind: str | None = None) -> dict:
+    """Detect + import one file. Returns {detected, counts, recomputed}.
+
+    force_kind (pos_master | salesapp | activity_plan | tourplan | workbook)
+    skips auto-detection — the explicit, predictable path used by the
+    template-based import. The sheet is the workbook's first non-empty sheet."""
     db.init_db()
-    det = detect(path)
+    if force_kind:
+        if force_kind == "workbook":
+            det = {"type": "workbook", "sheet": None}
+        else:
+            wb0 = openpyxl.load_workbook(path, read_only=True, data_only=True)
+            try:
+                sheet = wb0.sheetnames[0]
+            finally:
+                wb0.close()
+            det = {"type": force_kind, "sheet": sheet}
+    else:
+        det = detect(path)
     t = det["type"]
     if t == "workbook":
         counts = importer.import_workbook(path, filename)
