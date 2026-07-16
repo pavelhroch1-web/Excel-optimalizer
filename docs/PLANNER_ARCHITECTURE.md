@@ -134,9 +134,9 @@ rozhodují JAK to rozložit do období a dní.**
 ## 3b. [S] Coverage & Campaign Planning (strategická vrstva, Velín)
 
 **Rozhoduje se jako první.** Tady manažer rozhodne, *jakou část sítě* chce v
-období obsloužit — a systém řekne, jestli na to objednaná kapacita stačí. Teprve
-výstup (rozsah + cíle) řídí taktické plánování [C]–[E]. TourPlan je až výsledek
-tohoto rozhodnutí.
+období obsloužit — a systém nejen řekne, jestli na to objednaná kapacita stačí,
+ale **aktivně navrhuje obchodní strategii a trade-offy**. Teprve výstup (rozsah +
+cíle) řídí taktické plánování [C]–[E]. TourPlan je až výsledek tohoto rozhodnutí.
 
 **A) Segmentový model (konfigurovatelný z Velínu, žádná pravidla v kódu)**
 - Segment = konfigurovatelná kombinace existujících dimenzí: typ terminálu
@@ -168,9 +168,47 @@ feasibility       =  poptávka ≤ nabídka ?
 - Výstup vrstvy [S] = **množina POS v rozsahu + cílová kadence + priority kampaní**,
   které vstupují do [C] (priorita) a [E0] (kostra období).
 
-**Vše konfigurovatelné z administrace (Velínu)** — segmenty, kadence, priority,
-zahrnutí/vyloučení. Deterministické a auditovatelné; využívá naučené modely
-(trvání, kapacita) jen jako vstupy do výpočtu feasibility.
+**E) Strategický poradce / trade-off (rozhodovací podpora, ne jen reporting)**
+
+[S] aktivně upozorňuje a nabízí varianty. Vše jsou **deterministické scénáře nad
+modelem feasibility** (poptávka vs. nabídka) — žádná AI:
+
+- *„B terminály nebyly navštíveny 95 dní."* — coverage stav + kadence-riziko.
+- *„Malé terminály začínají vypadávat z cílové kadence."* — předpověď rizika.
+- *„Vánoce, celá síť kromě LI: potřebuješ 6 týdnů při současné kapacitě, nebo
+  5 týdnů při +15 % kapacity."* — invertuj feasibility: řeš délku kampaně při dané
+  kapacitě, nebo potřebnou kapacitu při dané délce.
+- *„Vyloučíš-li partnera X, uvolníš kapacitu na Y dalších prioritních POS."* —
+  delta feasibility po vyřazení segmentu → přepočet, co se vejde navíc (dle [C]).
+- *„Zvýšíš-li kadenci segmentu A, segment B už nepůjde udržet."* — přepočet
+  poptávky při změně kadence → které jiné segmenty přestanou být feasible.
+
+Poradce běží jako **what-if nad stejným výpočtem** [S]: mění jeden parametr
+(rozsah / kadenci / kapacitu / délku) a ukazuje důsledek na zbytek sítě. Manažer
+tak dostává **rozhodovací varianty**, ne jen „stihneme / nestihneme".
+
+---
+
+## 3c. Vše konfigurovatelné z Velínu — generic engine, strategie v konfiguraci
+
+**Princip:** kód je **generický engine**; obchodní strategie **žije v konfiguraci**.
+Prakticky všechny business parametry se nastavují z administrace (Velínu), ne
+v kódu — aby šlo systém dlouhodobě škálovat bez zásahů do implementace. Změna
+konfigurace = planner začne optimalizovat podle nové strategie.
+
+Konfigurovatelné z Velínu:
+- **definice segmentů** (typ terminálu / kategorie / partner / region),
+- **cílové kadence** per segment,
+- **priority segmentů**,
+- **zahrnout / vyloučit partnery / segmenty**,
+- **obchodní kampaně** (okna, rozsah),
+- **minimální požadované pokrytí** (floor, který planner musí udržet),
+- **ambice planneru** (capacityAmbitionPct, cílový percentil),
+- **business váhy** (w_* v prioritě [C]).
+
+Architektonicky to **navazuje na stávající platformu konfigurace** (`setting_definitions`
++ `settings` + config-overlay vzor): engine pravidla jen *čte*, nikdy je nemá
+zadrátovaná. Nové business parametry = nové položky konfigurace, ne nový kód.
 
 ---
 
@@ -499,7 +537,8 @@ Vše append-only, v souladu se zbytkem operační paměti.
 2. **[D] Mikro-clustering** — předpočet clusterů. **(Hotovo.)**
 3. **[A] Naučená kapacita** — mírně ambiciózní standard per role. **(Hotovo.)**
 4. **[S] Coverage & Campaign Planning** — segmenty, kadence-riziko, simulace
-   kampaně, feasibility poptávka vs. objednaná kapacita. Konfigurovatelné z Velínu.
+   kampaně, feasibility poptávka vs. objednaná kapacita, **strategický poradce /
+   trade-offy**. Vše konfigurovatelné z Velínu (generic engine).
 5. **[M] Manažerský pre-load** — rezervace kapacity + ruční fixní úkoly.
 6. **[C] Business priorita** — skóre + zdůvodnění nad existujícími pravidly.
 7. **[E0] Kostra období** — rozvržení povinností + ručních úkolů do dní.
