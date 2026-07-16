@@ -26,7 +26,7 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v78</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v79</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard" title="Přehled"><span class="si-ico" data-ico="grid"></span><span class="si-label">Přehled</span></button>
       <button class="side-item" data-nav="import" title="Import dat"><span class="si-ico" data-ico="upload"></span><span class="si-label">Import dat</span></button>
@@ -537,6 +537,21 @@
         <h2>Kapacita a produktivita <span class="badge">učený firemní standard</span></h2>
         <p class="hint">Kolik produktivní práce zvládne technik za den — učeno z historie (percentily, extrémy oříznuty), ne pevných 8 h ani průměr. Doporučená kapacita = základ + ambice, zastropováno reálným stropem (p90).</p>
         <div id="capacity-out"></div>
+      </section>
+
+      <!-- TECHNICIAN SCORE (full roster) -->
+      <section class="card">
+        <h2>Technician Score <span class="badge">celý tým · důvody nízkého skóre</span></h2>
+        <p class="hint">Health Score všech pracovníků, ne jen kritických. Skóre je relativní vůči kolegům (medián + odchylka) — u každého vidíš hlavní důvody, proč je nižší. Klikni na kartu pro kompletní rozbor technika.</p>
+        <div class="ts-bar">
+          <div class="fbar-seg" id="ts-role" data-val="TECHNIK">
+            <span data-v="TECHNIK" class="on">Technici</span><span data-v="OZ">OZ</span>
+          </div>
+          <div class="fbar-seg" id="ts-sort" data-val="score">
+            <span data-v="score" class="on">Od nejslabších</span><span data-v="name">Podle jména</span>
+          </div>
+        </div>
+        <div id="techscore-out"></div>
       </section>
 
       <!-- TEAM DASHBOARD -->

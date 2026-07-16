@@ -1680,6 +1680,69 @@ function renderTeam(r) {
     el.addEventListener("click", () => drillToTechnician(el.dataset.tech)));
 }
 
+// Full Technician Score panel (Analytika) — every worker's Health Score with
+// low-score reasons, not just the 5 worst on the dashboard. Reuses the same
+// /api/insights/health data + the hc-card visual (gauge + reason chips); the
+// global [data-diagnose] handler opens the full technician detail on click.
+const _tsState = { role: "TECHNIK", sort: "score" };
+async function loadTechScore() {
+  const out = document.getElementById("techscore-out");
+  if (!out) return;
+  out.innerHTML = skeleton({ rows: 5 });
+  try {
+    const h = await apiJson("/api/insights/health?role=" + _tsState.role);
+    let techs = (h.technicians || []).slice();
+    if (!techs.length) {
+      showState(out, "empty", h.insufficient ? "Málo dat pro tuto roli." : "Žádní pracovníci pro tuto roli.");
+      return;
+    }
+    if (_tsState.sort === "name") techs.sort((a, b) => a.technician.localeCompare(b.technician, "cs"));
+    else techs.sort((a, b) => a.healthScore - b.healthScore);
+    const scores = techs.map((t) => t.healthScore);
+    const avg = Math.round(scores.reduce((s, v) => s + v, 0) / scores.length);
+    const crit = scores.filter((v) => v < 70).length;
+    const warn = scores.filter((v) => v >= 70 && v < 80).length;
+    const good = scores.filter((v) => v >= 80).length;
+    const summary = `<div class="ts-summary">` +
+      tile("Ø Health Score", avg, `${techs.length} pracovníků`, avg < 70 ? "bad" : avg < 80 ? "warn" : "good") +
+      tile("Kritických", crit, "skóre < 70", crit ? "bad" : "good") +
+      tile("Ohrožených", warn, "skóre 70–79", warn ? "warn" : "") +
+      tile("V pořádku", good, "skóre ≥ 80", "good") + `</div>`;
+    const cards = techs.map((t) => {
+      const tone = t.healthScore < 70 ? "crit" : (t.healthScore < 80 ? "warn" : "ok");
+      const why = (t.why || []).map((w) => `<span class="hc-why">${esc(w.label)}</span>`).join("")
+        || `<span class="hc-why ok">bez varování</span>`;
+      return `<div class="hc-card ${tone}" data-diagnose="${esc(t.technician)}" role="button" tabindex="0">
+        <div class="hc-gauge"><svg viewBox="0 0 40 40"><circle class="hc-bg" cx="20" cy="20" r="16"></circle>
+          <circle class="hc-arc" cx="20" cy="20" r="16" style="stroke-dasharray:${Math.round(t.healthScore)} 100"></circle></svg>
+          <div class="hc-score">${t.healthScore}</div></div>
+        <div class="hc-body"><div class="hc-name">${esc(t.technician)}${t.region ? ` <span class="hc-reg">${esc(t.region)}</span>` : ""}</div>
+          <div class="hc-facts">${t.visitsPerDay ?? "—"} návšt/den · ${t.workHoursPerDay ?? "—"} h/den · ${t.onPosRatioPct != null ? t.onPosRatioPct + " % na POS" : "—"}${t.planFulfilmentPct != null ? " · plán " + t.planFulfilmentPct + " %" : ""}</div>
+          <div class="hc-whys">${why}</div></div>
+        <div class="hc-go">Rozbor →</div></div>`;
+    }).join("");
+    out.innerHTML = summary + `<div class="ts-grid">${cards}</div>`;
+  } catch (err) {
+    showState(out, "error", "Nepodařilo se načíst skóre: " + err.message);
+  }
+}
+
+let _tsInit = false;
+function initTechScore() {
+  if (!_tsInit) {
+    document.querySelectorAll("#ts-role span, #ts-sort span").forEach((sp) => {
+      sp.addEventListener("click", () => {
+        const bar = sp.parentElement;
+        bar.querySelectorAll("span").forEach((x) => x.classList.toggle("on", x === sp));
+        if (bar.id === "ts-role") _tsState.role = sp.dataset.v; else _tsState.sort = sp.dataset.v;
+        loadTechScore();
+      });
+    });
+    _tsInit = true;
+  }
+  loadTechScore();
+}
+
 async function loadTeamDashboard() {
   const days = document.getElementById("team-days").value || 21;
   const tiles = document.getElementById("team-tiles");
@@ -4508,6 +4571,8 @@ function showView(name) {
     if (name === "analytics" && typeof loadCapacity === "function") loadCapacity();
     if (name === "analytics" && typeof loadTeamDashboard === "function"
         && !document.getElementById("team-tiles").innerHTML) loadTeamDashboard();
+    if (name === "analytics" && typeof initTechScore === "function"
+        && !document.getElementById("techscore-out").innerHTML) initTechScore();
     if (name === "pos" && typeof initPosView === "function") initPosView();
     if (name === "summary" && typeof initSummary === "function") initSummary();
     if (name === "import" && typeof initBulkTasks === "function") initBulkTasks();

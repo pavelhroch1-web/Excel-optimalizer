@@ -582,6 +582,14 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 .hc-go { font-size: 12px; font-weight: 650; color: var(--accent); white-space: nowrap; }
 @media (max-width: 640px) { .hc-card { grid-template-columns: 44px 1fr; } .hc-go { display: none; } }
 
+/* full Technician Score panel (Analytika) */
+.ts-bar { display: flex; gap: var(--sp-3); flex-wrap: wrap; margin-bottom: var(--sp-3); }
+.ts-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.ts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-2); }
+.ts-grid .hc-card { margin-bottom: 0; }
+.hc-reg { font-weight: var(--fw-medium); font-size: var(--fs-2xs); color: var(--text-3); }
+.hc-why.ok { background: color-mix(in srgb, var(--good) 12%, transparent); color: var(--good); }
+
 /* ===== deep technician detail (full screen) ===== */
 .td-overlay { position: fixed; inset: 0; background: rgba(12,18,17,.55); z-index: 200; display: flex; padding: 24px; }
 .td-overlay.hidden { display: none; }
