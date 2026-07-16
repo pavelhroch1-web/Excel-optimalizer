@@ -26,12 +26,13 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v83</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v84</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard" title="Přehled"><span class="si-ico" data-ico="grid"></span><span class="si-label">Přehled</span></button>
       <button class="side-item" data-nav="import" title="Import dat"><span class="si-ico" data-ico="upload"></span><span class="si-label">Import dat</span></button>
       <button class="side-item" data-nav="tourplan" title="TourPlan"><span class="si-ico" data-ico="route"></span><span class="si-label">TourPlan</span></button>
       <button class="side-item" data-nav="pos" title="POS"><span class="si-ico" data-ico="grid"></span><span class="si-label">POS</span></button>
+      <button class="side-item" data-nav="dashboards" title="Dashboardy"><span class="si-ico" data-ico="target"></span><span class="si-label">Dashboardy</span></button>
       <button class="side-item" data-nav="analytics" title="Analytika"><span class="si-ico" data-ico="chart"></span><span class="si-label">Analytika</span></button>
       <button class="side-item" data-nav="summary" title="Měsíční souhrn"><span class="si-ico" data-ico="chart"></span><span class="si-label">Měsíční souhrn</span></button>
       <button class="side-item" data-nav="settings" title="Nastavení"><span class="si-ico" data-ico="gear"></span><span class="si-label">Nastavení</span></button>
@@ -613,6 +614,16 @@
       </div>
       <div id="sum-filters" class="sum-filters"></div>
       <div id="sum-body"><p class="pd-sub" style="padding:24px">Vyber období a filtry…</p></div>
+    </div>
+
+    <!-- ==================== VIEW: DASHBOARDY ==================== -->
+    <div class="view hidden" data-view="dashboards">
+      <div class="view-head">
+        <h1>Dashboardy</h1>
+        <p>Manažerské přehledy sítě nad živými daty z importu. Vyber dashboard; každý čte existující metriky, nic se nepočítá dvakrát.</p>
+      </div>
+      <div class="fbar" id="dash-tabs"></div>
+      <div id="dash-body"></div>
     </div>
 
     <!-- ==================== VIEW: NASTAVENÍ ==================== -->

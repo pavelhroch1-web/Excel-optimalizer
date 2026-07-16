@@ -4453,6 +4453,68 @@ async function renderModel(m) {
   } catch (e) { body.innerHTML = stateHTML("error", "Nelze načíst."); }
 }
 
+// ============ Phase 3: Dashboards ============
+// Tabbed dashboards, each reusing existing endpoints (no duplicate logic).
+// Tabs are added release-by-release into _DASH.
+const _DASH = [
+  { id: "overview", label: "Overview", load: dashOverview },
+];
+let _dashTab = "overview";
+function initDashboards() {
+  const tabs = document.getElementById("dash-tabs");
+  if (!tabs) return;
+  if (!_DASH.some((d) => d.id === _dashTab)) _dashTab = _DASH[0].id;
+  tabs.innerHTML = _DASH.map((d) =>
+    `<button class="pill ${d.id === _dashTab ? "on" : ""}" data-tab="${d.id}">${esc(d.label)}</button>`).join("");
+  tabs.querySelectorAll(".pill").forEach((b) => b.addEventListener("click", () => {
+    _dashTab = b.dataset.tab; initDashboards();
+  }));
+  const body = document.getElementById("dash-body");
+  const d = _DASH.find((x) => x.id === _dashTab);
+  if (d && body) d.load(body);
+}
+
+// --- Overview: network health at a glance (team + company insights) ---
+async function dashOverview(host) {
+  host.innerHTML = skeleton({ rows: 4 });
+  try {
+    const [team, company] = await Promise.all([
+      apiJson("/api/analytics/team?days_back=90"),
+      apiJson("/api/insights/company?days_back=90").catch(() => null),
+    ]);
+    const t = team.team || {};
+    if (!team.technicians || !team.technicians.length) {
+      showState(host, "empty", "Zatím nejsou data — naimportuj exporty.");
+      return;
+    }
+    const regions = new Set(team.technicians.map((x) => x.region).filter(Boolean));
+    const kpis = `<div class="pl-tiles">` +
+      tile("Návštěvy (90 dní)", _fmtNum(t.totalVisits || 0), `${t.technicianCount || 0} techniků`) +
+      tile("Ø čas na POS", (t.avgOnPosRatioPct != null ? t.avgOnPosRatioPct + " %" : "—"), "vs. čas na cestě",
+        t.avgOnPosRatioPct != null && t.avgOnPosRatioPct < 50 ? "bad" : "") +
+      tile("Najeto km", _fmtNum(t.totalKm || 0), `${_fmtNum(t.totalTravelHours || 0)} h na cestě`, "", true) +
+      tile("Přetížení", t.overloaded || 0, "techniků nad kapacitou", t.overloaded ? "bad" : "good") +
+      tile("Po termínu", _fmtNum(t.totalOverdue || 0), "zpožděných zastávek", t.totalOverdue ? "bad" : "good") +
+      tile("Ztracené hodiny", company ? _fmtNum(company.totalLostHours || 0) : "—", "rezerva v síti", "warn") +
+      `</div>`;
+
+    const worst = team.technicians.slice()
+      .sort((a, b) => (b.attention || 0) - (a.attention || 0))
+      .filter((x) => (x.attention || 0) > 0).slice(0, 5);
+    const attn = worst.length ? `<div class="pl-section">Nejvíc potřebují pozornost</div>` +
+      `<div class="dash-attn">` + worst.map((x) =>
+        `<div class="dash-attn-row"><span class="pos-link tech-link" data-tech="${esc(x.technician)}">${esc(x.technician)}</span>` +
+        `<span class="dash-attn-x">${x.onPosRatioPct != null ? x.onPosRatioPct + " % na POS" : "—"} · ${x.overdue || 0} po term.</span></div>`).join("") + `</div>` : "";
+
+    host.innerHTML = kpis +
+      `<div class="pl-section">Síť</div><p class="pd-sub">${regions.size} regionů · ${_fmtNum(t.totalOnPosHours || 0)} h u zákazníka · ${t.slack || 0} techniků s rezervou` +
+      (company && company.bestRegion ? ` · nejlepší region ${esc(company.bestRegion.region)}` : "") + `</p>` + attn;
+
+    host.querySelectorAll(".tech-link").forEach((el) =>
+      el.addEventListener("click", () => drillToTechnician(el.dataset.tech)));
+  } catch (e) { showState(host, "error", "Nepodařilo se načíst overview: " + e.message); }
+}
+
 // ============ Coverage by segment ============
 const _COV_RISK = { high: ["var(--bad)", "vysoké"], medium: ["var(--warn)", "střední"], low: ["var(--good)", "nízké"] };
 async function loadCoverage() {
@@ -4733,6 +4795,7 @@ function showView(name) {
       initViews && initViews();
       initModelMgmt && initModelMgmt();
     }
+    if (name === "dashboards" && typeof initDashboards === "function") initDashboards();
     if (name === "analytics" && typeof loadRactTechnicians === "function") loadRactTechnicians();
     if (name === "analytics" && typeof initTechGraphs === "function") initTechGraphs();
     if (name === "analytics" && typeof loadCapacity === "function") loadCapacity();
