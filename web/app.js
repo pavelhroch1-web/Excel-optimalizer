@@ -1887,6 +1887,7 @@ const _WIRED_RULES = ["MIN_GAP", "NEGLECTED_AFTER", "HOLDBACK", "MAX_VISITS_WEEK
 async function loadBusinessRules() {
   const el = document.getElementById("rules-biz-out");
   if (!el) return;
+  showState(el, "loading", "Načítám pravidla…");
   try {
     const seen = new Set();
     const rules = (await apiJson("/api/rules/business")).rules
@@ -1921,7 +1922,7 @@ async function loadBusinessRules() {
         { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ params }) });
       _cfgToast();
     }));
-  } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+  } catch (e) { showState(el, "error", "Nepodařilo se načíst pravidla: " + e.message); }
 }
 
 const _SET_NS = { planner: "Plánovač", scoring: "Skóre (PPT · bonusy · penalizace)", engine: "Engine konstanty", optimization: "Optimalizace", map: "Mapa", dashboard: "Dashboard", report: "Report" };
