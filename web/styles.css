@@ -959,3 +959,8 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .pd-planned { font-size: 13px; color: var(--text-2); }
 .pv-row { display: grid; grid-template-columns: 92px 1fr auto; gap: 10px; font-size: 12px; padding: 5px 0; border-top: 1px solid var(--border); }
 .pv-d { color: var(--text-2); font-variant-numeric: tabular-nums; } .pv-on { color: var(--text-3); white-space: nowrap; }
+/* Mikro-cluster v kartě POS */
+.cl-list { display: flex; flex-direction: column; gap: 2px; }
+.cl-row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
+.cl-row:hover { background: var(--panel-2); }
+.cl-n { font-weight: 550; } .cl-d { color: var(--text-3); white-space: nowrap; }

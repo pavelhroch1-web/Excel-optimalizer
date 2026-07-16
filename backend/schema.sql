@@ -720,6 +720,17 @@ CREATE TABLE IF NOT EXISTS duration_model (
     PRIMARY KEY (level, ckey)
 );
 
+-- Micro-clusters (planner Phase 2): POS in the same shopping centre / within a
+-- few tens of metres walking — one logical unit for the planner ("since the
+-- technician is already here, what else?"). Recomputable cache from pos_master.
+CREATE TABLE IF NOT EXISTS pos_clusters (
+    pos_id     TEXT PRIMARY KEY,
+    cluster_id INTEGER NOT NULL,     -- shared id for members of one cluster
+    size       INTEGER NOT NULL,     -- number of POS in the cluster (>=2)
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_pos_clusters_cid ON pos_clusters(cluster_id);
+
 -- Road-route geometry cache (OSRM). Keyed by the ordered coordinates so a route
 -- is fetched at most once, then served instantly and offline.
 CREATE TABLE IF NOT EXISTS route_geometry (

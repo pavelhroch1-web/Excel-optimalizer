@@ -1288,6 +1288,24 @@ if LOCAL_MODE:
     def duration_pos(pos_id: str):
         return _duration.predict(pos_id)
 
+    # Planner Phase 2: micro-clustering of nearby POS.
+    import clustering as _clustering  # noqa: E402
+
+    @app.get("/api/planner/clusters/overview", dependencies=[Depends(require_auth)])
+    def clusters_overview():
+        ov = _clustering.overview()
+        if not ov.get("clusters"):
+            _clustering.rebuild(); ov = _clustering.overview()
+        return ov
+
+    @app.post("/api/planner/clusters/rebuild", dependencies=[Depends(require_auth)])
+    def clusters_rebuild():
+        return _clustering.rebuild()
+
+    @app.get("/api/planner/clusters/pos/{pos_id}", dependencies=[Depends(require_auth)])
+    def clusters_pos(pos_id: str):
+        return _clustering.cluster_of(pos_id)
+
     @app.get("/api/summary", dependencies=[Depends(require_auth)])
     def summary_overview(period: str = "month", year: int | None = None,
                          month: int | None = None, quarter: int | None = None,

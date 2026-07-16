@@ -105,6 +105,11 @@ def import_pos_master(conn, ws) -> dict:
     summary = {"total": n, "new": new_pos, "changed": changed_pos,
                "pptChanged": ppt_changed, "inactivated": inactivated}
     history.log_event("import", "pos_master", None, summary, conn=conn)
+    try:
+        import clustering
+        clustering.rebuild()  # GPS may have changed -> refresh micro-clusters
+    except Exception:  # noqa: BLE001
+        pass
     return summary
 
 

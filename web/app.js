@@ -715,6 +715,16 @@ function renderPosCard(c) {
       tile("Vzorek", d.n + "×", "návštěv v modelu") + `</div>`;
   }
 
+  // micro-cluster (planner Phase 2 — nearby POS to plan together)
+  if (c.cluster && c.cluster.clustered) {
+    const cl = c.cluster;
+    const mates = (cl.members || []).map((m) =>
+      `<div class="cl-row" data-pos="${esc(m.pos)}"><span class="cl-n">${esc(m.name || m.pos)}</span>` +
+      `<span class="cl-d">${m.distM != null ? m.distM + " m" : ""}${m.chain ? " · " + esc(m.chain) : ""}</span></div>`).join("");
+    html += `<div class="pd-section">Mikro-cluster <span class="pd-chip">${cl.size} POS na stejném místě</span></div>` +
+      `<p class="pd-sub">Když sem technik jede, planner automaticky zváží i tyto blízké POS:</p><div class="cl-list">${mates}</div>`;
+  }
+
   // technician vs OZ frequency
   html += `<div class="pd-section">Četnost návštěv</div><div class="pl-tiles">` +
     tile("Technik", c.technicianVisits ?? 0, c.lastTechnicianVisit ? "naposledy " + String(c.lastTechnicianVisit).slice(0, 10) : "nikdy") +
@@ -745,11 +755,13 @@ async function openPosDetail(posId, week) {
     } catch (e) { /* fall back to card only */ }
   }
   try {
-    const [c, dur] = await Promise.all([
+    const [c, dur, clu] = await Promise.all([
       apiJson("/api/pos/" + encodeURIComponent(posId) + "/card"),
       apiJson("/api/planner/duration/pos/" + encodeURIComponent(posId)).catch(() => null),
+      apiJson("/api/planner/clusters/pos/" + encodeURIComponent(posId)).catch(() => null),
     ]);
     if (dur && dur.p50 != null) c.predictedDuration = dur;
+    if (clu && clu.clustered) c.cluster = clu;
     document.getElementById("pd-title").textContent = "POS " + posId + (c.name ? " · " + c.name : "");
     bodyEl.innerHTML = renderPosCard(c) + (head ? `<div class="pd-section" style="margin-top:22px">Plánování</div>` + head : "");
   } catch (err) {
