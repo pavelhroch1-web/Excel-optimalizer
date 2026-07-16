@@ -122,23 +122,40 @@ function toast(msg, kind = "ok") {   // kind: ok | err | info
   _toastTimer = setTimeout(() => t.classList.remove("show"), kind === "err" ? 3600 : 2200);
 }
 
+// Keep focus inside an open dialog (Tab/Shift+Tab wrap) so keyboard users
+// can't tab into the page behind the modal — one helper for every dialog.
+function _trapFocus(box, e) {
+  if (e.key !== "Tab") return;
+  const f = box.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+  const items = Array.from(f).filter((el) => !el.disabled && el.offsetParent !== null);
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+}
+
 // Promise<boolean>. Only for irreversible / bulk actions. Names object + effect.
 function confirmDialog({ title, body = "", confirmText = "Potvrdit", danger = false } = {}) {
   return new Promise((resolve) => {
+    const restore = document.activeElement;
     let ov = document.getElementById("confirm-overlay");
     if (!ov) {
       ov = document.createElement("div");
       ov.id = "confirm-overlay"; ov.className = "confirm-overlay hidden";
       ov.innerHTML =
-        '<div class="confirm-box" role="dialog" aria-modal="true">' +
+        '<div class="confirm-box" role="dialog" aria-modal="true" aria-labelledby="confirm-title">' +
         '<h3 id="confirm-title"></h3><p id="confirm-body"></p>' +
         '<div class="confirm-actions">' +
         '<button id="confirm-cancel" class="ghost">Zrušit</button>' +
         '<button id="confirm-ok" class="primary"></button></div></div>';
       document.body.appendChild(ov);
     }
+    const box = ov.querySelector(".confirm-box");
     ov.querySelector("#confirm-title").textContent = title || "Potvrdit akci";
-    ov.querySelector("#confirm-body").textContent = body || "";
+    const bodyEl = ov.querySelector("#confirm-body");
+    bodyEl.textContent = body || "";
+    bodyEl.style.display = body ? "" : "none";
     const ok = ov.querySelector("#confirm-ok");
     ok.textContent = confirmText;
     ok.className = danger ? "primary danger" : "primary";
@@ -146,14 +163,100 @@ function confirmDialog({ title, body = "", confirmText = "Potvrdit", danger = fa
     const done = (val) => {
       ov.classList.add("hidden");
       document.removeEventListener("keydown", onKey);
+      if (restore && restore.focus) restore.focus();
       resolve(val);
     };
-    const onKey = (e) => { if (e.key === "Escape") done(false); if (e.key === "Enter") done(true); };
+    const onKey = (e) => {
+      if (e.key === "Escape") done(false);
+      else if (e.key === "Enter") done(true);
+      else _trapFocus(box, e);
+    };
     ov.querySelector("#confirm-cancel").onclick = () => done(false);
     ok.onclick = () => done(true);
     ov.onclick = (e) => { if (e.target === ov) done(false); };
     document.addEventListener("keydown", onKey);
     ok.focus();
+  });
+}
+
+// Promise<string|null>. One accessible input modal to replace native prompt().
+// Pass `options` to force a validated pick (a <select>); otherwise free text.
+// Resolves null on cancel/Escape; never resolves an empty required value.
+function promptDialog({ title, body = "", label = "", value = "", placeholder = "",
+                       confirmText = "Potvrdit", options = null, required = true } = {}) {
+  return new Promise((resolve) => {
+    const restore = document.activeElement;
+    let ov = document.getElementById("prompt-overlay");
+    if (!ov) {
+      ov = document.createElement("div");
+      ov.id = "prompt-overlay"; ov.className = "confirm-overlay hidden";
+      ov.innerHTML =
+        '<div class="confirm-box" role="dialog" aria-modal="true" aria-labelledby="prompt-title">' +
+        '<h3 id="prompt-title"></h3><p id="prompt-body"></p>' +
+        '<label id="prompt-label" class="prompt-field"></label>' +
+        '<p id="prompt-err" class="result err" style="display:none"></p>' +
+        '<div class="confirm-actions">' +
+        '<button id="prompt-cancel" class="ghost">Zrušit</button>' +
+        '<button id="prompt-ok" class="primary"></button></div></div>';
+      document.body.appendChild(ov);
+    }
+    const box = ov.querySelector(".confirm-box");
+    ov.querySelector("#prompt-title").textContent = title || "Zadej hodnotu";
+    const bodyEl = ov.querySelector("#prompt-body");
+    bodyEl.textContent = body || "";
+    bodyEl.style.display = body ? "" : "none";
+    const lab = ov.querySelector("#prompt-label");
+    lab.textContent = label || "";
+    const errEl = ov.querySelector("#prompt-err");
+    errEl.style.display = "none";
+    // build the control fresh each open (text vs select)
+    let field;
+    if (options) {
+      field = document.createElement("select");
+      field.innerHTML =
+        (required ? "" : '<option value=""></option>') +
+        options.map((o) => {
+          const v = typeof o === "string" ? o : o.value;
+          const t = typeof o === "string" ? o : (o.label ?? o.value);
+          return `<option value="${esc(v)}"${v === value ? " selected" : ""}>${esc(t)}</option>`;
+        }).join("");
+    } else {
+      field = document.createElement("input");
+      field.type = "text";
+      field.value = value || "";
+      field.placeholder = placeholder || "";
+    }
+    field.id = "prompt-input";
+    lab.appendChild(field);
+    const ok = ov.querySelector("#prompt-ok");
+    ok.textContent = confirmText;
+    ov.classList.remove("hidden");
+    const done = (val) => {
+      ov.classList.add("hidden");
+      document.removeEventListener("keydown", onKey);
+      field.remove();
+      if (restore && restore.focus) restore.focus();
+      resolve(val);
+    };
+    const submit = () => {
+      const v = String(field.value || "").trim();
+      if (required && !v) {
+        errEl.textContent = "Zadej hodnotu."; errEl.style.display = "";
+        field.focus(); return;
+      }
+      done(v || null);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") done(null);
+      else if (e.key === "Enter") { e.preventDefault(); submit(); }
+      else _trapFocus(box, e);
+    };
+    ov.querySelector("#prompt-cancel").onclick = () => done(null);
+    ok.onclick = submit;
+    ov.onclick = (e) => { if (e.target === ov) done(null); };
+    document.addEventListener("keydown", onKey);
+    field.focus();
+    if (field.select) field.select();
   });
 }
 
@@ -2493,7 +2596,20 @@ document.addEventListener("click", async (e) => {
         confirmText: "Vyřadit", danger: true })) return;
       await postJson("/api/exclusions", { pos_ids: pos, reason: "oprava z plánu" });
     } else if (act.dataset.act === "move") {
-      const to = prompt(`Přehodit POS ${pos} na kterého technika?`, "");
+      let techs = [];
+      try {
+        techs = (await apiJson("/api/technicians")).technicians
+          .filter((t) => t.role === "TECHNIK" && t.active)
+          .map((t) => t.name || t.technician || t);
+      } catch (_) { /* fall back to free text below */ }
+      const to = await promptDialog({
+        title: `Přehodit POS ${pos}`,
+        body: "Vyber technika, který POS převezme. Projeví se po přegenerování.",
+        label: "Nový technik",
+        confirmText: "Přehodit",
+        options: techs.length ? techs : null,
+        placeholder: techs.length ? "" : "jméno technika",
+      });
       if (!to) return;
       await postJson("/api/reassignments", { pos_ids: pos, to_technician: to, reason: "oprava z plánu" });
     }
