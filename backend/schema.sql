@@ -720,6 +720,25 @@ CREATE TABLE IF NOT EXISTS duration_model (
     PRIMARY KEY (level, ckey)
 );
 
+-- Segment definitions (planner [S] Coverage & Campaign). A segment is any
+-- combination of predicates over pos_master attributes (terminal type, partner,
+-- region, chain, category, GEO, PPT, custom flags…). Fully configurable from the
+-- Velín — business strategy lives here, never in code.
+CREATE TABLE IF NOT EXISTS segment_definitions (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                TEXT NOT NULL,
+    rule                TEXT NOT NULL,          -- JSON {"all":[{"field","op","value"}]}
+    target_cadence_weeks REAL,                  -- cílová kadence
+    priority            INTEGER DEFAULT 3,      -- 1 (nejvyšší) .. 5
+    business_weight     REAL DEFAULT 1.0,
+    include_in_campaign INTEGER DEFAULT 1,
+    min_coverage_pct    REAL DEFAULT 80.0,      -- minimální požadované pokrytí
+    active              INTEGER DEFAULT 1,
+    sort_order          INTEGER DEFAULT 100,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Recommended daily productive capacity (planner). A learned company STANDARD
 -- (p60/p70 of productive minutes per role, extremes removed) — not a fixed 8h
 -- and not the average of current behaviour. Recomputed from history.

@@ -1320,6 +1320,37 @@ if LOCAL_MODE:
     def capacity_rebuild():
         return _capacity.rebuild()
 
+    # Planner [S] Coverage & Campaign: configurable segments + coverage state.
+    import segments as _segments  # noqa: E402
+
+    @app.get("/api/planner/coverage", dependencies=[Depends(require_auth)])
+    def planner_coverage():
+        return _segments.coverage()
+
+    @app.get("/api/planner/segments", dependencies=[Depends(require_auth)])
+    def planner_segments():
+        return {"segments": _segments.definitions(), "fieldsMeta": _segments.fields_meta()}
+
+    class SegmentBody(BaseModel):
+        id: int | None = None
+        name: str
+        rule: dict
+        target_cadence_weeks: float | None = None
+        priority: int = 3
+        business_weight: float = 1.0
+        include_in_campaign: bool = True
+        min_coverage_pct: float = 80.0
+        active: bool = True
+        sort_order: int = 100
+
+    @app.post("/api/planner/segments", dependencies=[Depends(require_auth)])
+    def planner_segment_upsert(body: SegmentBody):
+        return _segments.upsert(body.model_dump())
+
+    @app.delete("/api/planner/segments/{seg_id}", dependencies=[Depends(require_auth)])
+    def planner_segment_delete(seg_id: int):
+        return _segments.delete(seg_id)
+
     @app.get("/api/summary", dependencies=[Depends(require_auth)])
     def summary_overview(period: str = "month", year: int | None = None,
                          month: int | None = None, quarter: int | None = None,

@@ -964,3 +964,14 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .cl-row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
 .cl-row:hover { background: var(--panel-2); }
 .cl-n { font-weight: 550; } .cl-d { color: var(--text-3); white-space: nowrap; }
+/* [S] Coverage podle segmentů */
+.cov-cfg { float: right; font-size: 11px; color: var(--text-3); font-weight: 400; }
+.cov-seg { padding: 10px 0; border-top: 1px solid var(--border); }
+.cov-seg:first-of-type { border-top: none; }
+.cov-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.cov-risk { font-size: 10.5px; font-weight: 700; text-transform: uppercase; padding: 2px 8px; border-radius: 20px; }
+.cov-name { font-weight: 620; font-size: 13px; } .cov-meta { color: var(--text-3); font-size: 11.5px; margin-left: auto; }
+.cov-bars { margin-top: 6px; } .cov-bar { height: 7px; border-radius: 5px; background: var(--panel-2); overflow: hidden; }
+.cov-fill { height: 100%; border-radius: 5px; } .cov-fill.hs-ok { background: #0F7C77; } .cov-fill.hs-mid { background: #D9A441; } .cov-fill.hs-bad { background: #C0392B; }
+.cov-nums { font-size: 11px; color: var(--text-2); } .cov-exs { margin-top: 6px; font-size: 11px; color: var(--text-3); display: flex; flex-wrap: wrap; gap: 5px; align-items: baseline; }
+.cov-ex { padding: 2px 7px; border-radius: 12px; background: var(--panel-2); cursor: pointer; } .cov-ex:hover { background: var(--border); }

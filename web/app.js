@@ -3041,7 +3041,9 @@ function renderSummary(s) {
   return `${_gisMapHtml()}
     <div class="sum-period">Období <b>${esc(s.period.label)}</b> · ${esc(s.period.from)} – ${esc(s.period.to)}
       <span class="sum-vs">vs. minulé ${esc(s.period.prevFrom)} – ${esc(s.period.prevTo)}</span></div>
-    ${kpis}${tops}${regions}
+    ${kpis}
+    <div id="sum-coverage"></div>
+    ${tops}${regions}
     <div class="sk-cols">${coverage}${campaigns}</div>
     <div class="sk-cols">${unserved}</div>
     ${trends}`;
@@ -3082,6 +3084,39 @@ function bindSummary(scope) {
   });
   initGisMap();
   loadGisNetwork();
+  loadCoverage();
+}
+
+// [S] Coverage & riziko podle segmentů (konfigurovatelné z Velínu).
+async function loadCoverage() {
+  const host = document.getElementById("sum-coverage");
+  if (!host) return;
+  host.innerHTML = `<div class="sk-card"><div class="sk-ct">🎯 Coverage &amp; riziko podle segmentů</div><p class="pd-sub">Počítám…</p></div>`;
+  try {
+    const d = await apiJson("/api/planner/coverage");
+    const rk = { high: "bad", medium: "mid", low: "ok" };
+    const rl = { high: "vysoké riziko", medium: "střední", low: "v pořádku" };
+    const rows = (d.segments || []).map((s) => {
+      const ex = (s.examples || []).map((e) =>
+        `<span class="cov-ex" data-pos="${esc(e.pos)}">${esc(e.name || e.pos)}${e.weeksSince != null ? " · " + e.weeksSince + "t" : " · nikdy"}</span>`).join("");
+      return `<div class="cov-seg cov-${rk[s.risk]}">
+        <div class="cov-head">
+          <span class="cov-risk hs-${rk[s.risk]}">${rl[s.risk]}</span>
+          <span class="cov-name">${esc(s.name)}</span>
+          <span class="cov-meta">${_fmtNum(s.posCount)} POS · cíl ${s.targetCadenceWeeks ?? "—"} t</span>
+        </div>
+        <div class="cov-bars">
+          <div class="cov-bar"><div class="cov-fill hs-${rk[s.risk]}" style="width:${s.coveragePct}%"></div></div>
+          <span class="cov-nums">${s.coveragePct}% v kadenci · ${s.overduePct}% po termínu${s.never ? ` · ${_fmtNum(s.never)} nikdy` : ""} · Ø ${s.avgWeeksSince ?? "—"} t (min ${s.minCoveragePct}%)</span>
+        </div>
+        ${ex ? `<div class="cov-exs">Nejrizikovější: ${ex}</div>` : ""}
+      </div>`;
+    }).join("");
+    host.innerHTML = `<div class="sk-card"><div class="sk-ct">🎯 Coverage &amp; riziko podle segmentů
+      <span class="pd-chip">${d.counts.high} vysoké · ${d.counts.medium} střední · ${d.counts.low} ok</span>
+      <span class="cov-cfg">konfigurovatelné z Velínu</span></div>${rows}</div>`;
+    host.querySelectorAll(".cov-ex").forEach((el) => el.onclick = () => openPosDetail(el.dataset.pos));
+  } catch (e) { host.innerHTML = `<div class="sk-card"><p class="result err">${esc(e.message)}</p></div>`; }
 }
 
 // ==================== GIS SÍŤOVÁ MAPA ====================
