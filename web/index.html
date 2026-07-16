@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=61">
+<link rel="stylesheet" href="styles.css?v=62">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -26,11 +26,12 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v61</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v62</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard"><span class="si-ico" data-ico="grid"></span> Přehled</button>
       <button class="side-item" data-nav="import"><span class="si-ico" data-ico="upload"></span> Import dat</button>
       <button class="side-item" data-nav="tourplan"><span class="si-ico" data-ico="route"></span> TourPlan</button>
+      <button class="side-item" data-nav="pos"><span class="si-ico" data-ico="grid"></span> POS</button>
       <button class="side-item" data-nav="analytics"><span class="si-ico" data-ico="chart"></span> Analytika</button>
       <button class="side-item" data-nav="summary"><span class="si-ico" data-ico="chart"></span> Měsíční souhrn</button>
       <button class="side-item" data-nav="settings"><span class="si-ico" data-ico="gear"></span> Nastavení</button>
@@ -460,6 +461,30 @@
     </div>
 
     <!-- ==================== VIEW: ANALYTIKA ==================== -->
+    <!-- ==================== VIEW: POS (all provozovny) ==================== -->
+    <div class="view hidden" data-view="pos">
+      <div class="view-head">
+        <h1>POS — celá síť</h1>
+        <p>Všechny provozovny na jednom místě: kdo, kde, řetězec, technik, poslední návštěva a riziko podle kadence. Filtruj a klikni na řádek pro detail POS s celou historií.</p>
+      </div>
+      <section class="card">
+        <div class="tg-bar" id="posl-bar">
+          <label class="fsel"><input type="text" id="posl-q" placeholder="⌕ číslo / název / město" style="width:220px"></label>
+          <label class="fsel">Středisko <select id="posl-area"><option value="">všechna</option></select></label>
+          <label class="fsel">Řetězec <select id="posl-market"><option value="">všechny</option></select></label>
+          <label class="fsel">Technik <select id="posl-tech"><option value="">všichni</option></select></label>
+          <div class="fbar-seg" id="posl-status" data-val="all">
+            <span data-v="all" class="on">Vše</span><span data-v="overdue">Po termínu</span><span data-v="never">Nikdy</span>
+          </div>
+        </div>
+        <p id="posl-result" class="result"></p>
+        <div id="posl-table"></div>
+        <div class="row" id="posl-more-row" style="display:none; justify-content:center; margin-top:12px">
+          <button id="posl-more" class="ghost">Načíst dalších 200</button>
+        </div>
+      </section>
+    </div>
+
     <div class="view hidden" data-view="analytics">
       <div class="view-head">
         <h1>Analytika práce techniků</h1>
@@ -648,6 +673,6 @@
   </div>
 </div>
 
-<script src="app.js?v=61"></script>
+<script src="app.js?v=62"></script>
 </body>
 </html>

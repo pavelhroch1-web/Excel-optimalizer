@@ -3849,8 +3849,78 @@ async function boot() {
 }
 
 // ---- navigation shell -----------------------------------------------------
-const _NAV_TITLES = { dashboard: "Přehled", import: "Import dat", tourplan: "TourPlan", analytics: "Analytika", summary: "Měsíční souhrn", settings: "Nastavení" };
+const _NAV_TITLES = { dashboard: "Přehled", import: "Import dat", tourplan: "TourPlan", pos: "POS", analytics: "Analytika", summary: "Měsíční souhrn", settings: "Nastavení" };
 let _navReady = {};
+
+// ============ POS table (all provozovny) ============
+const _posl = { q: "", area: "", market: "", technician: "", status: "all", offset: 0, total: 0 };
+const _POSL_RISK = { never: ["var(--bad)", "nikdy"], overdue: ["var(--bad)", "po termínu"],
+                     soon: ["var(--warn)", "blíží se"], ok: ["var(--good)", "v normě"] };
+
+function initPosView() {
+  apiJson("/api/pos/list/filters").then((f) => {
+    const fill = (id, arr) => { const s = document.getElementById(id); if (!s) return;
+      arr.forEach((v) => { const o = document.createElement("option"); o.value = v; o.textContent = v; s.appendChild(o); }); };
+    fill("posl-area", f.areas || []); fill("posl-market", f.markets || []); fill("posl-tech", f.technicians || []);
+  }).catch(() => {});
+  const reload = () => { _posl.offset = 0; loadPosList(false); };
+  let qt; const qEl = document.getElementById("posl-q");
+  if (qEl) qEl.addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(() => { _posl.q = qEl.value.trim(); reload(); }, 300); });
+  ["posl-area", "posl-market", "posl-tech"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", () => {
+      _posl.area = document.getElementById("posl-area").value;
+      _posl.market = document.getElementById("posl-market").value;
+      _posl.technician = document.getElementById("posl-tech").value; reload();
+    });
+  });
+  document.querySelectorAll("#posl-status span").forEach((sp) => sp.addEventListener("click", () => {
+    document.querySelectorAll("#posl-status span").forEach((x) => x.classList.toggle("on", x === sp));
+    _posl.status = sp.dataset.v; reload();
+  }));
+  const more = document.getElementById("posl-more");
+  if (more) more.addEventListener("click", () => { _posl.offset += 200; loadPosList(true); });
+  loadPosList(false);
+}
+
+async function loadPosList(append) {
+  const host = document.getElementById("posl-table");
+  if (!host) return;
+  if (!append) host.innerHTML = stateHTML("loading");
+  try {
+    const q = new URLSearchParams({ status: _posl.status, limit: 200, offset: _posl.offset });
+    if (_posl.q) q.set("q", _posl.q);
+    if (_posl.area) q.set("area", _posl.area);
+    if (_posl.market) q.set("market", _posl.market);
+    if (_posl.technician) q.set("technician", _posl.technician);
+    const d = await apiJson("/api/pos/list?" + q.toString());
+    _posl.total = d.total;
+    setResult("posl-result", `${d.total} POS${_posl.status !== "all" ? " (" + _posl.status + ")" : ""}`, "");
+    const rowsHtml = (d.pos || []).map((p) => {
+      const rk = _POSL_RISK[p.risk] || _POSL_RISK.ok;
+      const lv = p.last_visit ? new Date(p.last_visit).toLocaleDateString("cs-CZ") : "—";
+      return `<tr data-pos="${esc(p.pos_id)}" style="cursor:pointer">
+        <td>${esc(p.pos_id)}</td><td class="posname">${esc(p.name || "")}</td>
+        <td>${esc(p.market || "")}</td><td>${esc(p.pos_area || "")}</td>
+        <td>${esc(p.technician || "—")}</td><td>${lv}</td>
+        <td class="num">${p.weeks_since == null ? "—" : p.weeks_since}</td>
+        <td><span class="risk-dot" style="background:${rk[0]}"></span>${rk[1]}</td></tr>`;
+    }).join("");
+    if (!append) {
+      host.innerHTML = `<div class="inv-tbl-wrap"><table class="inv-tbl"><thead><tr>
+        <th>POS</th><th>Název</th><th>Řetězec</th><th>Středisko</th><th>Technik</th>
+        <th>Poslední návštěva</th><th>Týdnů</th><th>Riziko</th></tr></thead>
+        <tbody id="posl-body">${rowsHtml}</tbody></table></div>`;
+    } else {
+      document.getElementById("posl-body").insertAdjacentHTML("beforeend", rowsHtml);
+    }
+    const shown = _posl.offset + (d.pos || []).length;
+    const moreRow = document.getElementById("posl-more-row");
+    if (moreRow) moreRow.style.display = shown < d.total ? "" : "none";
+    host.querySelectorAll("tr[data-pos]").forEach((tr) =>
+      tr.addEventListener("click", () => openPosDetail(tr.dataset.pos)));
+  } catch (e) { host.innerHTML = stateHTML("error", e.message); }
+}
 
 // ============ Technician graphs over time (Analytika) ============
 const _TG_COLORS = ["#12807C", "#B4801F", "#B3453A", "#3E8E5B", "#5B6FB4", "#A0559B",
@@ -3961,6 +4031,7 @@ function showView(name) {
     }
     if (name === "analytics" && typeof loadRactTechnicians === "function") loadRactTechnicians();
     if (name === "analytics" && typeof initTechGraphs === "function") initTechGraphs();
+    if (name === "pos" && typeof initPosView === "function") initPosView();
     if (name === "summary" && typeof initSummary === "function") initSummary();
     if (name === "import" && typeof initBulkTasks === "function") initBulkTasks();
     if (name === "tourplan" && typeof loadStrategyModes === "function") { loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); }

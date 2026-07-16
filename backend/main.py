@@ -963,6 +963,17 @@ if LOCAL_MODE:
         """Search POS by number / name / city (command bar)."""
         return pos_insights.search(q)
 
+    @app.get("/api/pos/list", dependencies=[Depends(require_auth)])
+    def pos_list_ep(q: str | None = None, area: str | None = None, market: str | None = None,
+                    technician: str | None = None, status: str = "all",
+                    limit: int = 200, offset: int = 0):
+        """All POS with last visit + weeks-since + cadence risk (the POS table)."""
+        return pos_insights.pos_list(q, area, market, technician, status, limit, offset)
+
+    @app.get("/api/pos/list/filters", dependencies=[Depends(require_auth)])
+    def pos_list_filters():
+        return pos_insights.list_filters()
+
     @app.get("/api/pos/{pos_id}/visits", dependencies=[Depends(require_auth)])
     def pos_visits(pos_id: str):
         """Informational: who visited this POS (technician vs OZ), when, what."""

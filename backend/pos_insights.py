@@ -23,6 +23,71 @@ def _last_visit(pos_id: str, role: str) -> dict | None:
     return dict(r[0]) if r else None
 
 
+def list_filters() -> dict:
+    """Distinct values for the POS table filter controls."""
+    areas = [r["pos_area"] for r in db.get(
+        "SELECT pos_area, COUNT(*) c FROM pos_master WHERE pos_area IS NOT NULL AND pos_area<>'' "
+        "GROUP BY pos_area ORDER BY c DESC")]
+    markets = [r["market"] for r in db.get(
+        "SELECT market, COUNT(*) c FROM pos_master WHERE market IS NOT NULL AND market<>'' "
+        "GROUP BY market ORDER BY c DESC")]
+    techs = [r["technician"] for r in db.get(
+        "SELECT technician, COUNT(*) c FROM pos_master WHERE technician IS NOT NULL AND technician<>'' "
+        "GROUP BY technician ORDER BY technician")]
+    return {"areas": areas, "markets": markets, "technicians": techs}
+
+
+def _risk(weeks) -> str:
+    if weeks is None:
+        return "never"
+    if weeks >= 8:
+        return "overdue"
+    if weeks >= 5:
+        return "soon"
+    return "ok"
+
+
+def pos_list(q: str | None = None, area: str | None = None, market: str | None = None,
+             technician: str | None = None, status: str = "all",
+             limit: int = 200, offset: int = 0) -> dict:
+    """All POS with last visit + weeks-since + a simple cadence risk, filtered
+    and paginated in SQL — fast over the whole network. `status`: all | overdue
+    | never. Any TECHNIK or OZ visit counts as coverage (MAX visit_date)."""
+    where = ["p.active=1"]
+    params: list = []
+    if q:
+        where.append("(p.pos_id LIKE ? OR p.name LIKE ? OR p.city LIKE ?)")
+        like = f"%{q}%"; params += [like, like, like]
+    if area:
+        where.append("p.pos_area=?"); params.append(area)
+    if market:
+        where.append("p.market=?"); params.append(market)
+    if technician:
+        where.append("p.technician=?"); params.append(technician)
+    base = ("FROM pos_master p LEFT JOIN "
+            "(SELECT pos_id, MAX(visit_date) lv FROM salesapp_visits GROUP BY pos_id) v "
+            "ON v.pos_id=p.pos_id WHERE " + " AND ".join(where))
+    wk = "((julianday('now') - julianday(v.lv)) / 7.0)"
+    having = ""
+    if status == "never":
+        having = " AND v.lv IS NULL"
+    elif status == "overdue":
+        having = f" AND (v.lv IS NULL OR {wk} >= 8)"
+    total = db.get(f"SELECT COUNT(*) c {base}{having}", tuple(params))[0]["c"]
+    rows = db.get(
+        f"SELECT p.pos_id, p.name, p.city, p.pos_area, p.market, p.category, p.technician, "
+        f"v.lv last_visit, CASE WHEN v.lv IS NULL THEN NULL ELSE round({wk},1) END weeks_since "
+        f"{base}{having} "
+        f"ORDER BY (v.lv IS NULL) DESC, v.lv ASC LIMIT ? OFFSET ?",
+        tuple(params) + (limit, offset))
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["risk"] = _risk(d.get("weeks_since"))
+        out.append(d)
+    return {"total": total, "count": len(out), "offset": offset, "limit": limit, "pos": out}
+
+
 def search(q: str, limit: int = 40) -> dict:
     """Full-text-ish POS search by number / name / city, with last visit.
     Powers the command-bar search on the main screen."""
