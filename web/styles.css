@@ -1019,6 +1019,23 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .bulk-grid { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; margin-top: 10px; }
 .bulk-grid .fsel, .bulk-grid .filelabel { margin: 0; }
 
+/* capacity cards */
+.cap-wrap { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 12px; }
+.cap-card { border: 1px solid var(--border); border-radius: var(--r-md); padding: 16px 18px; background: var(--panel-2); }
+.cap-role { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); font-weight: 600; }
+.cap-big { font-size: 26px; font-weight: 750; margin: 6px 0 12px; font-variant-numeric: tabular-nums; }
+.cap-big .cap-sub { font-size: 11.5px; font-weight: 500; color: var(--text-3); margin-left: 8px; }
+.cap-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+.cap-grid > div { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+.cap-l { color: var(--text-3); } .cap-v { font-weight: 640; font-variant-numeric: tabular-nums; }
+.cap-perc { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+
+/* POS change-history rows + chip-pill */
+.poshi-arr { color: var(--text-3); text-align: center; }
+.poshi-to { font-weight: 600; }
+.poshi-src { color: var(--text-3); font-family: var(--mono); font-size: 11px; }
+.chip-pill { font-family: var(--mono); font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+
 /* POS table */
 .risk-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
 #posl-table tr[data-pos]:hover td { background: var(--panel-2); }

@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=62">
+<link rel="stylesheet" href="styles.css?v=63">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -26,7 +26,7 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v62</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v63</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard"><span class="si-ico" data-ico="grid"></span> Přehled</button>
       <button class="side-item" data-nav="import"><span class="si-ico" data-ico="upload"></span> Import dat</button>
@@ -172,6 +172,13 @@
         <h1>TourPlan – konfigurace a generování</h1>
         <p>Nastav pravidla a strategii, vygeneruj plán, zkontroluj kandidáty a publikuj immutable verzi. Engine vybírá POS podle pravidel a kapacity; ty jen kontroluješ a řešíš výjimky.</p>
       </div>
+
+      <!-- CAMPAIGNS (imported activity plan) -->
+      <section class="card">
+        <h2>Kampaně <span class="badge">z Activity Planu</span></h2>
+        <p class="hint">Naimportované kampaně (LOS/LOT) s prioritou a oknem od–do týdne. Toto jsou skutečné kampaně z dat; plánovací pravidla nastavíš níže.</p>
+        <div id="campaigns-out"></div>
+      </section>
 
       <!-- 1) UPLOAD -->
       <section class="card">
@@ -518,6 +525,13 @@
         <div id="tg-legend" class="tg-legend"></div>
       </section>
 
+      <!-- CAPACITY STANDARD -->
+      <section class="card">
+        <h2>Kapacita a produktivita <span class="badge">učený firemní standard</span></h2>
+        <p class="hint">Kolik produktivní práce zvládne technik za den — učeno z historie (percentily, extrémy oříznuty), ne pevných 8 h ani průměr. Doporučená kapacita = základ + ambice, zastropováno reálným stropem (p90).</p>
+        <div id="capacity-out"></div>
+      </section>
+
       <!-- TEAM DASHBOARD -->
       <section class="card">
         <h2>Dashboard techniků <span class="badge">tým · zatížení · produktivita</span></h2>
@@ -673,6 +687,6 @@
   </div>
 </div>
 
-<script src="app.js?v=62"></script>
+<script src="app.js?v=63"></script>
 </body>
 </html>

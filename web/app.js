@@ -843,20 +843,41 @@ async function openPosDetail(posId, week) {
     } catch (e) { /* fall back to card only */ }
   }
   try {
-    const [c, dur, clu, tsk] = await Promise.all([
+    const [c, dur, clu, tsk, hist] = await Promise.all([
       apiJson("/api/pos/" + encodeURIComponent(posId) + "/card"),
       apiJson("/api/planner/duration/pos/" + encodeURIComponent(posId)).catch(() => null),
       apiJson("/api/planner/clusters/pos/" + encodeURIComponent(posId)).catch(() => null),
       apiJson("/api/planner/tasks/pos/" + encodeURIComponent(posId)).catch(() => null),
+      apiJson("/api/pos/" + encodeURIComponent(posId) + "/history?limit=40").catch(() => null),
     ]);
     if (dur && dur.p50 != null) c.predictedDuration = dur;
     if (clu && clu.clustered) c.cluster = clu;
     if (tsk && (tsk.tasks || []).length) c.openTasks = tsk.tasks;
     document.getElementById("pd-title").textContent = "POS " + posId + (c.name ? " · " + c.name : "");
-    bodyEl.innerHTML = renderPosCard(c) + (head ? `<div class="pd-section" style="margin-top:22px">Plánování</div>` + head : "");
+    bodyEl.innerHTML = renderPosCard(c)
+      + (head ? `<div class="pd-section" style="margin-top:22px">Plánování</div>` + head : "")
+      + _renderPosHistory(hist);
   } catch (err) {
     bodyEl.innerHTML = head || `<p class="result err">Chyba: ${esc(err.message)}</p>`;
   }
+}
+
+const _POS_FIELD_LABEL = { name: "Název", ppt: "PPT", active: "Aktivní", technician: "Technik",
+  terminal_type: "Typ terminálu", classification: "Klasifikace", market: "Řetězec", category: "Kategorie" };
+function _renderPosHistory(hist) {
+  if (!hist || !(hist.history || []).length) return "";
+  const rows = hist.history.map((h) => {
+    const when = h.changed_at ? new Date(h.changed_at.replace(" ", "T")).toLocaleDateString("cs-CZ") : "";
+    const fld = _POS_FIELD_LABEL[h.field] || h.field;
+    const from = h.old_value == null || h.old_value === "" ? "—" : esc(h.old_value);
+    const to = h.new_value == null || h.new_value === "" ? "—" : esc(h.new_value);
+    return `<tr><td>${when}</td><td>${esc(fld)}</td><td class="poshi-from">${from}</td>
+      <td class="poshi-arr">→</td><td class="poshi-to">${to}</td><td class="poshi-src">${esc(h.source || "")}</td></tr>`;
+  }).join("");
+  return `<div class="pd-section" style="margin-top:22px">Historie změn POS <span class="badge">${hist.history.length}</span></div>
+    <div class="inv-tbl-wrap"><table class="inv-tbl"><thead><tr>
+      <th>Datum</th><th>Pole</th><th>Z</th><th></th><th>Na</th><th>Zdroj</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
 }
 
 function renderPosDetail(d, week) {
@@ -3852,6 +3873,55 @@ async function boot() {
 const _NAV_TITLES = { dashboard: "Přehled", import: "Import dat", tourplan: "TourPlan", pos: "POS", analytics: "Analytika", summary: "Měsíční souhrn", settings: "Nastavení" };
 let _navReady = {};
 
+// ============ Campaigns (imported activity plan) ============
+async function loadCampaigns() {
+  const host = document.getElementById("campaigns-out");
+  if (!host) return;
+  host.innerHTML = stateHTML("loading");
+  try {
+    const d = await apiJson("/api/campaigns");
+    const list = d.campaigns || [];
+    if (!list.length) { host.innerHTML = stateHTML("empty", "Žádné kampaně — naimportuj Activity Plan."); return; }
+    const rows = list.map((c) => {
+      const win = (c.start_week != null ? "t" + c.start_week : "") + (c.end_week != null ? "–" + c.end_week : "");
+      const prio = c.priority != null ? `<span class="chip-pill">P${c.priority}</span>` : "";
+      return `<tr><td>${esc(c.kind || "")}</td><td class="posname">${esc(c.name || "")}</td>
+        <td>${esc(win)}</td><td class="num">${prio}</td>
+        <td>${c.override_gap && c.override_gap !== "NO" ? "ano" : "—"}</td>
+        <td>${c.active ? "aktivní" : "neaktivní"}</td></tr>`;
+    }).join("");
+    host.innerHTML = `<div class="inv-tbl-wrap"><table class="inv-tbl"><thead><tr>
+      <th>Typ</th><th>Kampaň</th><th>Okno</th><th>Priorita</th><th>Override gap</th><th>Stav</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="hint" style="margin-top:8px">${list.length} kampaní</p>`;
+  } catch (e) { host.innerHTML = stateHTML("error", e.message); }
+}
+
+// ============ Capacity standard (learned) ============
+async function loadCapacity() {
+  const host = document.getElementById("capacity-out");
+  if (!host) return;
+  host.innerHTML = stateHTML("loading");
+  try {
+    const d = await apiJson("/api/planner/capacity");
+    const roles = d.roles || {};
+    const cards = Object.values(roles).filter((r) => r && r.found).map((r) => `
+      <div class="cap-card">
+        <div class="cap-role">${esc(r.role)}</div>
+        <div class="cap-big">${r.productiveHours != null ? r.productiveHours : "—"} h<span class="cap-sub">doporučená kapacita / den</span></div>
+        <div class="cap-grid">
+          <div><span class="cap-l">Základ (${esc(r.targetPercentile || "")})</span><span class="cap-v">${Math.round(r.baseMinutes || 0)} min</span></div>
+          <div><span class="cap-l">+ ambice</span><span class="cap-v">${r.ambitionPct || 0} %</span></div>
+          <div><span class="cap-l">Strop (p90)</span><span class="cap-v">${Math.round(r.ceilingMinutes || 0)} min</span></div>
+          <div><span class="cap-l">POS / den</span><span class="cap-v">${r.posPerDay != null ? r.posPerDay : "—"}</span></div>
+        </div>
+        <div class="cap-perc">p50 ${Math.round(r.p50 || 0)} · p60 ${Math.round(r.p60 || 0)} · p70 ${Math.round(r.p70 || 0)} · p90 ${Math.round(r.p90 || 0)} min · z ${r.days || 0} dní</div>
+      </div>`).join("");
+    host.innerHTML = cards ? `<div class="cap-wrap">${cards}</div>`
+      : stateHTML("empty", "Kapacita zatím nespočítána — naimportuj návštěvy.");
+  } catch (e) { host.innerHTML = stateHTML("error", e.message); }
+}
+
 // ============ POS table (all provozovny) ============
 const _posl = { q: "", area: "", market: "", technician: "", status: "all", offset: 0, total: 0 };
 const _POSL_RISK = { never: ["var(--bad)", "nikdy"], overdue: ["var(--bad)", "po termínu"],
@@ -4031,10 +4101,11 @@ function showView(name) {
     }
     if (name === "analytics" && typeof loadRactTechnicians === "function") loadRactTechnicians();
     if (name === "analytics" && typeof initTechGraphs === "function") initTechGraphs();
+    if (name === "analytics" && typeof loadCapacity === "function") loadCapacity();
     if (name === "pos" && typeof initPosView === "function") initPosView();
     if (name === "summary" && typeof initSummary === "function") initSummary();
     if (name === "import" && typeof initBulkTasks === "function") initBulkTasks();
-    if (name === "tourplan" && typeof loadStrategyModes === "function") { loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); }
+    if (name === "tourplan" && typeof loadStrategyModes === "function") { loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); loadCampaigns && loadCampaigns(); }
   }
   window.scrollTo(0, 0);
 }
