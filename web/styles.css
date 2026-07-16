@@ -1019,6 +1019,18 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .bulk-grid { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; margin-top: 10px; }
 .bulk-grid .fsel, .bulk-grid .filelabel { margin: 0; }
 
+/* coverage by segment */
+.cov-row { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.cov-row:last-child { border-bottom: none; }
+.cov-head { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+.cov-name { font-weight: 640; font-size: 13.5px; }
+.cov-risk { font-size: 11.5px; font-weight: 600; }
+.cov-count { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+.cov-bar { position: relative; height: 9px; border-radius: 99px; background: var(--panel-2); border: 1px solid var(--border); overflow: hidden; }
+.cov-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; }
+.cov-target { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-2); opacity: .6; }
+.cov-meta { margin-top: 7px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
 /* task bundle chips in the plan table */
 .bcell { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 .bchip { font-family: var(--mono); font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 5px; white-space: nowrap; }

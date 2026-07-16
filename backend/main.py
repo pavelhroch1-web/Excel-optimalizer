@@ -1421,6 +1421,12 @@ if LOCAL_MODE:
     def planner_segments():
         return {"segments": _segments.definitions(), "fieldsMeta": _segments.fields_meta()}
 
+    @app.post("/api/planner/segments/seed", dependencies=[Depends(require_auth)])
+    def planner_segments_seed():
+        """Create the default segment set (Velké/Malé/LI terminály, klasifikace…)
+        if none exist. Exposes the existing seed — no new logic."""
+        return _segments.seed_defaults()
+
     class SegmentBody(BaseModel):
         id: int | None = None
         name: str

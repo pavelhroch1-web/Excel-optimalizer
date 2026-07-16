@@ -3892,6 +3892,50 @@ async function boot() {
 const _NAV_TITLES = { dashboard: "Přehled", import: "Import dat", tourplan: "TourPlan", pos: "POS", analytics: "Analytika", summary: "Měsíční souhrn", settings: "Nastavení" };
 let _navReady = {};
 
+// ============ Coverage by segment ============
+const _COV_RISK = { high: ["var(--bad)", "vysoké"], medium: ["var(--warn)", "střední"], low: ["var(--good)", "nízké"] };
+async function loadCoverage() {
+  const host = document.getElementById("coverage-out");
+  if (!host) return;
+  host.innerHTML = stateHTML("loading");
+  try {
+    let d = await apiJson("/api/planner/coverage");
+    let segs = d.segments || [];
+    if (!segs.length) {
+      host.innerHTML = `<div class="state"><div class="state-ico">∅</div>
+        <div>Žádné segmenty. Vytvoř výchozí sadu (velké/malé terminály, klasifikace…).</div>
+        <button class="primary" id="cov-seed" style="margin-top:12px">Nastavit výchozí segmenty</button></div>`;
+      const b = document.getElementById("cov-seed");
+      if (b) b.addEventListener("click", async () => {
+        b.disabled = true; b.textContent = "Vytvářím…";
+        try { await apiFetch("/api/planner/segments/seed", { method: "POST" }); toast("Segmenty vytvořeny", "ok"); loadCoverage(); }
+        catch (e) { toast("Chyba: " + e.message, "err"); b.disabled = false; b.textContent = "Nastavit výchozí segmenty"; }
+      });
+      return;
+    }
+    host.innerHTML = segs.map((s) => {
+      const rk = _COV_RISK[s.risk] || _COV_RISK.low;
+      const cov = Math.round(s.coveragePct || 0);
+      const target = s.minCoveragePct || 0;
+      return `<div class="cov-row">
+        <div class="cov-head">
+          <span class="cov-name">${esc(s.name)}</span>
+          <span class="chip-pill">P${s.priority}</span>
+          <span class="cov-risk" style="color:${rk[0]}">● riziko ${rk[1]}</span>
+          <span class="cov-count">${s.posCount} POS</span>
+        </div>
+        <div class="cov-bar"><div class="cov-fill" style="width:${cov}%; background:${rk[0]}"></div>
+          <div class="cov-target" style="left:${Math.min(target,100)}%" title="cíl ${target}%"></div></div>
+        <div class="cov-meta">
+          <b style="color:${rk[0]}">${cov}%</b> v kadenci · cíl ${target}% ·
+          <span style="color:var(--bad)">${s.overdue} po termínu</span> ·
+          <span style="color:var(--warn)">${s.approaching} blíží se</span> ·
+          ${s.never} nikdy · Ø ${s.avgWeeksSince} t od návštěvy</div>
+      </div>`;
+    }).join("");
+  } catch (e) { host.innerHTML = stateHTML("error", e.message); }
+}
+
 // ============ Campaigns (imported activity plan) ============
 async function loadCampaigns() {
   const host = document.getElementById("campaigns-out");
@@ -4124,7 +4168,7 @@ function showView(name) {
     if (name === "pos" && typeof initPosView === "function") initPosView();
     if (name === "summary" && typeof initSummary === "function") initSummary();
     if (name === "import" && typeof initBulkTasks === "function") initBulkTasks();
-    if (name === "tourplan" && typeof loadStrategyModes === "function") { loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); loadCampaigns && loadCampaigns(); }
+    if (name === "tourplan" && typeof loadStrategyModes === "function") { loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); loadCampaigns && loadCampaigns(); loadCoverage && loadCoverage(); }
   }
   window.scrollTo(0, 0);
 }

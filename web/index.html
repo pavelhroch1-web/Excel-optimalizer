@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=64">
+<link rel="stylesheet" href="styles.css?v=65">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -26,7 +26,7 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v64</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v65</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard"><span class="si-ico" data-ico="grid"></span> Přehled</button>
       <button class="side-item" data-nav="import"><span class="si-ico" data-ico="upload"></span> Import dat</button>
@@ -172,6 +172,13 @@
         <h1>TourPlan – konfigurace a generování</h1>
         <p>Nastav pravidla a strategii, vygeneruj plán, zkontroluj kandidáty a publikuj immutable verzi. Engine vybírá POS podle pravidel a kapacity; ty jen kontroluješ a řešíš výjimky.</p>
       </div>
+
+      <!-- COVERAGE BY SEGMENT -->
+      <section class="card">
+        <h2>Coverage podle segmentů <span class="badge">pokrytí sítě · riziko</span></h2>
+        <p class="hint">Jak je pokrytá síť podle segmentů (velké/malé terminály, klasifikace…). Coverage = podíl POS v kadenci; riziko podle podílu po termínu. Segment = pravidlo nad atributy POS.</p>
+        <div id="coverage-out"></div>
+      </section>
 
       <!-- CAMPAIGNS (imported activity plan) -->
       <section class="card">
@@ -687,6 +694,6 @@
   </div>
 </div>
 
-<script src="app.js?v=64"></script>
+<script src="app.js?v=65"></script>
 </body>
 </html>
