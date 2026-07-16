@@ -3919,6 +3919,52 @@ async function boot() {
 const _NAV_TITLES = { dashboard: "Přehled", import: "Import dat", tourplan: "TourPlan", pos: "POS", analytics: "Analytika", summary: "Měsíční souhrn", settings: "Nastavení" };
 let _navReady = {};
 
+// ============ Task types / materials config (Nastavení) ============
+const _TT_CATS = [["service", "Servis"], ["campaign", "Kampaň"], ["material", "Materiál"], ["other", "Jiné"]];
+async function loadTaskTypes() {
+  const host = document.getElementById("task-types-out");
+  if (!host) return;
+  host.innerHTML = stateHTML("loading");
+  try {
+    const d = await apiJson("/api/planner/task-types");
+    const types = d.types || [];
+    const catSel = (v) => `<select class="tt-cat box">${_TT_CATS.map(([k, l]) =>
+      `<option value="${k}"${(v || "other") === k ? " selected" : ""}>${l}</option>`).join("")}</select>`;
+    const row = (t) => `<tr data-id="${t.id || ""}">
+      <td><input class="tt-name box" value="${esc(t.name || "")}" placeholder="název typu"></td>
+      <td>${catSel(t.category)}</td>
+      <td><input class="tt-prio box num" type="number" min="1" max="5" value="${t.default_priority ?? 3}"></td>
+      <td><input class="tt-min box num" type="number" min="1" value="${t.default_minutes ?? 5}"></td>
+      <td style="text-align:center"><input class="tt-comb" type="checkbox"${(t.combinable ?? 1) ? " checked" : ""}></td>
+      <td style="text-align:center"><input class="tt-act" type="checkbox"${(t.active ?? 1) ? " checked" : ""}></td>
+      <td><button class="ghost small tt-save">Uložit</button></td></tr>`;
+    host.innerHTML = `<div class="inv-tbl-wrap"><table class="inv-tbl tt-tbl"><thead><tr>
+        <th>Název</th><th>Kategorie</th><th>Priorita</th><th>Min</th><th>Kombin.</th><th>Aktivní</th><th></th>
+      </tr></thead><tbody>${types.map(row).join("")}${row({ combinable: 1, active: 1, default_priority: 3, default_minutes: 5 })}</tbody></table></div>
+      <p class="hint" style="margin-top:8px">Poslední řádek je prázdný pro přidání nového typu. „Kombinovatelný" = přibalí se k běžné návštěvě; jinak samostatný výjezd.</p>`;
+    host.querySelectorAll(".tt-save").forEach((b) => b.addEventListener("click", () => _saveTaskType(b.closest("tr"))));
+  } catch (e) { host.innerHTML = stateHTML("error", e.message); }
+}
+
+async function _saveTaskType(tr) {
+  const name = tr.querySelector(".tt-name").value.trim();
+  if (!name) { toast("Zadej název typu.", "info"); return; }
+  const body = {
+    name, category: tr.querySelector(".tt-cat").value,
+    default_priority: parseInt(tr.querySelector(".tt-prio").value, 10) || 3,
+    default_minutes: parseFloat(tr.querySelector(".tt-min").value) || 5,
+    combinable: tr.querySelector(".tt-comb").checked,
+    active: tr.querySelector(".tt-act").checked,
+  };
+  if (tr.dataset.id) body.id = parseInt(tr.dataset.id, 10);
+  try {
+    await apiFetch("/api/planner/task-types", { method: "POST", body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json" } });
+    toast("Typ uložen: " + name, "ok");
+    loadTaskTypes();
+  } catch (e) { toast("Chyba: " + e.message, "err"); }
+}
+
 // ============ Coverage by segment ============
 const _COV_RISK = { high: ["var(--bad)", "vysoké"], medium: ["var(--warn)", "střední"], low: ["var(--good)", "nízké"] };
 async function loadCoverage() {
@@ -4195,6 +4241,7 @@ function showView(name) {
       loadEngineInventory && loadEngineInventory();
       loadBusinessRules && loadBusinessRules();
       loadSettingsTabs && loadSettingsTabs();
+      loadTaskTypes && loadTaskTypes();
     }
     if (name === "analytics" && typeof loadRactTechnicians === "function") loadRactTechnicians();
     if (name === "analytics" && typeof initTechGraphs === "function") initTechGraphs();

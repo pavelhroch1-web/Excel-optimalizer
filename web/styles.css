@@ -1019,6 +1019,13 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .bulk-grid { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; margin-top: 10px; }
 .bulk-grid .fsel, .bulk-grid .filelabel { margin: 0; }
 
+/* task types editable table */
+.tt-tbl .box { border: 1px solid var(--border-2); border-radius: 6px; padding: 4px 7px; background: var(--panel); color: var(--text); font-family: var(--grot); font-size: 12.5px; }
+.tt-tbl .tt-name { width: 100%; min-width: 130px; }
+.tt-tbl .num { width: 62px; text-align: right; }
+.tt-tbl td { vertical-align: middle; }
+.tt-tbl input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); }
+
 /* cockpit: technician workload panel */
 .brief-workload { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
 .brief-workload .brief-col-h { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }

@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=67">
+<link rel="stylesheet" href="styles.css?v=68">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -26,7 +26,7 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v67</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v68</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard"><span class="si-ico" data-ico="grid"></span> Přehled</button>
       <button class="side-item" data-nav="import"><span class="si-ico" data-ico="upload"></span> Import dat</button>
@@ -638,6 +638,12 @@
           </div>
           <div id="tech-out"></div>
         </section>
+
+        <section class="card">
+          <h2>Typy úkolů a materiálů <span class="badge">servis · kampaň · materiál</span></h2>
+          <p class="hint">Konfigurace Task Enginu: každý typ (Kotouče, Letáky, Servisní oprava…) má kategorii, prioritu, odhad času a zda je <strong>kombinovatelný</strong> (přibalí se k návštěvě) nebo vyžaduje vlastní výjezd. Nový typ = řádek, ne vývoj.</p>
+          <div id="task-types-out"></div>
+        </section>
       </div>
 
       <!-- LEVEL 2: engine parameters (advanced) -->
@@ -694,6 +700,6 @@
   </div>
 </div>
 
-<script src="app.js?v=67"></script>
+<script src="app.js?v=68"></script>
 </body>
 </html>
