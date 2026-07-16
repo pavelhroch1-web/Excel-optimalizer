@@ -45,8 +45,38 @@ if getattr(sys, "frozen", False):
         os.environ["TMP"] = os.environ["TEMP"] = os.environ["TMPDIR"] = _tmp
     except Exception:  # noqa: BLE001 - nikdy nebránit startu appky
         pass
+    # Seed scaffold: bundled at _MEIPASS/workbook/... . Several modules compute
+    # its path from __file__ (dirname(dirname())), which is WRONG when frozen
+    # (modules sit flat in _MEIPASS). Point every consumer at the bundled file
+    # via the env overrides they already honor.
+    try:
+        _scaffold = os.path.join(BASE_DIR, "workbook", "FieldForceOptimizer_V11_scaffold.xlsx")
+        if os.path.exists(_scaffold):
+            os.environ.setdefault("WORKBOOK_PATH", _scaffold)
+            os.environ.setdefault("CONFIG_SEED_WORKBOOK", _scaffold)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _log_startup_error(msg: str) -> None:
+    """Frozen --windowed apps show nothing on crash. Write the real error to a
+    file next to the app so it can be inspected/sent."""
+    try:
+        import db as _db
+        path = os.path.join(_db.data_dir(), "startup_error.log")
+    except Exception:  # noqa: BLE001
+        path = os.path.join(os.path.dirname(sys.executable if getattr(sys, "frozen", False)
+                                            else __file__), "startup_error.log")
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n{msg}\n")
+    except Exception:  # noqa: BLE001
+        pass
+    return path
+
 
 HOST = "127.0.0.1"
+_SERVE_ERROR: list = []
 
 
 def _free_port() -> int:
@@ -66,17 +96,45 @@ def _wait_until_up(port: int, timeout: float = 20.0) -> bool:
 
 
 def _serve(port: int) -> None:
-    import uvicorn
+    try:
+        import uvicorn
 
-    from main import app  # noqa: WPS433 - after sys.path + env are ready
-    uvicorn.run(app, host=HOST, port=port, log_level="warning")
+        from main import app  # noqa: WPS433 - after sys.path + env are ready
+        uvicorn.run(app, host=HOST, port=port, log_level="warning")
+    except BaseException as exc:  # noqa: BLE001 - capture so the UI can show it
+        import traceback
+        _SERVE_ERROR.append(traceback.format_exc())
+        _log_startup_error(f"Server thread selhal:\n{traceback.format_exc()}")
+        raise
+
+
+def _show_fatal(message: str, log_path: str) -> None:
+    """Last-resort visible error (frozen --windowed shows nothing otherwise)."""
+    try:
+        import tkinter as tk
+        from tkinter import scrolledtext
+        root = tk.Tk()
+        root.title("Field Force Optimizer — chyba při startu")
+        root.geometry("760x460")
+        tk.Label(root, justify="left", padx=14, pady=10, anchor="w",
+                 text=("Aplikaci se nepodařilo nastartovat.\n"
+                       f"Detail chyby byl uložen do:\n{log_path}\n\n"
+                       "Pošli prosím tento soubor / text níže.")).pack(fill="x")
+        box = scrolledtext.ScrolledText(root, wrap="word")
+        box.insert("1.0", message or "(bez detailu)")
+        box.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        root.mainloop()
+    except Exception:  # noqa: BLE001
+        print(message, file=sys.stderr)
 
 
 def main() -> None:
     port = _free_port()
     threading.Thread(target=_serve, args=(port,), daemon=True).start()
     if not _wait_until_up(port):
-        print("Server se nepodařilo nastartovat.", file=sys.stderr)
+        detail = _SERVE_ERROR[0] if _SERVE_ERROR else "Server nenaběhl v časovém limitu."
+        log_path = _log_startup_error(f"Server se nenastartoval do limitu.\n{detail}")
+        _show_fatal(detail, log_path)
         sys.exit(1)
 
     url = f"http://{HOST}:{port}/"
