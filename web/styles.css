@@ -791,6 +791,31 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 .leak-item b { font-variant-numeric: tabular-nums; }
 .tech-link { font-weight: 600; }
 
+/* regional overview — collapsible středisko rows with drill-down */
+.reg-list { display: flex; flex-direction: column; gap: 6px; }
+.reg-item { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--panel-2); overflow: hidden; }
+.reg-item.open { border-color: var(--border-2); }
+.reg-head { display: flex; align-items: center; gap: var(--sp-3); width: 100%; padding: 10px var(--sp-3);
+  background: transparent; border: 0; cursor: pointer; text-align: left; transition: background var(--t1) var(--ease); }
+.reg-head:hover { background: var(--bg-2); }
+.reg-caret { color: var(--text-3); font-size: var(--fs-xs); transition: transform var(--t2) var(--ease); }
+.reg-item.open .reg-caret { transform: rotate(90deg); }
+.reg-name { font-weight: var(--fw-semibold); font-size: var(--fs-sm); min-width: 150px; }
+.reg-metrics { display: flex; gap: var(--sp-4); margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+.reg-m { font-size: var(--fs-xs); color: var(--text-3); white-space: nowrap; }
+.reg-m b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: var(--fw-semibold); }
+.reg-m.reg-bad b { color: var(--bad); }
+.reg-on.low b { color: var(--bad); }
+.reg-techs { padding: 4px var(--sp-3) 10px; display: flex; flex-direction: column; gap: 2px; }
+.reg-tech { display: grid; grid-template-columns: minmax(140px, 1.6fr) 1fr 1.2fr auto 1fr; gap: var(--sp-3);
+  align-items: center; padding: 6px 0; border-top: 1px solid var(--border); font-size: var(--fs-sm); }
+.reg-tm { font-size: var(--fs-xs); color: var(--text-2); font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) {
+  .reg-metrics { gap: var(--sp-3); }
+  .reg-tech { grid-template-columns: 1fr auto; }
+  .reg-tech .reg-tm:nth-child(2), .reg-tech .reg-tm:nth-child(3) { display: none; }
+}
+
 /* travel vs on-site — stacked efficiency bar per technician */
 .split-legend { display: flex; gap: var(--sp-4); margin-bottom: var(--sp-2); font-size: var(--fs-xs); color: var(--text-3); }
 .split-legend span { display: inline-flex; align-items: center; gap: 6px; }

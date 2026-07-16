@@ -1548,6 +1548,70 @@ function drillToTechnician(tech) {
   document.getElementById("route-actual-form").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+// Regional overview — the network seen by středisko (RSA/RSC…). Aggregates the
+// same live team data by region so a manager can compare regions and drill in:
+// region row → expand its technicians → click a technician → their routes.
+// Pure client-side grouping of /api/analytics/team; no backend call.
+let _teamByRegion = null;
+function renderRegions(r) {
+  const host = document.getElementById("team-regions");
+  if (!host) return;
+  const groups = {};
+  r.technicians.forEach((x) => {
+    const reg = x.region || "Bez regionu";
+    (groups[reg] = groups[reg] || []).push(x);
+  });
+  _teamByRegion = groups;
+  const rows = Object.entries(groups).map(([reg, techs]) => {
+    const visits = techs.reduce((s, x) => s + (x.visits || 0), 0);
+    const overdue = techs.reduce((s, x) => s + (x.overdue || 0), 0);
+    const over = techs.filter((x) => x.loadStatus === "over").length;
+    const onVals = techs.map((x) => x.onPosRatioPct).filter((v) => v != null);
+    const onAvg = onVals.length ? Math.round(onVals.reduce((s, v) => s + v, 0) / onVals.length) : null;
+    const attn = techs.reduce((s, x) => s + (x.attention || 0), 0);
+    return { reg, techs, visits, overdue, over, onAvg, attn, count: techs.length };
+  }).sort((a, b) => b.attn - a.attn);
+
+  host.innerHTML = `<div class="pl-section">Regionální přehled <span class="pd-chip">${rows.length} středisek · klikni pro techniky</span></div>` +
+    `<div class="reg-list">` + rows.map((g) => {
+      const onCls = g.onAvg != null && g.onAvg < 50 ? "low" : "";
+      return `<div class="reg-item" data-reg="${esc(g.reg)}">
+        <button class="reg-head" aria-expanded="false">
+          <span class="reg-caret">▸</span>
+          <span class="reg-name">${esc(g.reg)}</span>
+          <span class="reg-metrics">
+            <span class="reg-m"><b>${g.count}</b> tech</span>
+            <span class="reg-m"><b>${_fmtNum(g.visits)}</b> návšt.</span>
+            <span class="reg-m reg-on ${onCls}"><b>${g.onAvg != null ? g.onAvg + " %" : "—"}</b> na POS</span>
+            <span class="reg-m ${g.overdue ? "reg-bad" : ""}"><b>${g.overdue}</b> po term.</span>
+            <span class="reg-m ${g.over ? "reg-bad" : ""}"><b>${g.over}</b> přetíž.</span>
+          </span>
+        </button>
+        <div class="reg-techs" hidden></div>
+      </div>`;
+    }).join("") + `</div>`;
+
+  host.querySelectorAll(".reg-head").forEach((btn) => btn.addEventListener("click", () => {
+    const item = btn.closest(".reg-item");
+    const panel = item.querySelector(".reg-techs");
+    const open = !panel.hidden;
+    if (open) { panel.hidden = true; btn.setAttribute("aria-expanded", "false"); item.classList.remove("open"); return; }
+    const techs = (_teamByRegion[item.dataset.reg] || [])
+      .slice().sort((a, b) => (b.attention || 0) - (a.attention || 0));
+    panel.innerHTML = techs.map((x) => {
+      const lm = _LOAD_META[x.loadStatus] || {};
+      return `<div class="reg-tech"><span class="pos-link tech-link" data-tech="${esc(x.technician)}">${esc(x.technician)}</span>` +
+        `<span class="reg-tm">${x.visits} návšt.</span>` +
+        `<span class="reg-tm">${x.onPosRatioPct != null ? x.onPosRatioPct + " % na POS" : "—"}</span>` +
+        `<span class="chip ${lm.cls || ""}">${lm.label || "—"}</span>` +
+        `<span class="reg-tm">${x.overdue ? `<b style="color:var(--bad)">${x.overdue} po term.</b>` : "0 po term."}</span></div>`;
+    }).join("");
+    panel.querySelectorAll(".tech-link").forEach((el) =>
+      el.addEventListener("click", () => drillToTechnician(el.dataset.tech)));
+    panel.hidden = false; btn.setAttribute("aria-expanded", "true"); item.classList.add("open");
+  }));
+}
+
 function renderTeam(r) {
   const t = r.team;
   document.getElementById("team-tiles").innerHTML = `<div class="pl-tiles">` +
@@ -1557,6 +1621,8 @@ function renderTeam(r) {
     tile("Přetížení", t.overloaded, "techniků nad kapacitou", t.overloaded ? "bad" : "good") +
     tile("Rezerva", t.slack, "techniků pod kapacitou", t.slack ? "warn" : "") +
     tile("Po termínu", t.totalOverdue, "zpožděných zastávek", t.totalOverdue ? "bad" : "good") + `</div>`;
+
+  renderRegions(r);
 
   // Travel vs on-site — the manager's core efficiency read, per technician.
   // On-site time is billable value; travel is overhead. One stacked bar each,
