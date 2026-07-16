@@ -164,11 +164,17 @@ def import_salesapp(conn, ws, filename: str | None = None) -> int:
     hidx, it, header = _rows(ws)
     purpose_cols = [(str(h), i) for i, h in enumerate(header) if str(h).startswith("Účel")]
 
-    # Link SalesApp visit -> POS the same way the engine does:
-    # SalesApp "Store UID" == pos_master.terminal_id -> posId.
-    term_to_pos = {str(r["terminal_id"]): r["pos_id"]
+    # Link SalesApp visit -> POS. In real exports "Store UID" is usually the
+    # terminal number, but some rows carry the POS number instead, so accept
+    # either key (terminal wins on the rare collision). Non-store activities
+    # (Store UID like "ST…CZ": prospect / regional office / lunch) match neither
+    # and stay unlinked — correct, they aren't POS visits.
+    term_to_pos = {str(r["pos_id"]): r["pos_id"]
                    for r in conn.execute(
-                       "SELECT terminal_id, pos_id FROM pos_master WHERE terminal_id IS NOT NULL")}
+                       "SELECT pos_id FROM pos_master WHERE pos_id IS NOT NULL")}
+    term_to_pos.update({str(r["terminal_id"]): r["pos_id"]
+                        for r in conn.execute(
+                            "SELECT terminal_id, pos_id FROM pos_master WHERE terminal_id IS NOT NULL")})
 
     cur = conn.execute(
         "INSERT INTO salesapp_imports (filename, row_count) VALUES (?, 0)", (filename,))
@@ -219,8 +225,69 @@ def _flush_visits(conn, batch):
         batch)
 
 
+def _activity_is_matrix(header) -> bool:
+    hu = {_norm_header(h) for h in header if h not in (None, "")}
+    return "ACTIVITY" not in hu and ("KALENDÁŘ" in hu or "MĚSÍC" in hu or "TÝDEN" in hu)
+
+
+def _import_activity_matrix(conn, ws) -> int:
+    """Parse the raw client Activity Plan calendar matrix (no clean table): a
+    week-number row across the top, then activity-track rows whose non-empty
+    week cells each name a campaign active from that week until the next marked
+    week. Year is read from datetime cells in the sheet — never hardcoded."""
+    import datetime
+    rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    # week-number row: the row with the longest run of integer week numbers
+    wk_row_i, week_col = -1, {}
+    for i, r in enumerate(rows[:8]):
+        cols = {j: int(c) for j, c in enumerate(r)
+                if isinstance(c, (int, float)) and 1 <= c <= 54
+                or (isinstance(c, str) and c.strip().isdigit() and 1 <= int(c) <= 54)}
+        if len(cols) > len(week_col):
+            wk_row_i, week_col = i, {j: int(rows[i][j]) for j in cols}
+    if len(week_col) < 10:
+        return 0  # not a recognizable week matrix
+    # plan year: the most common year among real datetime cells
+    years: dict = {}
+    for r in rows:
+        for c in r:
+            if isinstance(c, datetime.datetime):
+                years[c.year] = years.get(c.year, 0) + 1
+    year = max(years, key=years.get) if years else datetime.date.today().year
+    import re
+    _CAL_LABELS = {"ODE DNE", "TÝDEN", "TYDEN", "MĚSÍC", "MESIC", "KALENDÁŘ", "KALENDAR"}
+    _date_like = re.compile(r"^\d{1,2}\.\s?\d{0,2}\.?$")  # "29.12." / "5.1."
+
+    def _is_name(v) -> bool:
+        s = str(v).strip()
+        return bool(s) and not s.isdigit() and not _date_like.match(s)
+
+    conn.execute("DELETE FROM campaigns")
+    n = 0
+    for r in rows[wk_row_i + 1:]:
+        label = next((str(c).strip() for c in r[:3] if isinstance(c, str) and c.strip()), None)
+        if not label or label.strip().upper() in _CAL_LABELS:
+            continue  # skip the calendar-structure rows (dates/weeks/months)
+        # week cells that hold a campaign NAME (text, not a date/number)
+        marks = sorted((wk, str(r[j]).strip()) for j, wk in week_col.items()
+                       if j < len(r) and isinstance(r[j], str) and _is_name(r[j]))
+        if len(marks) < 2:
+            continue  # a real campaign track has several scheduled weeks
+        kind = "LOSY" if "LOS" in label.upper() else ("LOTERIE" if "LOTER" in label.upper() else "VISIBILITA")
+        for idx2, (wk, cname) in enumerate(marks):
+            end = (marks[idx2 + 1][0] - 1) if idx2 + 1 < len(marks) else 54
+            conn.execute(
+                "INSERT INTO campaigns (kind, name, year, start_week, end_week, priority, "
+                "override_gap, estimate, target_visits) VALUES (?,?,?,?,?,?,?,?,?)",
+                (kind, f"{cname} ({label})", year, wk, end, None, None, "", None))
+            n += 1
+    return n
+
+
 def import_activity_plan(conn, ws) -> int:
-    hidx, it, _ = _rows(ws)
+    hidx, it, header = _rows(ws)
+    if _activity_is_matrix(header):
+        return _import_activity_matrix(conn, ws)
     conn.execute("DELETE FROM campaigns")
     n = 0
     for row in it:

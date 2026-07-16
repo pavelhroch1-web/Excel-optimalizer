@@ -31,6 +31,9 @@ def _classify(ws) -> str | None:
     if "TYPE" in h and "ACTIVITY" in h and "START_WEEK" in h:
         return "activity_plan"
     hu = {str(x).strip().upper() for x in h}
+    # raw client Activity Plan calendar matrix
+    if "KALENDÁŘ" in hu and "MĚSÍC" in hu:
+        return "activity_plan"
     # Tourplan and the raw POS master export share most columns; a Tourplan file
     # additionally carries a week column ("TOURPLAN"/"WEEK"), so check it first.
     if ("WEEK" in hu or "TÝDEN" in hu or "TYDEN" in hu or "TOURPLAN" in hu) and \
