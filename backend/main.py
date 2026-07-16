@@ -58,6 +58,12 @@ app = FastAPI(title="Field Force Optimizer API")
 if LOCAL_MODE:
     import db  # noqa: E402
 
+    # Create the schema EAGERLY at import time: some routes seed config at
+    # module load (e.g. task_types via seed_default_types below), which runs
+    # BEFORE the startup event — on a fresh DB (first .exe launch) the tables
+    # would not exist yet and the import would crash. init_db() is idempotent.
+    db.init_db()
+
     @app.on_event("startup")
     def _init_local_db() -> None:
         db.init_db()
