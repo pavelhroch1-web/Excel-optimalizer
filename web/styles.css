@@ -94,6 +94,9 @@ button.ghost:hover, .btn-ghost:hover { background: var(--bg-2); border-color: va
 .state-spinner { width: 22px; height: 22px; border: 2px solid var(--border);
   border-top-color: var(--accent); border-radius: 50%; animation: state-spin .7s linear infinite; }
 @keyframes state-spin { to { transform: rotate(360deg); } }
+/* state row inside a table body: span all columns, no cell borders/hover */
+tr.tbl-state td { border: none; background: none; padding: 0; }
+tr.tbl-state:hover td { background: none; }
 
 /* file inputs (upload step) */
 .filelabel { display: block; margin: 10px 0; font-size: 13px; color: var(--text-dim); }

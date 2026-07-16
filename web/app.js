@@ -96,6 +96,14 @@ function showState(el, kind, msg) {
   const n = typeof el === "string" ? document.getElementById(el) : el;
   if (n) n.innerHTML = stateHTML(kind, msg);
 }
+// Same three states, but for a <tbody>: one full-width row so the message
+// lines up under the header instead of collapsing the table layout.
+function tblState(el, kind, msg, cols) {
+  const n = typeof el === "string" ? document.getElementById(el) : el;
+  if (!n) return;
+  const span = cols || (n.closest("table")?.querySelectorAll("thead th").length) || 1;
+  n.innerHTML = `<tr class="tbl-state"><td colspan="${span}">${stateHTML(kind, msg)}</td></tr>`;
+}
 
 // ---- unified feedback: one toast + one confirm dialog ---------------------
 // Replaces scattered native alert()/confirm() and ad-hoc toasts so success/
@@ -350,10 +358,16 @@ on("refresh-draft", "click", loadDraft);
 
 async function loadDraft() {
   const body = document.getElementById("draft-body");
-  body.innerHTML = "";
+  tblState(body, "loading", "Načítám návrh…");
   try {
     const data = await apiJson("/api/draft");
-    (data.rows || []).forEach((r) => {
+    const rows = data.rows || [];
+    if (!rows.length) {
+      tblState(body, "empty", "Návrh je prázdný. Nahraj plán a klikni na „Generovat“.");
+      return;
+    }
+    body.innerHTML = "";
+    rows.forEach((r) => {
       const tr = document.createElement("tr");
       const cells = [
         r.WEEK, r.DAY, r.POS, r.NAZEV_PROVOZOVNY, r.TECHNICIAN,
@@ -454,10 +468,16 @@ on("refresh-versions", "click", loadVersions);
 
 async function loadVersions() {
   const body = document.getElementById("versions-body");
-  body.innerHTML = "";
+  tblState(body, "loading", "Načítám verze…");
   try {
     const data = await apiJson("/api/versions");
-    (data.versions || []).forEach((v) => {
+    const versions = data.versions || [];
+    if (!versions.length) {
+      tblState(body, "empty", "Zatím žádná publikovaná verze.");
+      return;
+    }
+    body.innerHTML = "";
+    versions.forEach((v) => {
       const tr = document.createElement("tr");
       const when = v.publishedAt ? new Date(v.publishedAt).toLocaleString("cs-CZ") : "";
       [v.id, (v.publishedWeeks || []).join(", "), when, v.message || "", v.engineVersion || ""].forEach((val) => {
@@ -475,7 +495,9 @@ async function loadVersions() {
       tr.appendChild(tdDl);
       body.appendChild(tr);
     });
-  } catch (_) {}
+  } catch (err) {
+    tblState(body, "error", "Nepodařilo se načíst verze: " + err.message);
+  }
 }
 
 async function downloadFile(path, filename) {
@@ -2070,7 +2092,7 @@ async function loadPriority() {
   try {
     const r = await apiJson("/api/priority");
     if (cnt) cnt.textContent = r.count;
-    if (!r.priority.length) { el.innerHTML = ""; return; }
+    if (!r.priority.length) { showState(el, "empty", "Žádné POS přichystané pro kampaň."); return; }
     el.innerHTML = `<table class="pd-score-table"><thead><tr><th>POS</th><th>Kampaň</th><th></th></tr></thead><tbody>` +
       r.priority.map((p) =>
         `<tr><td>${esc(p.pos_id)}</td><td>${esc(p.campaign || "—")}</td>` +
@@ -2080,7 +2102,7 @@ async function loadPriority() {
       await apiFetch(`/api/priority/${encodeURIComponent(b.dataset.pos)}`, { method: "DELETE" });
       loadPriority();
     }));
-  } catch (e) { /* ignore */ }
+  } catch (e) { showState(el, "error", "Nepodařilo se načíst seznam."); }
 }
 
 on("prio-form", "submit", async (e) => {
@@ -2116,7 +2138,7 @@ async function loadReassignments() {
   try {
     const r = await apiJson("/api/reassignments");
     if (cnt) cnt.textContent = r.count;
-    if (!r.reassignments.length) { el.innerHTML = ""; return; }
+    if (!r.reassignments.length) { showState(el, "empty", "Žádné dočasné přesuny POS."); return; }
     el.innerHTML = `<table class="pd-score-table"><thead><tr><th>Co</th><th>→ Na koho</th><th>Důvod</th><th>Platnost</th><th></th></tr></thead><tbody>` +
       r.reassignments.map((x) => {
         const what = x.pos_id ? `POS ${esc(x.pos_id)}` : `vše: ${esc(x.from_technician || "?")}`;
@@ -2130,7 +2152,7 @@ async function loadReassignments() {
       await apiFetch(`/api/reassignments/${b.dataset.id}`, { method: "DELETE" });
       loadReassignments();
     }));
-  } catch (e) { /* ignore */ }
+  } catch (e) { showState(el, "error", "Nepodařilo se načíst přesuny."); }
 }
 
 on("reassign-form", "submit", async (e) => {
