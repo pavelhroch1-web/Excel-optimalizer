@@ -131,12 +131,17 @@ header h1 { font-size: 19px; font-weight: 650; margin: 0; letter-spacing: -0.01e
 .row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 8px; }
 
 #draft-table-wrap { overflow-x: auto; margin-top: 12px; }
+/* Canonical data-grid look — shared by all data tables (draft/cand/versions/
+   rules) and .inv-tbl so grids feel identical across screens. */
 table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 th, td {
-  border-bottom: 1px solid var(--border); padding: 6px 10px; text-align: left;
-  white-space: nowrap; font-family: var(--mono);
+  border-bottom: 1px solid var(--border); padding: 8px 12px; text-align: left;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
 }
-th { color: var(--text-dim); font-weight: 600; }
+th {
+  color: var(--text-3); font-weight: 640; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .03em; background: var(--panel-2);
+}
 
 .hint { color: var(--text-3); font-size: 12.5px; line-height: 1.5; margin: 0 0 16px; max-width: 76ch; }
 .rules-block { margin-bottom: 18px; }
