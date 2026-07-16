@@ -213,6 +213,11 @@ def bundle_for_pos(pos_id: str) -> dict:
             "deadline": r.get("deadline"), "urgency": r.get("urgency"),
             "needsDedicated": r.get("needsDedicated"), "note": r.get("note"),
         })
+    # Within each bucket the technician sees the important stuff first — higher
+    # priority before lower (e.g. Kotouče above Letáky), deadline as tiebreaker.
+    for items in groups.values():
+        items.sort(key=lambda it: (it.get("priority") if it.get("priority") is not None else 99,
+                                   str(it.get("deadline") or "9999-12-31")))
     prios = [r.get("priority") for r in rows if r.get("priority") is not None]
     return {
         "posId": str(pos_id),
