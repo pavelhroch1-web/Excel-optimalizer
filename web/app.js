@@ -3852,6 +3852,97 @@ async function boot() {
 const _NAV_TITLES = { dashboard: "Přehled", import: "Import dat", tourplan: "TourPlan", analytics: "Analytika", summary: "Měsíční souhrn", settings: "Nastavení" };
 let _navReady = {};
 
+// ============ Technician graphs over time (Analytika) ============
+const _TG_COLORS = ["#12807C", "#B4801F", "#B3453A", "#3E8E5B", "#5B6FB4", "#A0559B",
+                    "#2E8FA8", "#C06A2E", "#6E8B3D", "#9B4A6E"];
+const _tg = { grain: "week", metric: "visitsPerDay", region: "", market: "", campaign: "",
+              role: "TECHNIK", data: null, highlight: null };
+const _TG_UNIT = { visitsPerDay: "", visits: "", onPosHours: " h", avgVisitMin: " min", activeDays: "" };
+
+function initTechGraphs() {
+  // populate filter dropdowns once
+  apiJson("/api/analytics/technicians/filters").then((f) => {
+    const fill = (id, arr) => { const s = document.getElementById(id); if (!s) return;
+      arr.forEach((v) => { const o = document.createElement("option"); o.value = v; o.textContent = v; s.appendChild(o); }); };
+    fill("tg-region", f.regions || []); fill("tg-market", f.markets || []); fill("tg-campaign", f.campaigns || []);
+  }).catch(() => {});
+  // segmented controls
+  document.querySelectorAll("#tg-grain span, #tg-role span").forEach((sp) => {
+    sp.addEventListener("click", () => {
+      const bar = sp.parentElement; bar.querySelectorAll("span").forEach((x) => x.classList.toggle("on", x === sp));
+      if (bar.id === "tg-grain") _tg.grain = sp.dataset.v; else _tg.role = sp.dataset.v;
+      loadTechGraphs();
+    });
+  });
+  ["tg-metric", "tg-region", "tg-market", "tg-campaign"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", () => {
+      _tg.metric = document.getElementById("tg-metric").value;
+      _tg.region = document.getElementById("tg-region").value;
+      _tg.market = document.getElementById("tg-market").value;
+      _tg.campaign = document.getElementById("tg-campaign").value;
+      loadTechGraphs();
+    });
+  });
+  loadTechGraphs();
+}
+
+async function loadTechGraphs() {
+  const chart = document.getElementById("tg-chart"); const leg = document.getElementById("tg-legend");
+  if (!chart) return;
+  chart.innerHTML = stateHTML("loading");
+  try {
+    const q = new URLSearchParams({ grain: _tg.grain, role: _tg.role });
+    if (_tg.region) q.set("region", _tg.region);
+    if (_tg.market) q.set("market", _tg.market);
+    if (_tg.campaign) q.set("campaign", _tg.campaign);
+    _tg.data = await apiJson("/api/analytics/technicians/series?" + q.toString());
+    if (!_tg.data.technicians.length || !_tg.data.periods.length) {
+      chart.innerHTML = stateHTML("empty", "Žádná data pro tento filtr."); leg.innerHTML = ""; return;
+    }
+    _tgRender();
+  } catch (e) { chart.innerHTML = stateHTML("error", e.message); }
+}
+
+function _tgRender() {
+  const d = _tg.data, metric = _tg.metric, periods = d.periods;
+  const top = d.technicians.slice(0, 10);       // busiest 10 as lines
+  const chart = document.getElementById("tg-chart");
+  // collect values
+  const val = (t, p) => { const s = t.series[p]; return s && s[metric] != null ? +s[metric] : null; };
+  let hi = 0;
+  top.forEach((t) => periods.forEach((p) => { const v = val(t, p); if (v != null && v > hi) hi = v; }));
+  hi = hi || 1;
+  const W = 760, H = 260, padL = 44, padR = 12, padT = 16, padB = 34;
+  const x = (i) => padL + (periods.length === 1 ? (W - padL - padR) / 2 : i * (W - padL - padR) / (periods.length - 1));
+  const y = (v) => padT + (H - padT - padB) * (1 - v / hi);
+  let grid = "";
+  for (let g = 0; g <= 4; g++) { const v = hi * g / 4, yy = y(v).toFixed(1);
+    grid += `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" stroke="var(--border)" stroke-width="1"/>`;
+    grid += `<text x="${padL - 6}" y="${yy}" dy="3" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--text-3)">${_fmtNum(+v.toFixed(1))}</text>`; }
+  const step = Math.ceil(periods.length / 8);
+  let xlab = "";
+  periods.forEach((p, i) => { if (i % step === 0) xlab += `<text x="${x(i).toFixed(1)}" y="${H - 10}" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--text-3)">${esc(_periodShort(p))}</text>`; });
+  let lines = "";
+  top.forEach((t, ti) => {
+    const dim = _tg.highlight && _tg.highlight !== t.name;
+    let dpath = "", started = false;
+    periods.forEach((p, i) => { const v = val(t, p); if (v == null) return; dpath += `${started ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)} `; started = true; });
+    lines += `<path d="${dpath.trim()}" fill="none" stroke="${_TG_COLORS[ti % _TG_COLORS.length]}" stroke-width="${_tg.highlight === t.name ? 3.2 : 2}" opacity="${dim ? 0.15 : 1}"/>`;
+  });
+  chart.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block">${grid}${lines}${xlab}</svg>`;
+  // legend (click to highlight, click name to open technician detail)
+  const leg = document.getElementById("tg-legend");
+  leg.innerHTML = top.map((t, ti) =>
+    `<span class="tg-li ${_tg.highlight === t.name ? "on" : ""}" data-tech="${esc(t.name)}">
+       <span class="tg-sw" style="background:${_TG_COLORS[ti % _TG_COLORS.length]}"></span>${esc(t.name)}
+       <b>${t.region ? esc(t.region) : ""}</b></span>`).join("")
+    + (d.technicians.length > 10 ? `<span class="tg-li" style="color:var(--text-3)">+ ${d.technicians.length - 10} dalších</span>` : "");
+  leg.querySelectorAll(".tg-li[data-tech]").forEach((el) => {
+    el.addEventListener("click", () => { _tg.highlight = _tg.highlight === el.dataset.tech ? null : el.dataset.tech; _tgRender(); });
+  });
+}
+
 function showView(name) {
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("hidden", v.dataset.view !== name));
   document.querySelectorAll(".side-item").forEach((b) => b.classList.toggle("active", b.dataset.nav === name));
@@ -3869,6 +3960,7 @@ function showView(name) {
       loadSettingsTabs && loadSettingsTabs();
     }
     if (name === "analytics" && typeof loadRactTechnicians === "function") loadRactTechnicians();
+    if (name === "analytics" && typeof initTechGraphs === "function") initTechGraphs();
     if (name === "summary" && typeof initSummary === "function") initSummary();
     if (name === "import" && typeof initBulkTasks === "function") initBulkTasks();
     if (name === "tourplan" && typeof loadStrategyModes === "function") { loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); }

@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=60">
+<link rel="stylesheet" href="styles.css?v=61">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -26,7 +26,7 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v60</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v61</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard"><span class="si-ico" data-ico="grid"></span> Přehled</button>
       <button class="side-item" data-nav="import"><span class="si-ico" data-ico="upload"></span> Import dat</button>
@@ -466,6 +466,33 @@
         <p>Kdo potřebuje pozornost, kde utíkají km a čas. Klikni na technika pro detail jeho tras, na den pro mapu s vrstvami, na POS pro historii. Vše propojené.</p>
       </div>
 
+      <!-- TECHNICIAN GRAPHS OVER TIME -->
+      <section class="card">
+        <h2>Grafy techniků v čase <span class="badge">filtruj vším · srovnávej</span></h2>
+        <p class="hint">Všichni technici v jednom grafu. Přepni metriku a období, vyfiltruj region, řetězec nebo kampaň. Klikni na technika v legendě pro zvýraznění, na jméno pro detail jeho dne a tras.</p>
+        <div class="tg-bar" id="tg-bar">
+          <div class="fbar-seg" id="tg-grain" data-val="week">
+            <span data-v="week" class="on">Týden</span><span data-v="month">Měsíc</span>
+          </div>
+          <label class="fsel">Metrika <select id="tg-metric">
+            <option value="visitsPerDay">Návštěvy / den</option>
+            <option value="visits">Návštěvy</option>
+            <option value="onPosHours">Hodiny na POS</option>
+            <option value="avgVisitMin">Ø min / návštěva</option>
+            <option value="activeDays">Aktivní dny</option>
+          </select></label>
+          <label class="fsel">Region <select id="tg-region"><option value="">všechny</option></select></label>
+          <label class="fsel">Řetězec <select id="tg-market"><option value="">všechny</option></select></label>
+          <label class="fsel">Kampaň <select id="tg-campaign"><option value="">všechny</option></select></label>
+          <div class="fbar-seg" id="tg-role" data-val="TECHNIK">
+            <span data-v="TECHNIK" class="on">Technici</span><span data-v="OZ">OZ</span>
+          </div>
+        </div>
+        <p id="tg-result" class="result"></p>
+        <div id="tg-chart"></div>
+        <div id="tg-legend" class="tg-legend"></div>
+      </section>
+
       <!-- TEAM DASHBOARD -->
       <section class="card">
         <h2>Dashboard techniků <span class="badge">tým · zatížení · produktivita</span></h2>
@@ -621,6 +648,6 @@
   </div>
 </div>
 
-<script src="app.js?v=60"></script>
+<script src="app.js?v=61"></script>
 </body>
 </html>
