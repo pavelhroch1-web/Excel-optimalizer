@@ -358,7 +358,7 @@ async function loadDraft() {
       const cells = [
         r.WEEK, r.DAY, r.POS, r.NAZEV_PROVOZOVNY, r.TECHNICIAN,
         r.PPT, r.lastRealVisitDate || "", r.weeksSinceLastVisit ?? "",
-        r.terminalType || "", r.market || "", r.REASON_FRIENDLY || r.REASON || "",
+        r.terminalType || "", r.market || "",
       ];
       cells.forEach((v, i) => {
         const td = document.createElement("td");
@@ -373,6 +373,13 @@ async function loadDraft() {
         }
         tr.appendChild(td);
       });
+      // Bundling: úkoly (servis/kampaň/materiál) přibalené k této zastávce.
+      const tdTasks = document.createElement("td");
+      tdTasks.innerHTML = _bundleCell(r.tasks);
+      tr.appendChild(tdTasks);
+      const tdReason = document.createElement("td");
+      tdReason.textContent = r.REASON_FRIENDLY || r.REASON || "";
+      tr.appendChild(tdReason);
       const tdBtn = document.createElement("td");
       const btn = document.createElement("button");
       btn.textContent = "Odebrat";
@@ -860,6 +867,18 @@ async function openPosDetail(posId, week) {
   } catch (err) {
     bodyEl.innerHTML = head || `<p class="result err">Chyba: ${esc(err.message)}</p>`;
   }
+}
+
+// Compact task-bundle cell for the draft/plan table: colored count chips per
+// category (service/campaign/material) with the full summary as tooltip.
+const _CAT_UI = { service: ["svc", "Opr"], campaign: ["camp", "Kam"], material: ["mat", "Mat"] };
+function _bundleCell(tasks) {
+  if (!tasks || !tasks.count) return "";
+  const groups = tasks.groups || {};
+  const chips = Object.keys(_CAT_UI).filter((k) => (groups[k] || []).length)
+    .map((k) => `<span class="bchip ${_CAT_UI[k][0]}">${_CAT_UI[k][1]} ${groups[k].length}</span>`).join("");
+  const dedic = tasks.hasDedicated ? `<span class="bchip dedic" title="vyžaduje samostatný výjezd">!</span>` : "";
+  return `<span class="bcell" title="${esc(tasks.summary || "")}">${chips}${dedic}</span>`;
 }
 
 const _POS_FIELD_LABEL = { name: "Název", ppt: "PPT", active: "Aktivní", technician: "Technik",
