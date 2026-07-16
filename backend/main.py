@@ -226,7 +226,13 @@ def health():
         path = store.snapshot_temp()
         size = os.path.getsize(path)
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        pos_rows = wb["POS_MASTER"].max_row - 1
+        # The config-only scaffold has no POS_MASTER; the real count lives in
+        # the DB (built solely by import). Prefer the DB, fall back to 0.
+        try:
+            import db as _db
+            pos_rows = _db.get("SELECT COUNT(*) AS c FROM pos_master")[0]["c"]
+        except Exception:  # noqa: BLE001
+            pos_rows = (wb["POS_MASTER"].max_row - 1) if "POS_MASTER" in wb.sheetnames else 0
         wb.close()
         return {
             "ok": True,
@@ -781,14 +787,25 @@ if LOCAL_MODE:
 
     @app.post("/api/import/sample", dependencies=[Depends(require_auth)])
     def import_sample():
-        """Load the bundled real network (POS + visits + config) on demand, so a
-        fresh install has data to explore without hunting for a file. Defined
-        BEFORE /api/import/{kind} so it isn't captured as kind='sample'."""
-        import store_local
-        wb = store_local._bootstrap_workbook()  # noqa: SLF001
-        if not wb or not os.path.exists(wb):
-            raise HTTPException(status_code=404, detail="Ukázková data nejsou k dispozici.")
-        return auto_import.import_file(wb, "ukazkova_sit.xlsx", force_kind="workbook")
+        """Load SYNTHETIC demo data (sample_data/) on demand, so a fresh install
+        has something to explore. This is fabricated data (fake POS/technicians),
+        never real client data — the scaffold is config-only. Defined BEFORE
+        /api/import/{kind} so it isn't captured as kind='sample'."""
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        base = os.environ.get("SAMPLE_DATA_DIR", os.path.join(base, "sample_data"))
+        files = [("POS_master.xlsx", "pos_master"), ("SalesApp_export.xlsx", "salesapp")]
+        out: dict = {"counts": {}}
+        loaded = 0
+        for fname, kind in files:
+            p = os.path.join(base, fname)
+            if os.path.exists(p):
+                r = auto_import.import_file(p, f"demo_{fname}", force_kind=kind)
+                out["counts"].update(r.get("counts", {}))
+                loaded += 1
+        if not loaded:
+            raise HTTPException(status_code=404, detail="Ukázková (syntetická) data nejsou k dispozici.")
+        out["detected"] = "sample_synthetic"
+        return out
 
     @app.post("/api/import/{kind}", dependencies=[Depends(require_auth)])
     async def import_explicit(kind: str, file: UploadFile = File(...)):

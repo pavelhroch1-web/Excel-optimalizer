@@ -88,6 +88,9 @@ def read_enriched_draft(path: str) -> list[dict]:
     human-readable REASON."""
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
+        # config-only workbook (no draft/import yet) -> nothing to enrich
+        if "POS_MASTER" not in wb.sheetnames or "MANAGER_PLAN" not in wb.sheetnames:
+            return []
         pm_ws = wb["POS_MASTER"]
         pm_idx = _header_index(pm_ws)
         pos_by_id: dict[str, dict] = {}

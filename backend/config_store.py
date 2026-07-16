@@ -106,6 +106,10 @@ def load_pos_overrides(seed_workbook: str | None = None) -> dict[str, dict]:
     path = seed_workbook or DEFAULT_SEED_WORKBOOK
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
+        # A config-only scaffold carries no POS_MASTER (overrides come from the
+        # user's imported data), so its absence just means "no overrides yet".
+        if "POS_MASTER" not in wb.sheetnames:
+            return {}
         pm = wb["POS_MASTER"]
         header = [c.value for c in next(pm.iter_rows(min_row=1, max_row=1))]
         idx = {n: i for i, n in enumerate(header)}

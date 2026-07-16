@@ -41,6 +41,9 @@ def _pos_master_extras(path: str) -> tuple[dict, dict]:
     posId from VISIT_HISTORY_ACTUAL - the real SalesApp visit history)."""
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
+        # A config-only workbook (no import yet) has no data sheets.
+        if "POS_MASTER" not in wb.sheetnames:
+            return {}, {}
         pm = wb["POS_MASTER"]
         h = [c.value for c in next(pm.iter_rows(min_row=1, max_row=1))]
         idx = {n: i for i, n in enumerate(h)}
@@ -52,6 +55,8 @@ def _pos_master_extras(path: str) -> tuple[dict, dict]:
                 last_visit[str(pid)] = "" if lv in (None, "") else str(lv)[:10]
 
         history: dict[str, list] = {}
+        if "VISIT_HISTORY_ACTUAL" not in wb.sheetnames:
+            return last_visit, history
         vh = wb["VISIT_HISTORY_ACTUAL"]
         vh_h = [c.value for c in next(vh.iter_rows(min_row=1, max_row=1))]
         vidx = {n: i for i, n in enumerate(vh_h)}

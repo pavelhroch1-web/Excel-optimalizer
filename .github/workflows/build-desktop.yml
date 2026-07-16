@@ -49,6 +49,7 @@ jobs:
             '--add-data','web;web',
             '--add-data','backend/schema.sql;.',
             '--add-data','workbook/FieldForceOptimizer_V11_scaffold.xlsx;workbook',
+            '--add-data','sample_data;sample_data',
             'desktop_app.py'
           )
           python -m PyInstaller @pyargs

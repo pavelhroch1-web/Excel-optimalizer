@@ -64,6 +64,9 @@ if getattr(sys, "frozen", False):
         if os.path.exists(_scaffold):
             os.environ.setdefault("WORKBOOK_PATH", _scaffold)
             os.environ.setdefault("CONFIG_SEED_WORKBOOK", _scaffold)
+        _sample = os.path.join(BASE_DIR, "sample_data")
+        if os.path.isdir(_sample):
+            os.environ.setdefault("SAMPLE_DATA_DIR", _sample)
     except Exception:  # noqa: BLE001
         pass
 

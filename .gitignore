@@ -19,3 +19,11 @@ backend/.env
 
 # generated tour-plan exports
 TOUR_PLAN_*.xlsx
+
+# Runtime database + local data dir — created solely by the user's import,
+# never committed or distributed (contains real data on the user's machine).
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+FieldForceData/
