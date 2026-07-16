@@ -84,6 +84,58 @@ function setResult(id, msg, kind) {
   el.className = "result" + (kind ? " " + kind : "");
 }
 
+// ---- unified feedback: one toast + one confirm dialog ---------------------
+// Replaces scattered native alert()/confirm() and ad-hoc toasts so success/
+// error feedback and confirmations look and behave the same everywhere.
+let _toastTimer;
+function toast(msg, kind = "ok") {   // kind: ok | err | info
+  clearTimeout(_toastTimer);
+  let t = document.getElementById("app-toast");
+  if (!t) { t = document.createElement("div"); t.id = "app-toast"; t.className = "app-toast"; document.body.appendChild(t); }
+  const mark = kind === "err" ? "✕" : kind === "info" ? "ℹ" : "✓";
+  t.className = "app-toast " + kind;
+  t.textContent = mark + "  " + msg;
+  // force reflow so re-triggering restarts the transition
+  void t.offsetWidth;
+  t.classList.add("show");
+  _toastTimer = setTimeout(() => t.classList.remove("show"), kind === "err" ? 3600 : 2200);
+}
+
+// Promise<boolean>. Only for irreversible / bulk actions. Names object + effect.
+function confirmDialog({ title, body = "", confirmText = "Potvrdit", danger = false } = {}) {
+  return new Promise((resolve) => {
+    let ov = document.getElementById("confirm-overlay");
+    if (!ov) {
+      ov = document.createElement("div");
+      ov.id = "confirm-overlay"; ov.className = "confirm-overlay hidden";
+      ov.innerHTML =
+        '<div class="confirm-box" role="dialog" aria-modal="true">' +
+        '<h3 id="confirm-title"></h3><p id="confirm-body"></p>' +
+        '<div class="confirm-actions">' +
+        '<button id="confirm-cancel" class="ghost">Zrušit</button>' +
+        '<button id="confirm-ok" class="primary"></button></div></div>';
+      document.body.appendChild(ov);
+    }
+    ov.querySelector("#confirm-title").textContent = title || "Potvrdit akci";
+    ov.querySelector("#confirm-body").textContent = body || "";
+    const ok = ov.querySelector("#confirm-ok");
+    ok.textContent = confirmText;
+    ok.className = danger ? "primary danger" : "primary";
+    ov.classList.remove("hidden");
+    const done = (val) => {
+      ov.classList.add("hidden");
+      document.removeEventListener("keydown", onKey);
+      resolve(val);
+    };
+    const onKey = (e) => { if (e.key === "Escape") done(false); if (e.key === "Enter") done(true); };
+    ov.querySelector("#confirm-cancel").onclick = () => done(false);
+    ok.onclick = () => done(true);
+    ov.onclick = (e) => { if (e.target === ov) done(false); };
+    document.addEventListener("keydown", onKey);
+    ok.focus();
+  });
+}
+
 // ---- login ----------------------------------------------------------------
 
 loginForm.addEventListener("submit", async (e) => {
@@ -156,7 +208,7 @@ async function handleUpload(e) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || ("Server vrátil " + res.status));
       const m = data.messages || {};
-      setResult("upload-result", "Hotovo – Draft vytvořen. " + (m.import || "") + " " + (m.compliance || ""), "ok");
+      setResult("upload-result", "Hotovo – návrh vytvořen. " + (m.import || "") + " " + (m.compliance || ""), "ok");
       loadStatus();
       loadRules();
     } catch (err) {
@@ -185,7 +237,7 @@ function confirmUploadSelection() {
   if (posEl && posEl.files[0]) names.push(posEl.files[0].name + " (POS)");
   if (names.length) {
     setResult("upload-result", "Vybráno " + names.length + " souborů: " + names.join(", ") +
-      " — teď klikni „Nahrát a vytvořit Draft“.", "ok");
+      " — teď klikni „Nahrát a vytvořit návrh“.", "ok");
   }
 }
 on("salesapp-files", "change", confirmUploadSelection);
@@ -199,7 +251,7 @@ on("generate-form", "submit", async (e) => {
   const length = parseInt(document.getElementById("length").value, 10);
   const btn = document.getElementById("generate-btn");
   btn.disabled = true;
-  setResult("generate-result", "Generuji tour plán…", "");
+  setResult("generate-result", "Generuji TourPlan…", "");
   try {
     const data = await postJson("/api/draft/generate", { start_week, length });
     const m = data.messages || {};
@@ -355,7 +407,9 @@ on("download-draft-btn", "click", () =>
 
 on("publish-form", "submit", async (e) => {
   e.preventDefault();
-  if (!confirm("Publikovat tour plán? Vytvoří se nová immutable verze, kterou už nepůjde změnit.")) return;
+  if (!await confirmDialog({ title: "Publikovat TourPlan?",
+    body: "Vytvoří se nová immutable verze, kterou už nepůjde změnit.",
+    confirmText: "Publikovat", danger: true })) return;
   const message = document.getElementById("publish-message").value.trim();
   const btn = document.getElementById("publish-btn");
   btn.disabled = true;
@@ -416,7 +470,7 @@ async function downloadFile(path, filename) {
     a.click();
     URL.revokeObjectURL(url);
   } catch (err) {
-    alert("Stažení selhalo: " + err.message);
+    toast("Stažení selhalo: " + err.message, "err");
   }
 }
 
@@ -1686,14 +1740,8 @@ function _initCfgLevels() {
   }));
 }
 
-let _cfgToastTimer;
 function _cfgToast() {
-  clearTimeout(_cfgToastTimer);
-  let t = document.getElementById("cfg-toast");
-  if (!t) { t = document.createElement("div"); t.id = "cfg-toast"; t.className = "cfg-toast"; document.body.appendChild(t); }
-  t.textContent = "✓ Uloženo – projeví se při dalším generování";
-  t.classList.add("show");
-  _cfgToastTimer = setTimeout(() => t.classList.remove("show"), 1800);
+  toast("Uloženo – projeví se při dalším generování", "ok");
 }
 
 // ---- automatic import + alerts --------------------------------------------
@@ -1895,7 +1943,9 @@ on("excl-form", "submit", async (e) => {
 });
 
 on("excl-clear", "click", async () => {
-  if (!confirm("Zrušit všechna vyřazení POS?")) return;
+  if (!await confirmDialog({ title: "Zrušit všechna vyřazení POS?",
+    body: "Odstraní se celý seznam vyřazených POS. Projeví se po přegenerování.",
+    confirmText: "Zrušit vyřazení", danger: true })) return;
   try {
     const r = await apiFetch("/api/exclusions/_all", { method: "DELETE" });
     const d = await r.json();
@@ -1940,7 +1990,9 @@ on("prio-form", "submit", async (e) => {
 });
 
 on("prio-clear", "click", async () => {
-  if (!confirm("Zrušit celý seznam prioritních POS?")) return;
+  if (!await confirmDialog({ title: "Zrušit celý seznam prioritních POS?",
+    body: "Odstraní se všechny POS přichystané pro kampaň OZ.",
+    confirmText: "Zrušit vše", danger: true })) return;
   try {
     await apiFetch("/api/priority/_all", { method: "DELETE" });
     setResult("prio-result", "Seznam zrušen.", "ok");
@@ -2307,7 +2359,9 @@ document.addEventListener("click", async (e) => {
   if (act) {
     const pos = act.dataset.pos;
     if (act.dataset.act === "excl") {
-      if (!confirm(`Vyřadit POS ${pos} z plánování? Projeví se po přegenerování.`)) return;
+      if (!await confirmDialog({ title: `Vyřadit POS ${pos} z plánování?`,
+        body: "POS se už nenaplánuje. Projeví se po přegenerování.",
+        confirmText: "Vyřadit", danger: true })) return;
       await postJson("/api/exclusions", { pos_ids: pos, reason: "oprava z plánu" });
     } else if (act.dataset.act === "move") {
       const to = prompt(`Přehodit POS ${pos} na kterého technika?`, "");
@@ -2326,20 +2380,23 @@ document.addEventListener("click", async (e) => {
     } else if (fb.dataset.fix === "regen") {
       const wk = parseInt(document.getElementById("planner-week")?.value || document.getElementById("start-week")?.value, 10);
       const len = parseInt(document.getElementById("planner-length")?.value || "5", 10);
-      if (!wk) { alert("Zadej počáteční týden v sekci Planner a spusť generování tam."); return; }
+      if (!wk) { toast("Zadej počáteční týden v sekci TourPlan a spusť generování tam.", "info"); return; }
       fb.disabled = true; fb.textContent = "Generuji…";
       try {
         await postJson("/api/draft/generate", { start_week: wk, length: len });
-        alert("Plán přegenerován s opravami. Zkontroluj a publikuj novou verzi (tlačítko Publikovat).");
+        toast("Plán přegenerován s opravami. Zkontroluj a publikuj novou verzi.", "ok");
       } catch (err) {
-        alert("Přegenerování vyžaduje aktivní draft. Nahraj data v sekci Planner (krok 1) a vygeneruj tam. (" + err.message + ")");
+        toast("Přegenerování vyžaduje aktivní návrh. Nahraj data v TourPlan (krok 1) a vygeneruj tam.", "err");
       } finally { fb.disabled = false; fb.textContent = "Přegenerovat plán"; }
     } else if (fb.dataset.fix === "publish") {
-      if (!confirm("Publikovat novou immutable verzi plánu?")) return;
+      if (!await confirmDialog({ title: "Publikovat novou verzi TourPlanu?",
+        body: "Vytvoří se nová immutable verze, kterou už nepůjde změnit.",
+        confirmText: "Publikovat", danger: true })) return;
       try {
         await postJson("/api/publish", { message: "Publikace po opravách" });
         await loadLive();
-      } catch (err) { alert("Publikace selhala: " + err.message); }
+        toast("Publikováno.", "ok");
+      } catch (err) { toast("Publikace selhala: " + err.message, "err"); }
     }
   }
 });

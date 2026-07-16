@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=57">
+<link rel="stylesheet" href="styles.css?v=58">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -14,7 +14,7 @@
 <div id="login-screen" class="screen">
   <div class="login-card">
     <h1>Field Force Optimizer</h1>
-    <p class="sub">Tour Plán Cockpit</p>
+    <p class="sub">TourPlan Cockpit</p>
     <form id="login-form">
       <input type="password" id="password" placeholder="Heslo" autofocus required>
       <button type="submit">Přihlásit</button>
@@ -26,7 +26,7 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v57</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v58</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard"><span class="si-ico" data-ico="grid"></span> Přehled</button>
       <button class="side-item" data-nav="import"><span class="si-ico" data-ico="upload"></span> Import dat</button>
@@ -51,7 +51,7 @@
       <div class="tb-status" id="status-strip">
         <div class="tb-stat"><span class="tb-l">Publikováno</span><span class="tb-v" id="last-published">—</span></div>
         <div class="tb-stat"><span class="tb-l">Verzí</span><span class="tb-v" id="version-count">—</span></div>
-        <div class="tb-stat"><span class="tb-l">Draft</span><span class="tb-v" id="draft-state">—</span></div>
+        <div class="tb-stat"><span class="tb-l">Návrh</span><span class="tb-v" id="draft-state">—</span></div>
       </div>
     </header>
 
@@ -139,7 +139,7 @@
       <!-- 1) UPLOAD -->
       <section class="card">
         <h2>1 · Nahrát exporty</h2>
-        <p class="hint">Nahraj čerstvé exporty. Draft vždy naváže na poslední publikovaný snapshot – publikovaný plán se nikdy nezmění.</p>
+        <p class="hint">Nahraj čerstvé exporty. Návrh vždy naváže na poslední publikovanou verzi – publikovaný plán se nikdy nezmění.</p>
         <form id="upload-form">
           <label class="filelabel">SalesApp exporty (týdenní, můžeš vybrat víc)
             <input type="file" id="salesapp-files" accept=".xlsx" multiple>
@@ -147,7 +147,7 @@
           <label class="filelabel">POS export (nepovinné – když nenahraješ, síť se vezme z posledního snapshotu)
             <input type="file" id="pos-export" accept=".xlsx">
           </label>
-          <button type="submit" id="upload-btn" class="primary">Nahrát a vytvořit Draft</button>
+          <button type="submit" id="upload-btn" class="primary">Nahrát a vytvořit návrh</button>
         </form>
         <p id="upload-result" class="result"></p>
       </section>
@@ -155,7 +155,7 @@
       <!-- 2) PLANNING FILTERS -->
       <section class="card">
         <h2>2 · Plánovací filtry <span class="badge">terminály · partneři · kategorie · kampaně</span></h2>
-        <p class="hint">Stejná pravidla jako v Excelu. <strong>Neomezují jen zobrazení – omezují vstupní množinu Planning Engine</strong>, takže se tour plán generuje jen z vybraných POS. Ulož je před krokem „Generovat".</p>
+        <p class="hint">Stejná pravidla jako v Excelu. <strong>Neomezují jen zobrazení – omezují vstupní množinu Planning Engine</strong>, takže se TourPlan generuje jen z vybraných POS. Ulož je před krokem „Generovat".</p>
         <div class="rules-block"><h3>Druh terminálu (malý / střední / velký)</h3><div id="rules-terminal" class="toggle-list"></div></div>
         <div class="rules-block"><h3>Partner / obchodní síť</h3><div id="rules-market" class="toggle-list"></div></div>
         <div class="rules-block"><h3>Kategorie (pravidlo)</h3><div id="rules-category" class="dropdown-list"></div></div>
@@ -169,7 +169,7 @@
           </div>
         </div>
         <div class="row">
-          <button id="reload-rules-btn" class="ghost">Načíst pravidla</button>
+          <button id="reload-rules-btn" class="ghost">Obnovit</button>
           <button id="save-rules-btn" class="primary">Uložit pravidla</button>
         </div>
         <p id="rules-result" class="result"></p>
@@ -278,7 +278,7 @@
 
       <!-- 3) GENERATE -->
       <section class="card">
-        <h2>6 · Generovat tour plán (ručně)</h2>
+        <h2>6 · Generovat TourPlan (ručně)</h2>
         <form id="generate-form" class="row">
           <label>Počáteční týden<input type="number" id="start-week" min="1" max="53" required></label>
           <label>Délka (týdnů)<input type="number" id="length" min="1" max="12" value="1" required></label>
@@ -325,7 +325,7 @@
       <section class="card">
         <h2>8 · Návrh a ruční úpravy</h2>
         <div class="row">
-          <button id="refresh-draft" class="ghost">Zobrazit / obnovit návrh</button>
+          <button id="refresh-draft" class="ghost">Obnovit návrh</button>
           <button id="download-draft-btn" class="ghost">Stáhnout návrh (.xlsx)</button>
         </div>
         <div class="rules-block">
@@ -358,11 +358,11 @@
 
       <!-- PUBLISH -->
       <section class="card publish-card">
-        <h2>9 · Publikovat Tour Plán <span class="badge">immutable</span></h2>
-        <p class="hint">Publikace zmrazí nejnižší draftový týden do nové <strong>immutable verze</strong>. Od té chvíle na ni navazují všechny další běhy. Publikovaný plán už nikdy nezměníš.</p>
+        <h2>9 · Publikovat TourPlan <span class="badge">immutable</span></h2>
+        <p class="hint">Publikace zmrazí nejnižší týden návrhu do nové <strong>immutable verze</strong>. Od té chvíle na ni navazují všechny další běhy. Publikovaný plán už nikdy nezměníš.</p>
         <form id="publish-form" class="row">
           <label style="flex:1">Poznámka k verzi (nepovinné)<input type="text" id="publish-message" placeholder="např. Týden 33 – kampaň GECO"></label>
-          <button type="submit" id="publish-btn" class="primary danger">Publikovat Tour Plán</button>
+          <button type="submit" id="publish-btn" class="primary danger">Publikovat TourPlan</button>
         </form>
         <p id="publish-result" class="result"></p>
       </section>
@@ -384,7 +384,7 @@
       <!-- HISTORY -->
       <section class="card">
         <h2>Historie publikovaných verzí</h2>
-        <div class="row"><button id="refresh-versions" class="ghost">Obnovit historii</button></div>
+        <div class="row"><button id="refresh-versions" class="ghost">Obnovit</button></div>
         <div id="versions-wrap">
           <table id="versions-table">
             <thead><tr><th>Verze</th><th>Týden(y)</th><th>Publikováno</th><th>Poznámka</th><th>Engine</th><th>Plán</th></tr></thead>
@@ -513,7 +513,7 @@
           <h2>Terminály, partneři, kategorie, kampaně <span class="badge">zaškrtávátka · projeví se v enginu</span></h2>
           <p class="hint">Celý plánovací model z UI, bez zásahu do kódu: které druhy terminálů, partnery a kategorie zahrnout do plánu, a Activity plán (kampaně) s prioritou a oknem. Velikost terminálu a partner jsou atributy z importu (SalesApp) – zde se jen zapínají/vypínají. Nový typ = nový řádek v importu, ne vývoj.</p>
           <div class="row">
-            <button id="model-refresh" class="ghost">Načíst plánovací model</button>
+            <button id="model-refresh" class="ghost">Obnovit</button>
           </div>
           <div id="model-out"></div>
         </section>
@@ -522,7 +522,7 @@
           <h2>Technici <span class="badge">role · aktivita · kapacita</span></h2>
           <p class="hint">Kdo se počítá do plánování a statistik. Metriky se počítají <strong>jen nad aktivními techniky</strong> (role Technik). Pravidlo 3xx = OZ; ruční úprava přežije import.</p>
           <div class="row">
-            <button id="tech-refresh" class="ghost">Načíst techniky</button>
+            <button id="tech-refresh" class="ghost">Obnovit</button>
             <label>Filtr role
               <select id="tech-filter"><option value="">vše</option><option>TECHNIK</option><option>OZ</option><option>ADMIN</option><option>MANAGER</option></select>
             </label>
@@ -585,6 +585,6 @@
   </div>
 </div>
 
-<script src="app.js?v=57"></script>
+<script src="app.js?v=58"></script>
 </body>
 </html>
