@@ -11,7 +11,10 @@ from __future__ import annotations
 import base64
 import os
 
-import httpx
+try:
+    import httpx  # only for the cloud GitHub path; local desktop never uses it
+except ModuleNotFoundError:  # not bundled in the portable .exe (not needed there)
+    httpx = None
 
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "pavelhroch1-web/excel-optimalizer")

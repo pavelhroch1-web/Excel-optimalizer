@@ -12,7 +12,10 @@ import base64
 import json
 import os
 
-import httpx
+try:
+    import httpx  # only for the cloud GitHub path; local desktop never uses it
+except ModuleNotFoundError:  # not bundled in the portable .exe (not needed there)
+    httpx = None
 
 # Optional: only needed for the (cloud) GitHub Actions path. The local
 # desktop app never uses gh.py, so importing it must not require a token.
