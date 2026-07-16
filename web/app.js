@@ -96,6 +96,15 @@ function showState(el, kind, msg) {
   const n = typeof el === "string" ? document.getElementById(el) : el;
   if (n) n.innerHTML = stateHTML(kind, msg);
 }
+// Skeleton placeholder: reserve the panel's rough shape while a heavy block
+// streams in, so nothing pops from a blank gap and the layout doesn't jump.
+// `head` draws a title bar; `rows` shimmer lines of varied width.
+function skeleton({ head = true, rows = 3 } = {}) {
+  const bars = Array.from({ length: rows }, (_, i) =>
+    `<div class="sk-line" style="width:${[92, 74, 60, 84, 68][i % 5]}%"></div>`).join("");
+  return `<div class="sk" aria-busy="true" aria-hidden="true">` +
+    (head ? `<div class="sk-head"></div>` : "") + bars + `</div>`;
+}
 // Same three states, but for a <tbody>: one full-width row so the message
 // lines up under the header instead of collapsing the table layout.
 function tblState(el, kind, msg, cols) {
@@ -2691,7 +2700,8 @@ async function loadCockpitBrief() {
       ...(_BRIEF_KPIS.map((k) => apiJson(`/api/memory/trend?entity_type=${k.et}&metric_key=${k.m}`).catch(() => null))),
     ]);
     el.innerHTML = renderBrief(team, (runsResp && runsResp.runs && runsResp.runs[0]) || null, trends)
-      + `<div id="health-block"></div><div id="company-block"></div>` + renderInsightsBlock(insights);
+      + `<div id="health-block">${skeleton({ rows: 4 })}</div>`
+      + `<div id="company-block">${skeleton({ rows: 3 })}</div>` + renderInsightsBlock(insights);
   } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
   // Critical cases (Health Score) — default technicians; OZ behind a toggle.
   loadHealth(_healthRole);
@@ -2699,7 +2709,10 @@ async function loadCockpitBrief() {
   apiJson("/api/insights/company").then((co) => {
     const cb = document.getElementById("company-block");
     if (cb) { cb.innerHTML = renderCompanyBlock(co); initRegionTrends(cb); }
-  }).catch(() => {});
+  }).catch(() => {
+    const cb = document.getElementById("company-block");
+    if (cb) cb.innerHTML = "";  // drop the skeleton; block is optional
+  });
 }
 
 // Region (středisko) trend graphs under the company overview: pick a region,
@@ -2731,6 +2744,7 @@ async function loadHealth(role) {
   _healthRole = role;
   const hb = document.getElementById("health-block");
   if (!hb) return;
+  if (hb.querySelector(".health-h")) hb.innerHTML = skeleton({ rows: 4 });  // role switch: shimmer, not stale
   try {
     const h = await apiJson("/api/insights/health?role=" + role);
     hb.innerHTML = renderHealthBlock(h);
