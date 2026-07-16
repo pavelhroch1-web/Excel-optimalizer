@@ -19,6 +19,16 @@ import sys
 import threading
 import time
 
+# A --windowed PyInstaller app has NO console: sys.stdout/stderr are None.
+# Libraries that probe the terminal (uvicorn's logger calls sys.stdout.isatty())
+# then crash. Give them a real, harmless stream before anything imports them.
+for _name in ("stdout", "stderr"):
+    if getattr(sys, _name, None) is None:
+        try:
+            setattr(sys, _name, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115
+        except Exception:  # noqa: BLE001
+            pass
+
 # --- import path (dev i frozen) --------------------------------------------
 if getattr(sys, "frozen", False):
     BASE_DIR = sys._MEIPASS  # noqa: SLF001
@@ -100,7 +110,9 @@ def _serve(port: int) -> None:
         import uvicorn
 
         from main import app  # noqa: WPS433 - after sys.path + env are ready
-        uvicorn.run(app, host=HOST, port=port, log_level="warning")
+        # log_config=None: skip uvicorn's colour formatter (it calls
+        # sys.stdout.isatty(), which crashes in a windowed .exe).
+        uvicorn.run(app, host=HOST, port=port, log_level="warning", log_config=None)
     except BaseException as exc:  # noqa: BLE001 - capture so the UI can show it
         import traceback
         _SERVE_ERROR.append(traceback.format_exc())
