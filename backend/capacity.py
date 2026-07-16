@@ -94,12 +94,12 @@ def rebuild() -> dict:
         posv = sorted(pos_by_role.get(role, []))
         posv_t = posv[int(_TRIM_LO * len(posv)):int(_TRIM_HI * len(posv))] or posv
         rec = {"productive_p50": _pct(trimmed, 0.50), "productive_p60": _pct(trimmed, 0.60),
-               "productive_p70": _pct(trimmed, 0.70), "pos_per_day": _pct(posv_t, 0.60),
-               "days": len(vals)}
+               "productive_p70": _pct(trimmed, 0.70), "productive_p90": _pct(trimmed, 0.90),
+               "pos_per_day": _pct(posv_t, 0.60), "days": len(vals)}
         db.run("INSERT INTO capacity_standard(role, productive_p50, productive_p60, productive_p70, "
-               "pos_per_day, days) VALUES(?,?,?,?,?,?)",
+               "productive_p90, pos_per_day, days) VALUES(?,?,?,?,?,?,?)",
                (role, rec["productive_p50"], rec["productive_p60"], rec["productive_p70"],
-                rec["pos_per_day"], rec["days"]))
+                rec["productive_p90"], rec["pos_per_day"], rec["days"]))
         out[role] = rec
     return {"rebuilt": bool(out), "byRole": out, "trim": [_TRIM_LO, _TRIM_HI]}
 
@@ -112,28 +112,46 @@ def _target_percentile() -> str:
             return v
     except Exception:  # noqa: BLE001
         pass
-    return "p60"
+    return "p70"
+
+
+def _ambition_pct() -> float:
+    """How much more ambitious than the learned base to plan (fraction).
+    Default +10%; the planner nudges productivity up without being unrealistic."""
+    try:
+        import settings
+        v = settings.get("planner", "capacityAmbitionPct")
+        if v is not None:
+            return max(0.0, float(v)) / 100.0
+    except Exception:  # noqa: BLE001
+        pass
+    return 0.10
 
 
 def recommended(role: str = "TECHNIK") -> dict:
-    """Recommended productive-minute capacity for a role (learned standard).
-    Optional config `planner.capacityPercentile` picks p50/p60/p70; a config
-    override on the standard work day can act as a guardrail (not yet wired)."""
+    """Recommended productive-minute capacity — a slightly ambitious learned
+    standard: base percentile (p60/p70) lifted by the ambition factor, capped at
+    the achievable ceiling (p90 of real competent days) so it never becomes
+    unrealistic. History says what is possible; the planner nudges the target up
+    to move the organisation forward. Config gives the final say."""
     r = db.get("SELECT * FROM capacity_standard WHERE role=?", (role.upper(),))
     if not r:
         return {"role": role, "found": False}
     row = r[0]
     pct = _target_percentile()
-    val = {"p50": row["productive_p50"], "p60": row["productive_p60"], "p70": row["productive_p70"]}[pct]
-    return {"role": role, "found": True, "targetPercentile": pct,
-            "productiveMinutes": val, "productiveHours": round(val / 60.0, 1),
+    base = {"p50": row["productive_p50"], "p60": row["productive_p60"], "p70": row["productive_p70"]}[pct]
+    ceiling = row["productive_p90"] or base
+    ambition = _ambition_pct()
+    target = round(min(base * (1 + ambition), ceiling), 1)
+    return {"role": role, "found": True, "targetPercentile": pct, "ambitionPct": round(ambition * 100),
+            "baseMinutes": base, "ceilingMinutes": ceiling,
+            "productiveMinutes": target, "productiveHours": round(target / 60.0, 1),
             "posPerDay": row["pos_per_day"], "days": row["days"],
-            "p50": row["productive_p50"], "p60": row["productive_p60"], "p70": row["productive_p70"]}
+            "p50": row["productive_p50"], "p60": row["productive_p60"],
+            "p70": row["productive_p70"], "p90": row["productive_p90"]}
 
 
 def overview() -> dict:
     rows = db.get("SELECT * FROM capacity_standard")
-    return {"targetPercentile": _target_percentile(),
-            "roles": {r["role"]: {"p50": r["productive_p50"], "p60": r["productive_p60"],
-                                  "p70": r["productive_p70"], "posPerDay": r["pos_per_day"],
-                                  "days": r["days"]} for r in rows}}
+    return {"targetPercentile": _target_percentile(), "ambitionPct": round(_ambition_pct() * 100),
+            "roles": {r["role"]: dict(recommended(r["role"]), **{"p90": r["productive_p90"]}) for r in rows}}

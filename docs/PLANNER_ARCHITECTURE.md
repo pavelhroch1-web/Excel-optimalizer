@@ -13,6 +13,18 @@ regionální manažer**: ví, co je obchodně nejdůležitější, postaví logi
 kolem povinných návštěv, volnou kapacitu využije na nejhodnotnější okolní POS a
 vytvoří TourPlan, který jde reálně odjet v pracovní době.
 
+**Optimalizační cíl:** ne využití hodin, ne počet návštěv, ale **co nejvyšší
+obchodní hodnota obsloužené sítě při dostupné kapacitě.** Kapacita je *omezení*,
+ne cíl. Business Gain, PPT, kadence, geografie, predikce trvání a naučená
+kapacita společně určují nejlepší plán.
+
+**Filozofie:**
+- **historie** říká, co je *možné* (přesné odhady reality),
+- **business pravidla** říkají, co je *důležité*,
+- **planner** určuje, *kam se chceme dlouhodobě posouvat* — plánuje mírně
+  ambiciózněji než historie, aby dlouhodobě zvyšoval produktivitu a pokrytí,
+  ale nikdy ne nereálně nebo demotivujícím způsobem.
+
 Tři věty, které drží celý návrh:
 
 1. **Neoptimalizujeme kilometry.** Kilometry a jízdní časy jsou pouze *kontrola
@@ -157,19 +169,24 @@ hierarchie → kvantily), jen nad jinou veličinou.
 Model reprezentuje **kolektivní zkušenost celé firmy**, cílí na běžného až mírně
 nadprůměrného technika a **ignoruje extrémy**.
 
-> **Denní kapacita = dlouhodobě učený firemní STANDARD, ne pevných 8 h a ne
-> průměr současného chování.** Planner nesmí kopírovat to, že někdo odpracuje
-> 4 h a jiný 20 h. Po každém importu SalesApp se z agregovaných dat celé firmy
-> (produktivní minuty, jízdní časy, délky návštěv, sezónnost, reálně stihnuté
-> POS…) **po odstranění extrémů** spočítá doporučená denní kapacita jako
-> **~p60/p70 produktivních minut** — tedy cíl kompetentního dne, mírně nad
-> mediánem. Planner tím **dlouhodobě posouvá všechny techniky stejným směrem**
-> místo aby normalizoval slabší výkon.
->   - Zdroj = naučená distribuce produktivních minut/den (extrémy vyřazené).
->   - Cíl = p60/p70 (konfigurovatelný percentil).
->   - Konfigurace slouží jako **mantinel/override** (horní/dolní strop), ne jako
->     primární zdroj.
-> Kapacita se počítá **per role** (technik vs. OZ), nikdy per jednotlivec.
+> **Denní kapacita = mírně ambiciózní učený firemní STANDARD, ne pevných 8 h,
+> ne popis historie.** Historie slouží k *přesným odhadům reality*; cíl planneru
+> ale není popsat současný stav, nýbrž **firmu dlouhodobě posouvat**. Planner
+> proto plánuje **mírně ambiciózněji** než historie — ne nereálně, ale tak, aby
+> nekonzervoval dnešní neefektivitu.
+>
+> Výpočet po každém importu SalesApp (agregovaně, po odstranění extrémů):
+>   1. **báze** = naučená distribuce produktivních minut/den, cílový percentil
+>      **p60/p70** (konfigurovatelný) — mírně nad mediánem,
+>   2. **ambiční navýšení** = báze × (1 + *ambitionPct*), default ~+10 %,
+>   3. **strop reálně dosažitelného** = **p90** distribuce (co nejlepší kompetentní
+>      dny reálně zvládly) — ambice nikdy nepřekročí strop, aby standard nebyl
+>      nereálný ani demotivující.
+>   → `kapacita = min( báze × (1+ambition), p90 )`
+>
+> Počítá se **per role** (technik vs. OZ), nikdy per jednotlivec. Planner tím
+> posouvá všechny stejným směrem místo normalizace slabšího výkonu. Konfigurace
+> (percentil, ambitionPct, případný pevný mantinel) dává finální slovo.
 
 **Metoda — empirical Bayes / shrinkage s ořezem extrémů:**
 

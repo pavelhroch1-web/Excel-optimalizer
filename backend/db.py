@@ -89,6 +89,9 @@ def init_db() -> None:
         scols = {r[1] for r in conn.execute("PRAGMA table_info(snapshots)")}
         if "kind" not in scols:
             conn.execute("ALTER TABLE snapshots ADD COLUMN kind TEXT NOT NULL DEFAULT 'state'")
+        capcols = {r[1] for r in conn.execute("PRAGMA table_info(capacity_standard)")}
+        if capcols and "productive_p90" not in capcols:
+            conn.execute("ALTER TABLE capacity_standard ADD COLUMN productive_p90 REAL")
         conn.commit()
     finally:
         conn.close()

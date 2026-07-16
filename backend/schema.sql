@@ -728,6 +728,7 @@ CREATE TABLE IF NOT EXISTS capacity_standard (
     productive_p50 REAL,
     productive_p60 REAL,
     productive_p70 REAL,
+    productive_p90 REAL,               -- achievable ceiling (best competent days)
     pos_per_day    REAL,               -- p60 of POS actually completed / day
     days           INTEGER,
     updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
