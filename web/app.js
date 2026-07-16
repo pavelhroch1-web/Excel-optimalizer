@@ -1558,6 +1558,29 @@ function renderTeam(r) {
     tile("Rezerva", t.slack, "techniků pod kapacitou", t.slack ? "warn" : "") +
     tile("Po termínu", t.totalOverdue, "zpožděných zastávek", t.totalOverdue ? "bad" : "good") + `</div>`;
 
+  // Travel vs on-site — the manager's core efficiency read, per technician.
+  // On-site time is billable value; travel is overhead. One stacked bar each,
+  // worst on-site ratio first, click → that technician's routes.
+  const split = r.technicians
+    .map((x) => ({ ...x, _tot: (x.onPosMin || 0) + (x.travelMin || 0) }))
+    .filter((x) => x._tot > 0)
+    .sort((a, b) => (a.onPosRatioPct ?? 999) - (b.onPosRatioPct ?? 999));
+  const teamOn = t.avgOnPosRatioPct;
+  document.getElementById("team-split").innerHTML = split.length
+    ? `<div class="pl-section">Čas u zákazníka vs. na cestě` +
+        (teamOn != null ? ` <span class="pd-chip">tým Ø ${teamOn} % na POS</span>` : "") + `</div>` +
+      `<div class="split-legend"><span class="sl-on">u zákazníka</span><span class="sl-tr">na cestě</span></div>` +
+      `<div class="split-list">` + split.map((x) => {
+        const on = Math.round((x.onPosMin / x._tot) * 100);
+        const onH = (x.onPosMin / 60).toFixed(1), trH = (x.travelMin / 60).toFixed(1);
+        const low = x.onPosRatioPct != null && x.onPosRatioPct < 50;
+        return `<div class="split-row"><span class="split-name pos-link tech-link" data-tech="${esc(x.technician)}">${esc(x.technician)}</span>` +
+          `<div class="split-bar" title="${onH} h u zákazníka · ${trH} h na cestě">` +
+          `<span class="split-on" style="width:${on}%"></span><span class="split-tr" style="width:${100 - on}%"></span></div>` +
+          `<span class="split-pct ${low ? "low" : ""}">${x.onPosRatioPct != null ? x.onPosRatioPct + " %" : "—"}</span></div>`;
+      }).join("") + `</div>`
+    : "";
+
   // leaks — where km/time leaks
   const L = r.leaks || {};
   const leakRow = (title, items, fmt) => items && items.length
@@ -1587,20 +1610,31 @@ function renderTeam(r) {
   }).join("") + `</tbody></table>`;
   document.getElementById("team-table").innerHTML = html;
 
-  document.querySelectorAll("#team-table .tech-link, #team-leaks .tech-link").forEach((el) =>
+  document.querySelectorAll("#team-table .tech-link, #team-leaks .tech-link, #team-split .tech-link").forEach((el) =>
     el.addEventListener("click", () => drillToTechnician(el.dataset.tech)));
 }
 
-on("team-load", "click", async () => {
+async function loadTeamDashboard() {
   const days = document.getElementById("team-days").value || 21;
+  const tiles = document.getElementById("team-tiles");
   setResult("team-result", "Počítám dashboard týmu…", "");
+  if (tiles && !tiles.innerHTML) tiles.innerHTML = skeleton({ rows: 3 });
   try {
     const r = await apiJson(`/api/analytics/team?days_back=${days}`);
-    if (!r.technicians.length) { setResult("team-result", r.note || "Žádní aktivní technici.", "err"); return; }
+    if (!r.technicians.length) {
+      if (tiles) showState(tiles, "empty", r.note || "Žádní aktivní technici v tomto okně.");
+      setResult("team-result", "", "ok"); return;
+    }
     renderTeam(r);
     setResult("team-result", "", "ok");
-  } catch (err) { setResult("team-result", "Chyba: " + err.message, "err"); }
-});
+  } catch (err) {
+    if (tiles) showState(tiles, "error", "Nepodařilo se načíst dashboard: " + err.message);
+    setResult("team-result", "", "ok");
+  }
+}
+on("team-load", "click", loadTeamDashboard);
+// re-run when the manager changes the window
+on("team-days", "change", () => { if (document.getElementById("team-tiles").innerHTML) loadTeamDashboard(); });
 
 on("ract-tech", "change", loadRactDays);
 
@@ -4406,6 +4440,8 @@ function showView(name) {
     if (name === "analytics" && typeof loadRactTechnicians === "function") loadRactTechnicians();
     if (name === "analytics" && typeof initTechGraphs === "function") initTechGraphs();
     if (name === "analytics" && typeof loadCapacity === "function") loadCapacity();
+    if (name === "analytics" && typeof loadTeamDashboard === "function"
+        && !document.getElementById("team-tiles").innerHTML) loadTeamDashboard();
     if (name === "pos" && typeof initPosView === "function") initPosView();
     if (name === "summary" && typeof initSummary === "function") initSummary();
     if (name === "import" && typeof initBulkTasks === "function") initBulkTasks();

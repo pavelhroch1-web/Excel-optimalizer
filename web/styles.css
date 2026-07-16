@@ -791,6 +791,22 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 .leak-item b { font-variant-numeric: tabular-nums; }
 .tech-link { font-weight: 600; }
 
+/* travel vs on-site — stacked efficiency bar per technician */
+.split-legend { display: flex; gap: var(--sp-4); margin-bottom: var(--sp-2); font-size: var(--fs-xs); color: var(--text-3); }
+.split-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.split-legend span::before { content: ""; width: 10px; height: 10px; border-radius: 3px; }
+.split-legend .sl-on::before { background: var(--good); }
+.split-legend .sl-tr::before { background: color-mix(in srgb, var(--warn) 55%, var(--border-2)); }
+.split-list { display: flex; flex-direction: column; gap: 6px; }
+.split-row { display: grid; grid-template-columns: 150px 1fr 52px; align-items: center; gap: var(--sp-3); }
+.split-name { font-size: var(--fs-sm); font-weight: var(--fw-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.split-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--bg-2); }
+.split-on { background: var(--good); transition: width var(--t2) var(--ease); }
+.split-tr { background: color-mix(in srgb, var(--warn) 55%, var(--border-2)); transition: width var(--t2) var(--ease); }
+.split-pct { text-align: right; font-size: var(--fs-sm); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; color: var(--text-2); }
+.split-pct.low { color: var(--bad); }
+@media (max-width: 640px) { .split-row { grid-template-columns: 110px 1fr 46px; } }
+
 /* ===================== APP SHELL (product navigation) ===================== */
 body:has(.app-shell:not(.hidden)) { padding: 0; }
 .app-shell { display: flex; min-height: 100vh; }
