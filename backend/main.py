@@ -1091,6 +1091,21 @@ if LOCAL_MODE:
     def analytics_team(days_back: int = 21):
         return team_analytics.overview(days_back)
 
+    # All-technicians filterable time series (dashboard graphs). Fast SQL — no
+    # per-day route reconstruction. Filter by grain/date/region/chain/campaign.
+    import tech_trends  # noqa: E402
+
+    @app.get("/api/analytics/technicians/series", dependencies=[Depends(require_auth)])
+    def analytics_tech_series(grain: str = "week", date_from: str | None = None,
+                              date_to: str | None = None, region: str | None = None,
+                              market: str | None = None, campaign: str | None = None,
+                              role: str = "TECHNIK"):
+        return tech_trends.all_series(grain, date_from, date_to, region, market, campaign, role)
+
+    @app.get("/api/analytics/technicians/filters", dependencies=[Depends(require_auth)])
+    def analytics_tech_filters():
+        return tech_trends.filter_options()
+
     import planner_unserved  # noqa: E402
 
     @app.post("/api/planner/unserved", dependencies=[Depends(require_auth)])
