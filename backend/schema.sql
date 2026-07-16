@@ -739,6 +739,37 @@ CREATE TABLE IF NOT EXISTS segment_definitions (
     updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Task Engine (planner [T]): generic tasks over POS — voucher handover, material
+-- exchange, addendum signing, service install, one-off actions, inventory,
+-- anything. Task TYPES are configuration (from the Velín); a task is an instance.
+-- Nothing is hardcoded.
+CREATE TABLE IF NOT EXISTS task_types (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL,
+    default_minutes REAL DEFAULT 5,
+    default_priority INTEGER DEFAULT 3,
+    combinable    INTEGER DEFAULT 1,      -- lze splnit při běžné návštěvě?
+    active        INTEGER DEFAULT 1,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS tasks (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    type_id       INTEGER,
+    pos_id        TEXT NOT NULL,
+    assigned_date TEXT NOT NULL DEFAULT (date('now')),
+    deadline      TEXT,
+    est_minutes   REAL,
+    priority      INTEGER,
+    combinable    INTEGER,                -- override typu (NULL = dědí z typu)
+    quantity      INTEGER,
+    note          TEXT,
+    status        TEXT NOT NULL DEFAULT 'open',  -- open | done | cancelled
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_tasks_pos ON tasks(pos_id);
+CREATE INDEX IF NOT EXISTS ix_tasks_status ON tasks(status);
+
 -- Recommended daily productive capacity (planner). A learned company STANDARD
 -- (p60/p70 of productive minutes per role, extremes removed) — not a fixed 8h
 -- and not the average of current behaviour. Recomputed from history.

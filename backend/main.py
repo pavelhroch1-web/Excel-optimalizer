@@ -1351,6 +1351,34 @@ if LOCAL_MODE:
     def planner_segment_delete(seg_id: int):
         return _segments.delete(seg_id)
 
+    # Planner [T] Task Engine: generic tasks over POS.
+    import tasks as _tasks  # noqa: E402
+    _tasks.seed_default_types()
+
+    @app.get("/api/planner/tasks", dependencies=[Depends(require_auth)])
+    def planner_tasks():
+        return _tasks.open_tasks()
+
+    @app.get("/api/planner/task-types", dependencies=[Depends(require_auth)])
+    def planner_task_types():
+        return {"types": _tasks.types()}
+
+    @app.post("/api/planner/task-types", dependencies=[Depends(require_auth)])
+    def planner_task_type_upsert(body: dict):
+        return _tasks.upsert_type(body)
+
+    @app.post("/api/planner/tasks", dependencies=[Depends(require_auth)])
+    def planner_task_create(body: dict):
+        return _tasks.create(body)
+
+    @app.put("/api/planner/tasks/{task_id}/status", dependencies=[Depends(require_auth)])
+    def planner_task_status(task_id: int, body: dict):
+        return _tasks.set_status(task_id, body.get("status", "done"))
+
+    @app.get("/api/planner/tasks/pos/{pos_id}", dependencies=[Depends(require_auth)])
+    def planner_tasks_pos(pos_id: str):
+        return {"tasks": _tasks.for_pos(pos_id)}
+
     @app.get("/api/summary", dependencies=[Depends(require_auth)])
     def summary_overview(period: str = "month", year: int | None = None,
                          month: int | None = None, quarter: int | None = None,

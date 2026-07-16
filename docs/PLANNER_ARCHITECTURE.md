@@ -212,6 +212,52 @@ zadrátovaná. Nové business parametry = nové položky konfigurace, ne nový k
 
 ---
 
+## 3d. [T] Task Engine — generické úkoly nad POS
+
+Planner neplánuje jen pravidelné coverage kampaně. Musí umět pracovat s
+**libovolnými úkoly nad POS** — předání poukázek, výměna materiálů, podpis
+dodatku, instalace služby, jednorázová akce, inventura, cokoli za rok přijde.
+
+**Generický, ne „poukázky v kódu.** `task_types` je konfigurace (z Velínu);
+úkol je instance typu. Žádný typ úkolu není zadrátovaný v kódu.
+
+**Atributy úkolu:**
+- seznam POS (na koho se vztahuje),
+- datum zadání, **deadline** (např. +2 měsíce),
+- odhad trvání, priorita,
+- **splnitelné při běžné návštěvě?** (kombinovatelný / vyžaduje vlastní návštěvu),
+- volitelně počet kusů, poznámka.
+
+**Integrace do TourPlanu (chování planneru):**
+- **Piggyback:** pokud technik na POS **stejně jede**, úkol se u té návštěvy jen
+  zobrazí („zároveň předej poukázky") — nulový dodatečný náklad. Toto je
+  přednostní režim pro kombinovatelné úkoly.
+- **Vlastní návštěva až když je nutná:** samostatnou návštěvu kvůli úkolu planner
+  vytvoří **teprve když se blíží deadline** a běžná návštěva už nestačí (nebo je
+  úkol nekombinovatelný). Tehdy se úkol chová jako **povinná kotva** [E0]/[E] s
+  časovým oknem daným deadlinem.
+- Otevřené úkoly per POS vstupují do **Business priority [C]** (blížící se deadline
+  zvyšuje prioritu) a do **manažerského pre-loadu [M]** (ruční jednorázové úkoly
+  jsou zvláštním případem Task Engine).
+
+Task Engine je **průřezová vrstva**: eviduje úkoly, počítá jejich naléhavost vůči
+deadlinu a napojuje je na plánování. Deterministické, plně konfigurovatelné.
+
+---
+
+## 3e. Lifecycle POS — spravedlivá coverage baseline
+
+Coverage se nesmí počítat od „nikdy", ale od okamžiku, kdy POS vstoupilo do sítě:
+- **nově importované POS** → *datum první evidence* = datum prvního importu
+  (`pos_master.first_seen`),
+- coverage a kadence se počítají **od first_seen**, dokud POS nemá první reálnou
+  návštěvu (čerstvě přidané POS není hned „po termínu"),
+- **po první skutečné návštěvě** se přejde na reálné *datum poslední návštěvy*.
+
+Tím je coverage férová k nově přidaným POS a nevytváří falešná rizika.
+
+---
+
 ## 4. [C] Business priorita POS
 
 Aditivní, transparentní skóre (žádný black-box) — manažer musí u každého POS
@@ -489,6 +535,8 @@ Draft → Optimalizace → Kontrola → Publikace → Monitoring → Nový Draft
 | `duration_model` | Hierarchické odhady trvání (p50/p75) per typ × řetězec × region × (tech), přepočítávané z historie. **(Fáze 1 — hotovo.)** |
 | `learned_stats` | Rodina firemních standardů stejným vzorem (jízdní časy, sezónnost, dopad kampaní, frekvence, efekt dofillu…). `duration_model` je první instancí. |
 | `capacity_standard` | Doporučená denní produktivní kapacita (p60/p70) per role, přepočítávaná z historie. |
+| `task_types` | Konfigurovatelné typy úkolů (z Velínu) — název, výchozí trvání/priorita, kombinovatelnost. |
+| `tasks` | Instance úkolů: POS, zadáno, deadline, trvání, priorita, kombinovatelnost, kusy/poznámka, stav. |
 | `segment_definitions` | Konfigurovatelné segmenty (typ terminálu / kategorie / partner / region) + cílová kadence + priorita — z Velínu, ne v kódu. |
 | `coverage_scopes` | Uložené rozsahy / simulace kampaní (které segmenty zahrnout/vyloučit) + výsledek feasibility. |
 | `pos_priors` | Naučené hodnotové priory + objem/jistota dat (pro shrinkage). |

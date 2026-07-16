@@ -715,6 +715,19 @@ function renderPosCard(c) {
       tile("Vzorek", d.n + "×", "návštěv v modelu") + `</div>`;
   }
 
+  // open tasks (Task Engine) — shown at the visit ("also do X")
+  if ((c.openTasks || []).length) {
+    const rows = c.openTasks.map((t) => {
+      const u = { overdue: "bad", urgent: "mid", normal: "ok" }[t.urgency] || "ok";
+      const dl = t.deadline ? `deadline ${String(t.deadline).slice(0, 10)}${t.daysToDeadline != null ? ` (${t.daysToDeadline} dní)` : ""}` : "bez deadline";
+      return `<div class="task-row"><span class="task-u hs-${u}"></span>
+        <span class="task-n">${esc(t.type_name || "úkol")}${t.quantity ? " ×" + t.quantity : ""}${t.note ? " · " + esc(t.note) : ""}</span>
+        <span class="task-m">${dl}${t.needsDedicated ? " · vlastní návštěva" : " · při běžné návštěvě"}</span></div>`;
+    }).join("");
+    html += `<div class="pd-section">Úkoly na POS <span class="pd-chip">${c.openTasks.length} otevřené</span></div>` +
+      `<p class="pd-sub">Při návštěvě POS technik zároveň splní:</p><div class="task-list">${rows}</div>`;
+  }
+
   // micro-cluster (planner Phase 2 — nearby POS to plan together)
   if (c.cluster && c.cluster.clustered) {
     const cl = c.cluster;
@@ -755,13 +768,15 @@ async function openPosDetail(posId, week) {
     } catch (e) { /* fall back to card only */ }
   }
   try {
-    const [c, dur, clu] = await Promise.all([
+    const [c, dur, clu, tsk] = await Promise.all([
       apiJson("/api/pos/" + encodeURIComponent(posId) + "/card"),
       apiJson("/api/planner/duration/pos/" + encodeURIComponent(posId)).catch(() => null),
       apiJson("/api/planner/clusters/pos/" + encodeURIComponent(posId)).catch(() => null),
+      apiJson("/api/planner/tasks/pos/" + encodeURIComponent(posId)).catch(() => null),
     ]);
     if (dur && dur.p50 != null) c.predictedDuration = dur;
     if (clu && clu.clustered) c.cluster = clu;
+    if (tsk && (tsk.tasks || []).length) c.openTasks = tsk.tasks;
     document.getElementById("pd-title").textContent = "POS " + posId + (c.name ? " · " + c.name : "");
     bodyEl.innerHTML = renderPosCard(c) + (head ? `<div class="pd-section" style="margin-top:22px">Plánování</div>` + head : "");
   } catch (err) {

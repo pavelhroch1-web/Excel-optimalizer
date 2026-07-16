@@ -144,7 +144,8 @@ def seed_defaults() -> dict:
 def _pos_with_last_visit():
     return db.get(
         "SELECT p.pos_id, p.name, p.city, p.terminal_type, p.market, p.pos_area, p.area, "
-        "p.category, p.classification, p.ppt, p.technician, p.gps_x, p.gps_y, lv.last last_visit "
+        "p.category, p.classification, p.ppt, p.technician, p.gps_x, p.gps_y, "
+        "p.first_seen first_seen, lv.last last_visit "
         "FROM pos_master p LEFT JOIN (SELECT pos_id, MAX(visit_date) last FROM salesapp_visits "
         "GROUP BY pos_id) lv ON lv.pos_id=p.pos_id WHERE p.active=1")
 
@@ -177,15 +178,20 @@ def coverage() -> dict:
         weeks = []
         overdue_list = []
         for p in members:
-            w = _weeks_since(p["last_visit"], today)
+            visited = p["last_visit"] is not None
+            # POS lifecycle: coverage counts from first_seen until the first real
+            # visit, so a freshly-imported POS isn't instantly "overdue".
+            ref = p["last_visit"] if visited else p["first_seen"]
+            w = _weeks_since(ref, today)
+            if not visited:
+                never += 1
+            if visited and w is not None:
+                weeks.append(w)                 # real cadence uses visited only
             if w is None:
-                never += 1; overdue += 1
-                overdue_list.append((None, p))
-                continue
-            weeks.append(w)
-            if target:
+                overdue += 1; overdue_list.append((None, p, visited))
+            elif target:
                 if w > target:
-                    overdue += 1; overdue_list.append((w, p))
+                    overdue += 1; overdue_list.append((w, p, visited))
                 elif w > 0.8 * target:
                     approaching += 1
                 else:
@@ -204,8 +210,8 @@ def coverage() -> dict:
             risk = "low"
         overdue_list.sort(key=lambda x: (x[0] is not None, -(x[0] or 1e9)))
         examples = [{"pos": str(p["pos_id"]), "name": p["name"], "city": p["city"],
-                     "weeksSince": w, "lat": p["gps_x"], "lon": p["gps_y"]}
-                    for w, p in overdue_list[:8]]
+                     "weeksSince": w, "visited": vis, "lat": p["gps_x"], "lon": p["gps_y"]}
+                    for w, p, vis in overdue_list[:8]]
         out.append({
             "id": s["id"], "name": s["name"], "priority": s["priority"],
             "businessWeight": s["business_weight"], "targetCadenceWeeks": target,
