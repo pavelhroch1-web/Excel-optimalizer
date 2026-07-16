@@ -4458,6 +4458,7 @@ async function renderModel(m) {
 // Tabs are added release-by-release into _DASH.
 const _DASH = [
   { id: "overview", label: "Overview", load: dashOverview },
+  { id: "capacity", label: "Capacity", load: dashCapacity },
 ];
 let _dashTab = "overview";
 function initDashboards() {
@@ -4513,6 +4514,47 @@ async function dashOverview(host) {
     host.querySelectorAll(".tech-link").forEach((el) =>
       el.addEventListener("click", () => drillToTechnician(el.dataset.tech)));
   } catch (e) { showState(host, "error", "Nepodařilo se načíst overview: " + e.message); }
+}
+
+// --- Capacity: learned standard + per-technician load vs capacity ---
+async function dashCapacity(host) {
+  host.innerHTML = skeleton({ rows: 4 });
+  try {
+    const [cap, team] = await Promise.all([
+      apiJson("/api/planner/capacity").catch(() => null),
+      apiJson("/api/analytics/team?days_back=90"),
+    ]);
+    const techs = team.technicians || [];
+    if (!techs.length) { showState(host, "empty", "Zatím nejsou data — naimportuj exporty."); return; }
+    const t = (cap && cap.roles && cap.roles.TECHNIK) || {};
+    const std = `<div class="pl-tiles">` +
+      tile("Produktivní čas/den", (t.productiveHours != null ? t.productiveHours + " h" : "—"),
+        `standard ${cap ? cap.targetPercentile : "—"}`) +
+      tile("POS / den", t.posPerDay ?? "—", "naučená kapacita") +
+      tile("Strop (p90)", (t.ceilingMinutes != null ? Math.round(t.ceilingMinutes) + " min" : "—"), "reálný strop") +
+      tile("Ambice", (cap && cap.ambitionPct != null ? "+" + cap.ambitionPct + " %" : "—"), "nad základ") +
+      tile("Přetížení", (team.team && team.team.overloaded) || 0, "nad kapacitou", (team.team && team.team.overloaded) ? "bad" : "good") +
+      tile("Rezerva", (team.team && team.team.slack) || 0, "pod kapacitou", (team.team && team.team.slack) ? "warn" : "") +
+      `</div>`;
+
+    // per-technician load vs capacity, worst (most overloaded) first
+    const rows = techs.filter((x) => x.loadPct != null)
+      .sort((a, b) => (b.loadPct || 0) - (a.loadPct || 0));
+    const list = rows.length ? `<div class="pl-section">Vytížení vs. kapacita (plán / naučená kapacita)</div>` +
+      `<div class="split-list">` + rows.map((x) => {
+        const lm = _LOAD_META[x.loadStatus] || {};
+        const pct = Math.max(0, Math.min(x.loadPct || 0, 150));
+        const w = Math.min(pct, 100);
+        const tone = x.loadStatus === "over" ? "over" : (x.loadStatus === "slack" ? "slack" : "ok");
+        return `<div class="split-row"><span class="split-name pos-link tech-link" data-tech="${esc(x.technician)}">${esc(x.technician)}</span>` +
+          `<div class="split-bar cap-bar" title="${x.planLoad ?? "—"} plán / ${x.capacityPerWeek ?? "—"} kapacita/týd"><span class="cap-fill ${tone}" style="width:${w}%"></span></div>` +
+          `<span class="split-pct ${x.loadStatus === "over" ? "low" : ""}">${x.loadPct != null ? x.loadPct + " %" : "—"}</span></div>`;
+      }).join("") + `</div>` : "";
+
+    host.innerHTML = std + list;
+    host.querySelectorAll(".tech-link").forEach((el) =>
+      el.addEventListener("click", () => drillToTechnician(el.dataset.tech)));
+  } catch (e) { showState(host, "error", "Nepodařilo se načíst kapacitu: " + e.message); }
 }
 
 // ============ Coverage by segment ============

@@ -972,6 +972,11 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .dash-attn-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3);
   padding: 7px 0; border-top: 1px solid var(--border); font-size: var(--fs-sm); }
 .dash-attn-x { font-size: var(--fs-xs); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.cap-bar { background: var(--bg-2); }
+.cap-fill { display: block; height: 100%; transition: width var(--t2) var(--ease); }
+.cap-fill.over { background: var(--bad); }
+.cap-fill.slack { background: var(--warn); }
+.cap-fill.ok { background: var(--good); }
 .cfg-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); z-index: 100;
   background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 999px; font-size: 13px; font-weight: 600;
   box-shadow: var(--shadow-3); opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; }
