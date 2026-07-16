@@ -19,6 +19,9 @@
   --shadow-2: 0 4px 16px -6px rgba(16,24,28,.14), 0 1px 3px rgba(16,24,28,.06);
   --shadow-3: 0 12px 32px -10px rgba(16,24,28,.20);
   --r-lg: 12px; --r-md: 8px; --r-sm: 6px;
+  --ring: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent);  /* keyboard focus */
+  --ease: cubic-bezier(.4, 0, .2, 1);
+  --t1: .12s; --t2: .2s;
   --mono: ui-monospace, "Cascadia Code", "SF Mono", "Consolas", monospace;
   --grot: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
 }
@@ -81,6 +84,35 @@ button.ghost:hover, .btn-ghost:hover { background: var(--bg-2); border-color: va
   padding: 8px 14px; border-radius: var(--r-sm); border: 1px solid transparent; cursor: pointer; }
 .btn-ghost { border-color: var(--border-2); }
 
+/* Disabled: one look everywhere — muted, no hover/press feedback. */
+button:disabled, button[disabled], .btn-primary:disabled, .btn-ghost:disabled {
+  opacity: .5; cursor: not-allowed; box-shadow: none; transform: none;
+}
+button:disabled:hover { background: var(--accent); }
+button.ghost:disabled:hover, .btn-ghost:disabled:hover { background: var(--panel); border-color: var(--border-2); }
+
+/* Keyboard focus — one crisp ring for every interactive element, only when
+   navigating by keyboard (:focus-visible), never on mouse click. Uses box-
+   shadow with a panel gap so it reads on any background; outline stays hidden.
+   The ring wins over overflow clipping by sitting on the element itself. */
+:focus-visible { outline: none; }
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible,
+.side-item:focus-visible, .pos-link:focus-visible, .pill:focus-visible,
+.ht-btn:focus-visible, .td-tab:focus-visible, .sf-seg:focus-visible,
+.tp-btn:focus-visible, .gg-btn:focus-visible, .rad-btn:focus-visible,
+.cfg-switch:focus-visible, .cov-ex:focus-visible, .fbar-seg span:focus-visible,
+.hc-card:focus-visible, .st-row:focus-visible, .brief-row:focus-visible,
+.ck-res:focus-visible, .pd-close:focus-visible, .imp-up:focus-visible {
+  box-shadow: var(--ring); position: relative; z-index: 1; border-radius: var(--r-sm);
+}
+/* inputs already show a soft ring on plain focus; keep it, add offset on kb nav */
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--accent);
+}
+/* rounded controls keep their pill radius under the ring */
+.pill:focus-visible, .ht-btn:focus-visible, .td-tab:focus-visible,
+.fbar-seg span:focus-visible { border-radius: 999px; }
+
 .error { color: #B3453A; font-size: 13px; min-height: 18px; }
 .result { color: var(--text-dim); font-size: 13px; min-height: 18px; }
 .result.ok { color: var(--good, #2e7d32); }
@@ -105,6 +137,12 @@ button.ghost:hover, .btn-ghost:hover { background: var(--bg-2); border-color: va
 @media (prefers-reduced-motion: reduce) {
   .sk-head, .sk-line { animation: none; }
   .state-spinner { animation: none; }
+  /* honor the OS setting: no motion, but keep focus rings and color changes */
+  *, *::before, *::after {
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+  }
+  button:active, .hc-card:hover, .insight[role=button]:hover { transform: none !important; }
 }
 /* state row inside a table body: span all columns, no cell borders/hover */
 tr.tbl-state td { border: none; background: none; padding: 0; }
@@ -509,7 +547,8 @@ button.ghost.small { padding: 7px 13px; font-size: 12.5px; margin-left: auto; }
 .health-sub { font-weight: 500; font-size: 12px; color: var(--text-3); margin-left: 10px; }
 .hc-card { display: grid; grid-template-columns: 48px 1fr auto; gap: 14px; align-items: center; padding: 12px 14px; border-radius: var(--r-md); border: 1px solid var(--border); margin-bottom: 8px; background: var(--panel-2); cursor: pointer; transition: .12s; }
 .hc-card:last-child { margin-bottom: 0; }
-.hc-card:hover { border-color: var(--border-2); }
+.hc-card:hover { border-color: var(--border-2); background: var(--panel); box-shadow: var(--shadow-1); transform: translateY(-1px); }
+.hc-card:active { transform: translateY(0); }
 .hc-card.crit { border-left: 4px solid #C0392B; }
 .hc-card.warn { border-left: 4px solid #B45309; }
 .hc-gauge { position: relative; width: 48px; height: 48px; }
@@ -745,10 +784,14 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .side-mark { color: var(--accent); font-size: 16px; }
 .side-logo .ver { margin-left: auto; }
 .side-nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
-.side-item { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-radius: var(--r-md);
-  background: transparent; border: 0; color: var(--text-2); font-size: 14px; font-weight: 600; cursor: pointer; text-align: left; width: 100%; transition: background .1s, color .1s; }
+.side-item { position: relative; display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-radius: var(--r-md);
+  background: transparent; border: 0; color: var(--text-2); font-size: 14px; font-weight: 600; cursor: pointer; text-align: left; width: 100%; transition: background var(--t1) var(--ease), color var(--t1) var(--ease); }
 .side-item:hover { background: var(--bg-2); color: var(--text); }
 .side-item.active { background: var(--accent-soft); color: var(--accent); }
+/* signature active indicator — an accent bar that grows in on select */
+.side-item::before { content: ""; position: absolute; left: 2px; top: 50%; width: 3px; height: 0;
+  border-radius: 3px; background: var(--accent); transform: translateY(-50%); transition: height var(--t2) var(--ease); }
+.side-item.active::before { height: 18px; }
 .side-item .si-ico { display: flex; } .side-item .si-ico svg { width: 19px; height: 19px; }
 .side-foot { padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--border); }
 .side-foot button { width: 100%; }

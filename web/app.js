@@ -121,7 +121,15 @@ let _toastTimer;
 function toast(msg, kind = "ok") {   // kind: ok | err | info
   clearTimeout(_toastTimer);
   let t = document.getElementById("app-toast");
-  if (!t) { t = document.createElement("div"); t.id = "app-toast"; t.className = "app-toast"; document.body.appendChild(t); }
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "app-toast"; t.className = "app-toast";
+    t.setAttribute("role", "status");
+    t.setAttribute("aria-live", "polite");
+    document.body.appendChild(t);
+  }
+  // errors interrupt (assertive); success/info wait their turn (polite)
+  t.setAttribute("aria-live", kind === "err" ? "assertive" : "polite");
   const mark = kind === "err" ? "✕" : kind === "info" ? "ℹ" : "✓";
   t.className = "app-toast " + kind;
   t.textContent = mark + "  " + msg;
