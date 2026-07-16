@@ -156,6 +156,11 @@ def configure(state: dict, mode: str, start_week: int, length: int,
     _apply_planner_settings(state)
     _apply_exclusions(state)
     _apply_priority(state)
+    try:
+        import task_bridge
+        task_bridge.apply_to_state(state)   # open tasks needing a visit -> FORCE_INCLUDE
+    except Exception:  # noqa: BLE001 - never block planning on the task overlay
+        pass
     _apply_reassignments(state)
     try:
         import cadence_config

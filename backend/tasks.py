@@ -31,26 +31,41 @@ def types(active_only: bool = False) -> list:
     return [dict(r) for r in db.get(q + " ORDER BY name")]
 
 
+# The three business buckets the technician must see distinctly on a stop.
+CATEGORIES = ("service", "campaign", "material", "other")
+
+
 def upsert_type(t: dict) -> dict:
-    f = (t.get("name"), t.get("default_minutes", 5), t.get("default_priority", 3),
+    cat = (t.get("category") or "other").strip().lower()
+    if cat not in CATEGORIES:
+        cat = "other"
+    f = (t.get("name"), cat, t.get("default_minutes", 5), t.get("default_priority", 3),
          1 if t.get("combinable", True) else 0, 1 if t.get("active", True) else 0)
     if t.get("id"):
-        db.run("UPDATE task_types SET name=?, default_minutes=?, default_priority=?, combinable=?, "
-               "active=? WHERE id=?", f + (t["id"],))
+        db.run("UPDATE task_types SET name=?, category=?, default_minutes=?, default_priority=?, "
+               "combinable=?, active=? WHERE id=?", f + (t["id"],))
         return {"id": t["id"], "updated": True}
-    db.run("INSERT INTO task_types(name, default_minutes, default_priority, combinable, active) "
-           "VALUES(?,?,?,?,?)", f)
+    db.run("INSERT INTO task_types(name, category, default_minutes, default_priority, combinable, active) "
+           "VALUES(?,?,?,?,?,?)", f)
     return {"id": db.get("SELECT last_insert_rowid() id")[0]["id"], "created": True}
 
 
 def seed_default_types() -> dict:
     if db.get("SELECT id FROM task_types LIMIT 1"):
         return {"seeded": False}
-    for name, mins, prio, comb in [
-        ("Předání poukázek", 5, 3, 1), ("Výměna materiálů", 8, 3, 1),
-        ("Podpis dodatku", 10, 2, 1), ("Instalace služby", 30, 2, 0),
-        ("Jednorázová akce", 15, 3, 1), ("Inventura", 25, 2, 0)]:
-        upsert_type({"name": name, "default_minutes": mins, "default_priority": prio, "combinable": comb})
+    # name, category, minutes, priority, combinable
+    for name, cat, mins, prio, comb in [
+        # servis (oprava/instalace)
+        ("Servisní oprava", "service", 20, 2, 1), ("Instalace služby", "service", 30, 2, 0),
+        ("Inventura", "service", 25, 2, 0),
+        # obchodní kampaň
+        ("Předání poukázek", "campaign", 5, 3, 1), ("Podpis dodatku", "campaign", 10, 2, 1),
+        ("Jednorázová akce", "campaign", 15, 3, 1),
+        # materiál (logistika)
+        ("Kotouče", "material", 4, 3, 1), ("Stojánky", "material", 6, 3, 1),
+        ("Letáky", "material", 3, 4, 1), ("Poukázky (materiál)", "material", 4, 3, 1)]:
+        upsert_type({"name": name, "category": cat, "default_minutes": mins,
+                     "default_priority": prio, "combinable": comb})
     return {"seeded": True}
 
 
@@ -167,7 +182,8 @@ def set_status(task_id: int, status: str) -> dict:
 
 def _join_rows(where, params):
     return db.get(
-        "SELECT t.*, tt.name type_name, tt.combinable type_combinable, p.name pos_name, p.city pos_city "
+        "SELECT t.*, tt.name type_name, tt.category type_category, tt.combinable type_combinable, "
+        "p.name pos_name, p.city pos_city "
         "FROM tasks t LEFT JOIN task_types tt ON tt.id=t.type_id "
         "LEFT JOIN pos_master p ON p.pos_id=t.pos_id " + where, tuple(params))
 
@@ -175,6 +191,49 @@ def _join_rows(where, params):
 def for_pos(pos_id: str) -> list:
     """Open tasks for one POS — surfaced at the visit ('also do X')."""
     return _enrich(_join_rows("WHERE t.pos_id=? AND t.status='open' ORDER BY t.deadline", (str(pos_id),)))
+
+
+_CAT_LABEL = {"service": "Opravit", "campaign": "Kampaň", "material": "Materiál", "other": "Úkol"}
+
+
+def bundle_for_pos(pos_id: str) -> dict:
+    """All open tasks for a POS, grouped into the three business buckets the
+    technician must see on a stop (service / campaign / material). This is the
+    *bundling* layer: when a technician visits a POS, they get everything open
+    there in one go — minimizing repeat trips. Presentation only; no engine."""
+    rows = for_pos(pos_id)
+    groups: dict[str, list] = {"service": [], "campaign": [], "material": [], "other": []}
+    for r in rows:
+        cat = (r.get("type_category") or "other")
+        if cat not in groups:
+            cat = "other"
+        groups[cat].append({
+            "type": r.get("type_name"), "quantity": r.get("quantity"),
+            "priority": r.get("priority"), "estMinutes": r.get("est_minutes"),
+            "deadline": r.get("deadline"), "urgency": r.get("urgency"),
+            "needsDedicated": r.get("needsDedicated"), "note": r.get("note"),
+        })
+    prios = [r.get("priority") for r in rows if r.get("priority") is not None]
+    return {
+        "posId": str(pos_id),
+        "count": len(rows),
+        "groups": {k: v for k, v in groups.items() if v},
+        "totalMinutes": round(sum((r.get("est_minutes") or 0) for r in rows), 1),
+        "topPriority": min(prios) if prios else None,  # 1 = highest
+        "hasDedicated": any(r.get("needsDedicated") for r in rows),
+        "summary": _bundle_summary(groups),
+    }
+
+
+def _bundle_summary(groups: dict) -> str:
+    """One-line human summary for the export cell / TourPlan row."""
+    parts = []
+    for cat in ("service", "campaign", "material", "other"):
+        items = groups.get(cat) or []
+        for it in items:
+            q = f" {it['quantity']}×" if it.get("quantity") else ""
+            parts.append(f"{_CAT_LABEL[cat]}: {it['type']}{q}")
+    return " | ".join(parts)
 
 
 def open_tasks(limit: int = 500) -> dict:

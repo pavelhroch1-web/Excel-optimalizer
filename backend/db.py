@@ -92,6 +92,9 @@ def init_db() -> None:
         capcols = {r[1] for r in conn.execute("PRAGMA table_info(capacity_standard)")}
         if capcols and "productive_p90" not in capcols:
             conn.execute("ALTER TABLE capacity_standard ADD COLUMN productive_p90 REAL")
+        ttcols = {r[1] for r in conn.execute("PRAGMA table_info(task_types)")}
+        if ttcols and "category" not in ttcols:
+            conn.execute("ALTER TABLE task_types ADD COLUMN category TEXT DEFAULT 'other'")
         conn.commit()
     finally:
         conn.close()

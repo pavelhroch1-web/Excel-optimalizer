@@ -118,6 +118,13 @@ def read_enriched_draft(path: str) -> list[dict]:
             base["lastRealVisitDate"] = extra.get("lastRealVisitDate")
             base["weeksSinceLastVisit"] = extra.get("weeksSinceLastVisit")
             base["REASON_FRIENDLY"] = friendly_reason(base.get("REASON") or "")
+            # Bundling: every planned stop carries all its open tasks (service /
+            # campaign / material) so the technician does everything in one trip.
+            try:
+                import tasks as _tasks
+                base["tasks"] = _tasks.bundle_for_pos(str(pos_id))
+            except Exception:  # noqa: BLE001 - task overlay must never break the plan view
+                base["tasks"] = None
             rows.append(base)
         return rows
     finally:

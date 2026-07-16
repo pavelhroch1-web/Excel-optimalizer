@@ -746,6 +746,7 @@ CREATE TABLE IF NOT EXISTS segment_definitions (
 CREATE TABLE IF NOT EXISTS task_types (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     name          TEXT NOT NULL,
+    category      TEXT DEFAULT 'other',   -- service | campaign | material | other
     default_minutes REAL DEFAULT 5,
     default_priority INTEGER DEFAULT 3,
     combinable    INTEGER DEFAULT 1,      -- lze splnit při běžné návštěvě?

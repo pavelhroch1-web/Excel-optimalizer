@@ -171,8 +171,30 @@ def _stream_sheet(workbook_path: str, sheet_name: str, download_name: str) -> St
         out_wb = openpyxl.Workbook()
         out_ws = out_wb.active
         out_ws.title = sheet_name[:31]
-        for row in src_ws.iter_rows(values_only=True):
-            out_ws.append(row)
+        rows_iter = src_ws.iter_rows(values_only=True)
+        header = next(rows_iter, None)
+        # Bundling in the export: if the sheet lists POS, append an "ÚKOLY" column
+        # so the technician sees service/campaign/material to do at each stop.
+        pos_col = None
+        if header:
+            try:
+                pos_col = [str(h).upper() if h is not None else "" for h in header].index("POS")
+            except ValueError:
+                pos_col = None
+            out_ws.append(list(header) + (["ÚKOLY"] if pos_col is not None else []))
+        for row in rows_iter:
+            if pos_col is not None:
+                pid = row[pos_col] if pos_col < len(row) else None
+                summary = ""
+                if pid not in (None, ""):
+                    try:
+                        import tasks as _tasks
+                        summary = _tasks.bundle_for_pos(str(pid)).get("summary", "")
+                    except Exception:  # noqa: BLE001 - export must not fail on task overlay
+                        summary = ""
+                out_ws.append(list(row) + [summary])
+            else:
+                out_ws.append(row)
     finally:
         src_wb.close()
     buf = io.BytesIO()
