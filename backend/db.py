@@ -56,8 +56,8 @@ def _seed_db_path() -> str | None:
     FFO_SEED_DB; otherwise looked up in the PyInstaller bundle or the repo at
     seed/fieldforce.db. Returns None when no seed is available (empty start)."""
     override = os.environ.get("FFO_SEED_DB")
-    if override:
-        return override if os.path.exists(override) else None
+    if override is not None:  # explicitly set — honor it; "" disables seeding
+        return override if (override and os.path.exists(override)) else None
     candidates = []
     base = getattr(sys, "_MEIPASS", None)
     if base:

@@ -24,6 +24,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r desktop_client/requirements-desktop.txt pyinstaller requests
 
+      - name: Verify seed DB schema matches the app (fail build on drift)
+        shell: pwsh
+        run: |
+          # Guard the single source of truth: if seed/fieldforce.db was built
+          # against an older schema than backend/schema.sql (+migrations), stop
+          # the build so a stale seed can never ship. Regenerate with
+          # tools/build_seed_db.py. No-op (exit 0) when no seed is present.
+          python tools/verify_seed_db.py
+          if ($LASTEXITCODE -ne 0) { throw "Seed DB schema drift - regenerate seed/fieldforce.db" }
+
       - name: Build portable app (PyInstaller --onedir, self-contained)
         shell: pwsh
         run: |

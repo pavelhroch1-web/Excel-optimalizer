@@ -8,11 +8,14 @@ so a freshly downloaded app is usable immediately, while the git *source* stays
 free of real data (the exports and the seed DB are inputs/outputs, gitignored).
 
 Usage:
-    python tools/build_seed_db.py <export.xlsx> [<export.xlsx> ...]
-    # e.g.  python tools/build_seed_db.py exports/*.xlsx
+    python tools/build_seed_db.py                      # reads seed_inputs/*.xlsx
+    python tools/build_seed_db.py <export.xlsx> ...    # explicit files/globs
 
-Order does not matter for detection, but POS master should precede SalesApp so
-visits link; the script sorts known types into the correct order automatically.
+With no arguments it picks up every .xlsx in seed_inputs/ (the conventional,
+gitignored drop folder), so regenerating a release seed after new exports is a
+single command. Order does not matter for detection — known types are sorted
+into dependency order (POS -> visits -> plan) automatically. After writing the
+seed it runs tools/verify_seed_db.py so a bad seed never reaches a build.
 Output: seed/fieldforce.db (override with --out).
 """
 from __future__ import annotations
@@ -32,27 +35,33 @@ _ORDER = {"pos_master": 0, "salesapp": 1, "activity_plan": 2, "tourplan": 3, "wo
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("files", nargs="+", help="export .xlsx files (globs ok)")
+    ap.add_argument("files", nargs="*", help="export .xlsx files (globs ok); "
+                    "default: every .xlsx in seed_inputs/")
     ap.add_argument("--out", default=os.path.join(REPO, "seed", "fieldforce.db"))
     args = ap.parse_args()
 
+    patterns = args.files or [os.path.join(REPO, "seed_inputs", "*.xlsx")]
     paths: list[str] = []
-    for pat in args.files:
+    for pat in patterns:
         paths.extend(sorted(glob.glob(pat)) or [pat])
     paths = [p for p in paths if os.path.exists(p)]
     if not paths:
-        print("No input files found.", file=sys.stderr)
+        print("No input files found. Put your exports in seed_inputs/ or pass paths.",
+              file=sys.stderr)
         return 2
 
-    # Fresh, isolated DB in a temp dir — never touch the developer's runtime DB.
+    # Fresh, isolated, EMPTY DB in a temp dir — never touch the developer's
+    # runtime DB, and never seed from the previous seed (that would accumulate
+    # data every regeneration). FFO_SEED_DB="" disables the first-run bootstrap
+    # so the seed is always built purely from the given exports.
     workdir = tempfile.mkdtemp(prefix="seed_build_")
     os.environ["FFO_LOCAL"] = "1"
     os.environ["FFO_DATA_DIR"] = workdir
     os.environ["FFO_DB_PATH"] = os.path.join(workdir, "fieldforce.db")
+    os.environ["FFO_SEED_DB"] = ""  # do NOT bootstrap from an existing seed
 
     import db
     import auto_import
-    db.bootstrap_db()  # no-op (no seed yet); keeps parity with runtime
     db.init_db()
 
     # Detect types, then import in dependency order.
@@ -68,15 +77,22 @@ def main() -> int:
         print(f"  imported {os.path.basename(p):45s} -> {r.get('detected')}: {counts}")
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    # Consolidate WAL into the main file, then copy out a clean single file.
+    # Consolidate WAL and compact free pages so the seed is a clean, minimal,
+    # reproducible single file.
     conn = db.connect()
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    conn.execute("VACUUM")
     conn.close()
     import shutil
     shutil.copyfile(os.environ["FFO_DB_PATH"], args.out)
     size = os.path.getsize(args.out)
     print(f"\nSeed DB written: {args.out} ({size/1e6:.1f} MB)")
-    print("Bundle it with the build (build-desktop.yml already adds seed/ if present).")
+    # Same schema check the build runs — never emit a seed that would fail CI.
+    import subprocess
+    rc = subprocess.call([sys.executable, os.path.join(REPO, "tools", "verify_seed_db.py"), args.out])
+    if rc != 0:
+        return rc
+    print("Commit it for the next release:  git add -f seed/fieldforce.db && git commit")
     return 0
 
 
