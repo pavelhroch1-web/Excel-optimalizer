@@ -948,6 +948,23 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
   resize: vertical; min-height: 34px; }
 .cfg-ovr { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
 .cfg-reset { padding: 4px 9px; line-height: 1; }
+
+/* Saved views (card 4) */
+.view-list { display: flex; flex-direction: column; gap: 6px; }
+.view-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  padding: 10px var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--panel-2); }
+.view-name { font-weight: var(--fw-semibold); font-size: var(--fs-sm); }
+.view-def { font-family: var(--mono); font-size: var(--fs-2xs); color: var(--text-3); margin-top: 3px; word-break: break-all; }
+.view-row-r { display: flex; gap: var(--sp-2); flex: none; }
+
+/* Model management (card 5) */
+.mdl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--sp-3); }
+.mdl-card { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--panel-2); padding: var(--sp-3); }
+.mdl-h { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.mdl-t { font-weight: var(--fw-semibold); font-size: var(--fs-sm); }
+.mdl-stats { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); color: var(--text-2); }
+.mdl-stats b { color: var(--text); font-variant-numeric: tabular-nums; }
+.mdl-built { font-size: var(--fs-2xs); color: var(--text-3); margin-top: 6px; }
 .cfg-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); z-index: 100;
   background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 999px; font-size: 13px; font-weight: 600;
   box-shadow: var(--shadow-3); opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; }

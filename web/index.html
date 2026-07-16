@@ -26,7 +26,7 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v82</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v83</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard" title="Přehled"><span class="si-ico" data-ico="grid"></span><span class="si-label">Přehled</span></button>
       <button class="side-item" data-nav="import" title="Import dat"><span class="si-ico" data-ico="upload"></span><span class="si-label">Import dat</span></button>
@@ -661,6 +661,13 @@
           <p class="hint">Konfigurace Task Enginu: každý typ (Kotouče, Letáky, Servisní oprava…) má kategorii, prioritu, odhad času a zda je <strong>kombinovatelný</strong> (přibalí se k návštěvě) nebo vyžaduje vlastní výjezd. Nový typ = řádek, ne vývoj.</p>
           <div id="task-types-out"></div>
         </section>
+
+        <section class="card">
+          <h2>Uložené pohledy <span class="badge">filtry · presety</span></h2>
+          <p class="hint">Uložené kombinace filtrů a nastavení pro dashboard, report a mapu. Nastav <strong>výchozí</strong> pohled (načte se automaticky) nebo pohled smaž. Definice je JSON – přesně to, co si aplikace uloží.</p>
+          <div class="fbar" id="views-tabs"></div>
+          <div id="views-out"></div>
+        </section>
       </div>
 
       <!-- LEVEL 2: engine parameters (advanced) -->
@@ -682,6 +689,12 @@
           <p class="hint">Parametry plánovače, optimalizace, váhy skóre (bonusy/penalizace), mapy a reportů. Typované položky s výchozími hodnotami.</p>
           <div class="fbar" id="settings-tabs"></div>
           <div id="settings-out"></div>
+        </section>
+
+        <section class="card">
+          <h2>Správa naučených modelů <span class="badge">trvání · clustery · kapacita</span></h2>
+          <p class="hint">Modely, které se učí z importovaných dat a engine je používá při rozhodování: predikce trvání návštěvy, mikro-clustery blízkých POS a naučený kapacitní standard. Po novém importu je můžeš <strong>přepočítat</strong>.</p>
+          <div id="model-mgmt-out"></div>
         </section>
       </div>
 

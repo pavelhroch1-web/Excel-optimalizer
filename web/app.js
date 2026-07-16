@@ -4341,6 +4341,118 @@ async function _saveTaskType(tr) {
   } catch (e) { toast("Chyba: " + e.message, "err"); }
 }
 
+// ============ Saved views (card 4) ============
+const _VIEW_NS = { dashboard: "Dashboard", report: "Report", map: "Mapa" };
+let _viewNs = "dashboard";
+function initViews() {
+  const tabs = document.getElementById("views-tabs");
+  if (!tabs) return;
+  tabs.innerHTML = Object.entries(_VIEW_NS).map(([ns, l]) =>
+    `<button class="pill ${ns === _viewNs ? "on" : ""}" data-ns="${ns}">${esc(l)}</button>`).join("");
+  tabs.querySelectorAll(".pill").forEach((b) => b.addEventListener("click", () => {
+    _viewNs = b.dataset.ns; initViews();
+  }));
+  loadViews();
+}
+async function loadViews() {
+  const el = document.getElementById("views-out");
+  if (!el) return;
+  showState(el, "loading", "Načítám pohledy…");
+  try {
+    const views = (await apiJson("/api/views/" + _viewNs)).views || [];
+    const rows = views.map((v) => {
+      const def = (() => { try { return JSON.stringify(v.definition); } catch (_) { return String(v.definition ?? ""); } })();
+      return `<div class="view-row" data-name="${esc(v.name)}">
+        <div class="view-row-l"><span class="view-name">${esc(v.name)}</span>` +
+        (v.is_default ? ` <span class="pd-chip cfg-ovr">výchozí</span>` : "") +
+        `<div class="view-def">${esc(def.length > 80 ? def.slice(0, 80) + "…" : def)}</div></div>` +
+        `<div class="view-row-r">` +
+        (v.is_default ? "" : `<button class="ghost small view-default" title="Nastavit jako výchozí">Výchozí</button>`) +
+        `<button class="ghost small view-del" title="Smazat">✕</button></div></div>`;
+    }).join("");
+    el.innerHTML = (views.length ? `<div class="view-list">${rows}</div>`
+      : stateHTML("empty", "Zatím žádné uložené pohledy pro tento okruh.")) +
+      `<form class="row view-add" style="margin-top:12px">
+        <label style="flex:0 0 180px">Název<input type="text" class="view-new-name" placeholder="např. Jen technici Q1"></label>
+        <label style="flex:1">Definice (JSON)<input type="text" class="view-new-def" placeholder='{"role":"TECHNIK"}' value="{}"></label>
+        <button type="submit" class="primary">Uložit pohled</button></form>`;
+
+    const save = async (name, definition, is_default) => {
+      await apiJson(`/api/views/${_viewNs}/${encodeURIComponent(name)}`,
+        { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ definition, is_default }) });
+      _cfgToast(); loadViews();
+    };
+    el.querySelectorAll(".view-default").forEach((b) => b.addEventListener("click", async () => {
+      const name = b.closest(".view-row").dataset.name;
+      const v = views.find((x) => x.name === name);
+      await save(name, v.definition, true);
+    }));
+    el.querySelectorAll(".view-del").forEach((b) => b.addEventListener("click", async () => {
+      const name = b.closest(".view-row").dataset.name;
+      if (!await confirmDialog({ title: `Smazat pohled „${name}"?`, confirmText: "Smazat", danger: true })) return;
+      await apiFetch(`/api/views/${_viewNs}/${encodeURIComponent(name)}`, { method: "DELETE" });
+      toast("Pohled smazán.", "ok"); loadViews();
+    }));
+    el.querySelector(".view-add").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = el.querySelector(".view-new-name").value.trim();
+      if (!name) { toast("Zadej název pohledu.", "info"); return; }
+      let definition;
+      try { definition = JSON.parse(el.querySelector(".view-new-def").value || "{}"); }
+      catch (_) { toast("Neplatný JSON v definici.", "err"); return; }
+      await save(name, definition, false);
+    });
+  } catch (e) { showState(el, "error", "Nepodařilo se načíst pohledy: " + e.message); }
+}
+
+// ============ Model management (card 5) ============
+// Each learned model: overview endpoint + rebuild endpoint. Shows key stats and
+// a rebuild button; rebuild reruns the model over the current runtime data.
+const _MODELS = [
+  { id: "duration", title: "Predikce trvání návštěvy",
+    get: "/api/planner/duration/overview", rebuild: "/api/planner/duration/rebuild",
+    stats: (d) => [["Medián (p50)", (d.national?.p50 ?? "—") + " min"],
+      ["p75", (d.national?.p75 ?? "—") + " min"], ["Vzorek návštěv", _fmtNum(d.national?.n || 0)],
+      ["Kategorií", (d.byCategory || []).length]] },
+  { id: "clusters", title: "Mikro-clustery blízkých POS",
+    get: "/api/planner/clusters/overview", rebuild: "/api/planner/clusters/rebuild",
+    stats: (d) => [["Clusterů", _fmtNum(d.clusters || 0)], ["POS v clusterech", _fmtNum(d.clusteredPos || 0)],
+      ["Ø velikost", d.avgSize ?? "—"], ["Poloměr", (d.radiusM ?? "—") + " m"]] },
+  { id: "capacity", title: "Kapacitní standard",
+    get: "/api/planner/capacity", rebuild: "/api/planner/capacity/rebuild",
+    stats: (d) => { const t = (d.roles && d.roles.TECHNIK) || {};
+      return [["Percentil", d.targetPercentile ?? "—"], ["Ambice", (d.ambitionPct ?? "—") + " %"],
+        ["Produktivní čas", (t.productiveHours ?? "—") + " h"], ["POS/den", t.posPerDay ?? "—"]]; } },
+];
+async function initModelMgmt() {
+  const host = document.getElementById("model-mgmt-out");
+  if (!host) return;
+  host.innerHTML = `<div class="mdl-grid">` + _MODELS.map((m) =>
+    `<div class="mdl-card" data-id="${m.id}"><div class="mdl-h"><span class="mdl-t">${esc(m.title)}</span>` +
+    `<button class="ghost small mdl-rebuild" data-id="${m.id}">Přepočítat</button></div>` +
+    `<div class="mdl-body">${stateHTML("loading", "Načítám…")}</div></div>`).join("") + `</div>`;
+  _MODELS.forEach(renderModel);
+  host.querySelectorAll(".mdl-rebuild").forEach((b) => b.addEventListener("click", async () => {
+    const m = _MODELS.find((x) => x.id === b.dataset.id);
+    b.disabled = true; b.textContent = "Přepočítávám…";
+    try {
+      await apiFetch(m.rebuild, { method: "POST" });
+      toast(m.title + ": přepočítáno.", "ok");
+      await renderModel(m);
+    } catch (e) { toast("Chyba přepočtu: " + e.message, "err"); }
+    finally { b.disabled = false; b.textContent = "Přepočítat"; }
+  }));
+}
+async function renderModel(m) {
+  const body = document.querySelector(`.mdl-card[data-id="${m.id}"] .mdl-body`);
+  if (!body) return;
+  try {
+    const d = await apiJson(m.get);
+    body.innerHTML = `<div class="mdl-stats">` +
+      m.stats(d).map(([k, v]) => `<div>${esc(k)}: <b>${esc(String(v))}</b></div>`).join("") + `</div>`;
+  } catch (e) { body.innerHTML = stateHTML("error", "Nelze načíst."); }
+}
+
 // ============ Coverage by segment ============
 const _COV_RISK = { high: ["var(--bad)", "vysoké"], medium: ["var(--warn)", "střední"], low: ["var(--good)", "nízké"] };
 async function loadCoverage() {
@@ -4618,6 +4730,8 @@ function showView(name) {
       loadBusinessRules && loadBusinessRules();
       loadSettingsTabs && loadSettingsTabs();
       loadTaskTypes && loadTaskTypes();
+      initViews && initViews();
+      initModelMgmt && initModelMgmt();
     }
     if (name === "analytics" && typeof loadRactTechnicians === "function") loadRactTechnicians();
     if (name === "analytics" && typeof initTechGraphs === "function") initTechGraphs();
