@@ -1306,6 +1306,20 @@ if LOCAL_MODE:
     def clusters_pos(pos_id: str):
         return _clustering.cluster_of(pos_id)
 
+    # Planner: learned daily productive-capacity standard (per role).
+    import capacity as _capacity  # noqa: E402
+
+    @app.get("/api/planner/capacity", dependencies=[Depends(require_auth)])
+    def capacity_overview():
+        ov = _capacity.overview()
+        if not ov.get("roles"):
+            _capacity.rebuild(); ov = _capacity.overview()
+        return ov
+
+    @app.post("/api/planner/capacity/rebuild", dependencies=[Depends(require_auth)])
+    def capacity_rebuild():
+        return _capacity.rebuild()
+
     @app.get("/api/summary", dependencies=[Depends(require_auth)])
     def summary_overview(period: str = "month", year: int | None = None,
                          month: int | None = None, quarter: int | None = None,

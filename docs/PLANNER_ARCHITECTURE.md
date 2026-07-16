@@ -140,11 +140,13 @@ Rodina naučených firemních standardů (všechny z agregovaných dat celé ČR
 
 - typická **délka návštěvy** podle typu POS (Fáze 1 — hotovo),
 - průměrné **jízdní časy** (po silnici, OSRM),
-- **reálná denní produktivní kapacita** (viz upřesnění níže),
+- **doporučená denní produktivní kapacita** (p60/p70, per role — viz upřesnění níže),
+- **počet reálně stihnutých POS/den**,
 - **sezónní vzorce**,
 - **dopad kampaní**,
 - **business priority**,
-- **frekvence návštěv**,
+- **frekvence návštěv (kadence)**,
+- **efekt přidávání okolních POS** (Business Gain — viz §7c),
 - další operační metriky.
 
 Každý nový Draft TourPlanu tak těží ze všeho, co se firma za poslední měsíce
@@ -155,17 +157,19 @@ hierarchie → kvantily), jen nad jinou veličinou.
 Model reprezentuje **kolektivní zkušenost celé firmy**, cílí na běžného až mírně
 nadprůměrného technika a **ignoruje extrémy**.
 
-> **Challenge — „reálná denní kapacita" je normativní, ne popisná.** Kdybychom
-> kapacitu učili jako *průměr toho, co se reálně děje*, zahrneme do ní 3hodinové
-> dny a slabý výkon — a planner by se přizpůsobil přesně tomu, co nechceš.
-> Kapacita pro plánování proto musí být **standard kompetentního dne**, ne popis
-> skutečnosti:
->   - základ = **konfigurovaná pracovní doba** (manažer nastaví, např. 8 h),
->   - naučená distribuce slouží jen jako *informace* (např. „kompetentní den =
->     ~p50–p60 produktivních minut napříč firmou po vyřazení absencí a extrémů"),
->     nikdy jako průměr tažený dolů slabými/krátkými dny.
-> Stejná logika jako u trvání: učíme se z normálu až mírného nadprůměru, ne z
-> extrémů — a u kapacity necháváme finální slovo konfiguraci.
+> **Denní kapacita = dlouhodobě učený firemní STANDARD, ne pevných 8 h a ne
+> průměr současného chování.** Planner nesmí kopírovat to, že někdo odpracuje
+> 4 h a jiný 20 h. Po každém importu SalesApp se z agregovaných dat celé firmy
+> (produktivní minuty, jízdní časy, délky návštěv, sezónnost, reálně stihnuté
+> POS…) **po odstranění extrémů** spočítá doporučená denní kapacita jako
+> **~p60/p70 produktivních minut** — tedy cíl kompetentního dne, mírně nad
+> mediánem. Planner tím **dlouhodobě posouvá všechny techniky stejným směrem**
+> místo aby normalizoval slabší výkon.
+>   - Zdroj = naučená distribuce produktivních minut/den (extrémy vyřazené).
+>   - Cíl = p60/p70 (konfigurovatelný percentil).
+>   - Konfigurace slouží jako **mantinel/override** (horní/dolní strop), ne jako
+>     primární zdroj.
+> Kapacita se počítá **per role** (technik vs. OZ), nikdy per jednotlivec.
 
 **Metoda — empirical Bayes / shrinkage s ořezem extrémů:**
 
@@ -240,6 +244,37 @@ a dofilluje hodnotu.
 
 ---
 
+## 7c. Business Gain — geografie jako příležitost, ne jen omezení
+
+Primární priorita zůstává PPT / obchodní hodnota POS. Ale **geografie není jen
+omezení proveditelnosti — je to příležitost.** Když už technik jede do oblasti,
+planner spočítá u okolních POS jejich **Business Gain**: obchodní přínos vůči
+dodatečnému času.
+
+```
+gain(POS)  = přínos  /  vložený čas
+
+přínos      = navýšení PPT / obchodní hodnota + vliv na kadenci
+vložený čas = dodatečný čas návštěvy (predikce trvání, Fáze 1)
+            + dodatečný čas přejezdu (OSRM, marginální zajížďka)
+            + dopad na zbytek dne (posun ostatních návštěv)
+```
+
+- Pokud je poměr **přínos / čas výhodný**, planner POS automaticky přidá.
+- Typický případ: hlavní cíl = silný POS, vedle 3–5 slabších; přidání stojí pár
+  minut, ale výrazně zvýší pokrytí sítě.
+- **Neoptimalizujeme jednotlivé návštěvy, ale celkovou obchodní hodnotu obsloužené
+  oblasti.** Mikro-clustery [D] mají gain prakticky „zdarma" (nulový přejezd) →
+  téměř vždy se berou společně.
+- Efekt přidávání okolních POS se **dlouhodobě učí** (§5) — planner si ověřuje,
+  kdy se dofill vyplatil, a kalibruje práh gain/čas.
+
+Business Gain je vlastně kritérium **dofillu** ve stavbě dne [E]: kotva (povinný
+POS) je daná, kolem ní se přidávají POS s nejvyšším gain/čas, dokud je volná
+kapacita a den zůstává objetelný.
+
+---
+
 ## 8. [E0] Kostra plánovacího období
 
 Kritická vrstva. Bez ní by se dny stavěly nezávisle a povinné POS (které nechodí
@@ -265,8 +300,8 @@ může kolísat — důležité je splnění povinností v období.
 ```
 1. Kotva dne = první povinný POS dne (z [E0]).
 2. Postav logický okruh kolem kotvy (a případných dalších povinností dne).
-3. Dofill volné kapacity nejhodnotnějšími OKOLNÍMI POS
-   (priorita [C] / vložený čas), vždy přibal mikro-clustery [D].
+3. Dofill volné kapacity okolními POS podle **Business Gain** (§7c,
+   přínos / vložený čas), vždy přibal mikro-clustery [D].
 4. Plň do p75 kapacity, ne přes.
 5. Kontrola proveditelnosti přes OSRM (reálné silniční časy) — den musí být
    jeden souvislý okruh odjetelný v pracovní době.
@@ -337,7 +372,8 @@ Draft → Optimalizace → Kontrola → Publikace → Monitoring → Nový Draft
 | Tabulka | Účel |
 |---------|------|
 | `duration_model` | Hierarchické odhady trvání (p50/p75) per typ × řetězec × region × (tech), přepočítávané z historie. **(Fáze 1 — hotovo.)** |
-| `learned_stats` | Rodina firemních standardů stejným vzorem (jízdní časy, sezónnost, dopad kampaní, frekvence…). `duration_model` je první instancí. |
+| `learned_stats` | Rodina firemních standardů stejným vzorem (jízdní časy, sezónnost, dopad kampaní, frekvence, efekt dofillu…). `duration_model` je první instancí. |
+| `capacity_standard` | Doporučená denní produktivní kapacita (p60/p70) per role, přepočítávaná z historie. |
 | `pos_priors` | Naučené hodnotové priory + objem/jistota dat (pro shrinkage). |
 | `pos_clusters` | Předpočítané mikro-clustery (stejné centrum / pěší docházka). |
 | `capacity_reservations` | Manažerské rezervace kapacity (schůzky, školení, inventura, „30 % volné") — den/blok nebo % období. |
@@ -372,10 +408,9 @@ Vše append-only, v souladu se zbytkem operační paměti.
    tom stojí. Průběžně zlepšovat pokrytí.
 4. **Realizovaná hodnota** — v1 běží na proxy (PPT + recency + pravidla); datový
    model připravit na pozdější učení z výsledků (prodej / instalace visibility).
-5. **Denní kapacita = normativní standard, ne popis.** Základ je konfigurovaná
-   pracovní doba; naučená distribuce je jen informace (kompetentní den ~p50–p60
-   po vyřazení absencí/extrémů), nikdy průměr tažený dolů slabými dny. Potvrdit
-   výchozí hodnotu standardní pracovní doby.
+5. **Denní kapacita = učený firemní standard** (rozhodnuto): ~p60/p70 produktivních
+   minut z agregovaných dat celé firmy po vyřazení extrémů, per role; konfigurace
+   jen jako mantinel/override. Ne pevných 8 h, ne průměr současného chování.
 
 ---
 

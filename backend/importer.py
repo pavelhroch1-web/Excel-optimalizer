@@ -455,6 +455,11 @@ def import_workbook(path: str, filename: str | None = None) -> dict:
         duration.rebuild()  # refresh the collective visit-duration model
     except Exception:  # noqa: BLE001
         pass
+    try:
+        import capacity
+        capacity.rebuild()  # refresh the learned daily-capacity standard
+    except Exception:  # noqa: BLE001
+        pass
     return result
 
 

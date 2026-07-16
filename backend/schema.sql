@@ -720,6 +720,19 @@ CREATE TABLE IF NOT EXISTS duration_model (
     PRIMARY KEY (level, ckey)
 );
 
+-- Recommended daily productive capacity (planner). A learned company STANDARD
+-- (p60/p70 of productive minutes per role, extremes removed) — not a fixed 8h
+-- and not the average of current behaviour. Recomputed from history.
+CREATE TABLE IF NOT EXISTS capacity_standard (
+    role           TEXT PRIMARY KEY,   -- TECHNIK | OZ
+    productive_p50 REAL,
+    productive_p60 REAL,
+    productive_p70 REAL,
+    pos_per_day    REAL,               -- p60 of POS actually completed / day
+    days           INTEGER,
+    updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Micro-clusters (planner Phase 2): POS in the same shopping centre / within a
 -- few tens of metres walking — one logical unit for the planner ("since the
 -- technician is already here, what else?"). Recomputable cache from pos_master.
