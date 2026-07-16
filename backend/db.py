@@ -63,10 +63,17 @@ def _schema_sql() -> str:
 
 
 def connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path())
+    # timeout + busy_timeout: FastAPI runs sync endpoints in a threadpool, so
+    # several requests hit SQLite at once (the dashboard alone fires ~8 parallel
+    # calls, some of which write/recompute). Without a busy timeout a concurrent
+    # write raises "database is locked" immediately -> HTTP 500. WAL lets readers
+    # not block the writer; the timeout makes writers WAIT instead of failing.
+    conn = sqlite3.connect(db_path(), timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA synchronous = NORMAL")
     return conn
 
 

@@ -64,9 +64,32 @@ if LOCAL_MODE:
     # would not exist yet and the import would crash. init_db() is idempotent.
     db.init_db()
 
+    def _maybe_seed_sample_data() -> None:
+        """First run: the analytics DB is empty (the bundled scaffold is only a
+        planning seed). Load the scaffold's real network (POS + visits + config)
+        into SQLite so the user has data to click through immediately. Runs in a
+        daemon thread so the window opens instantly; data appears after ~30-60s
+        (hit Obnovit). Only when pos_master is empty; never overwrites imports."""
+        import threading
+
+        def _seed() -> None:
+            try:
+                if db.get("SELECT 1 FROM pos_master LIMIT 1"):
+                    return  # already has data (user imported, or seeded before)
+                import store_local
+                import importer
+                wb = store_local._bootstrap_workbook()  # noqa: SLF001
+                if wb and os.path.exists(wb):
+                    importer.import_workbook(wb)
+            except Exception:  # noqa: BLE001 - seeding must never break startup
+                pass
+
+        threading.Thread(target=_seed, daemon=True).start()
+
     @app.on_event("startup")
     def _init_local_db() -> None:
         db.init_db()
+        _maybe_seed_sample_data()
 
 _allowed_origins = os.environ.get("ALLOWED_ORIGIN", "*")
 app.add_middleware(
