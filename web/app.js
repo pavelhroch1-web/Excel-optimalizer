@@ -1936,41 +1936,85 @@ async function loadSettingsTabs() {
   loadSettings();
 }
 
+// Deep-equality good enough for scalars + JSON config values.
+function _settingEq(a, b) {
+  if (a === b) return true;
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch (_) { return false; }
+}
+
 async function loadSettings() {
   const el = document.getElementById("settings-out");
   if (!el) return;
+  showState(el, "loading", "Načítám nastavení…");
   try {
     const r = await apiJson("/api/settings/" + _setNs);
     const defs = r.definitions || [];
-    if (!defs.length) { el.innerHTML = `<p class="pd-sub">Pro tento okruh nejsou definice.</p>`; return; }
-    const val = (d) => (r.values && r.values[d.key] != null) ? r.values[d.key] : d.default_value;
-    el.innerHTML = `<div class="cfg-grid">` + defs.map((d) => {
-      const v = val(d); let input;
+    if (!defs.length) { showState(el, "empty", "Pro tento okruh nejsou žádná nastavení."); return; }
+    const val = (d) => (r.values && r.values[d.key] != null) ? r.values[d.key] : d.default;
+
+    // group by ui_group so 37 settings read as organised sections, not a wall
+    const groups = {};
+    defs.forEach((d) => { (groups[d.ui_group || "Ostatní"] = groups[d.ui_group || "Ostatní"] || []).push(d); });
+
+    const widget = (d, v) => {
       if (d.value_type === "bool") {
-        input = `<label class="cfg-switch"><input type="checkbox" class="cfg-set" data-key="${esc(d.key)}" data-type="bool" ${(v === true || v === "true" || v === 1 || v === "1") ? "checked" : ""}><span></span></label>`;
-      } else if (d.value_type === "enum" && Array.isArray(d.options)) {
-        input = `<select class="cfg-set" data-key="${esc(d.key)}" data-type="enum">` +
-          d.options.map((o) => `<option ${String(o) === String(v) ? "selected" : ""}>${esc(o)}</option>`).join("") + `</select>`;
-      } else if (d.value_type === "number") {
-        input = `<input type="number" step="any" class="cfg-set" data-key="${esc(d.key)}" data-type="number" value="${v ?? ""}"${d.min_value != null ? ` min="${d.min_value}"` : ""}${d.max_value != null ? ` max="${d.max_value}"` : ""}>`;
-      } else {
-        input = `<input type="text" class="cfg-set" data-key="${esc(d.key)}" data-type="string" value="${esc(v ?? "")}">`;
+        return `<label class="cfg-switch"><input type="checkbox" class="cfg-set" data-key="${esc(d.key)}" data-type="bool" ${(v === true || v === "true" || v === 1 || v === "1") ? "checked" : ""}><span></span></label>`;
       }
-      return `<div class="cfg-item"><div class="cfg-item-l"><div class="cfg-item-n">${esc(d.label || d.key)}</div>` +
-        (d.description ? `<div class="cfg-item-d">${esc(d.description)}</div>` : "") + `</div>${input}</div>`;
-    }).join("") + `</div>`;
+      if (d.value_type === "enum" && Array.isArray(d.options)) {
+        return `<select class="cfg-set" data-key="${esc(d.key)}" data-type="enum">` +
+          d.options.map((o) => `<option ${String(o) === String(v) ? "selected" : ""}>${esc(o)}</option>`).join("") + `</select>`;
+      }
+      if (d.value_type === "number") {
+        return `<input type="number" step="any" class="cfg-set" data-key="${esc(d.key)}" data-type="number" value="${v ?? ""}"${d.min_value != null ? ` min="${d.min_value}"` : ""}${d.max_value != null ? ` max="${d.max_value}"` : ""}>`;
+      }
+      if (d.value_type === "json") {
+        const text = (() => { try { return JSON.stringify(v, null, 0); } catch (_) { return String(v ?? ""); } })();
+        return `<textarea class="cfg-set cfg-json" rows="2" data-key="${esc(d.key)}" data-type="json" spellcheck="false">${esc(text)}</textarea>`;
+      }
+      return `<input type="text" class="cfg-set" data-key="${esc(d.key)}" data-type="string" value="${esc(v ?? "")}">`;
+    };
+
+    el.innerHTML = Object.entries(groups).map(([g, items]) =>
+      `<div class="cfg-group"><div class="cfg-group-h">${esc(g)}</div><div class="cfg-grid">` +
+      items.map((d) => {
+        const v = val(d);
+        const overridden = !_settingEq(v, d.default);
+        return `<div class="cfg-item" data-key="${esc(d.key)}">` +
+          `<div class="cfg-item-l"><div class="cfg-item-n">${esc(d.label || d.key)}` +
+          (overridden ? ` <span class="pd-chip cfg-ovr">upraveno</span>` : "") + `</div>` +
+          (d.description ? `<div class="cfg-item-d">${esc(d.description)}</div>` : "") + `</div>` +
+          `<div class="cfg-item-r">${widget(d, v)}` +
+          (overridden ? `<button class="ghost small cfg-reset" data-key="${esc(d.key)}" title="Vrátit na výchozí">↺</button>` : "") +
+          `</div></div>`;
+      }).join("") + `</div></div>`).join("");
+
+    const defByKey = Object.fromEntries(defs.map((d) => [d.key, d]));
+    const save = async (key, value) => {
+      await apiJson(`/api/settings/${_setNs}/${encodeURIComponent(key)}`,
+        { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value }) });
+      _cfgToast();
+      if (_setNs === "scoring" || _setNs === "engine") loadEngineInventory && loadEngineInventory();
+      loadSettings();  // refresh so the "upraveno"/reset state stays accurate
+    };
+
     el.querySelectorAll(".cfg-set").forEach((inp) => {
-      const ev = inp.type === "checkbox" ? "change" : "change";
-      inp.addEventListener(ev, async () => {
-        let value = inp.dataset.type === "bool" ? inp.checked
-          : inp.dataset.type === "number" ? parseFloat(inp.value) : inp.value;
-        await apiJson(`/api/settings/${_setNs}/${encodeURIComponent(inp.dataset.key)}`,
-          { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value }) });
-        _cfgToast();
-        if (_setNs === "scoring" || _setNs === "engine") loadEngineInventory && loadEngineInventory();
+      inp.addEventListener("change", async () => {
+        try {
+          let value;
+          if (inp.dataset.type === "bool") value = inp.checked;
+          else if (inp.dataset.type === "number") value = parseFloat(inp.value);
+          else if (inp.dataset.type === "json") value = JSON.parse(inp.value);
+          else value = inp.value;
+          if (inp.dataset.type === "number" && Number.isNaN(value)) { toast("Zadej číslo.", "err"); return; }
+          await save(inp.dataset.key, value);
+        } catch (e) {
+          toast(inp.dataset.type === "json" ? "Neplatný JSON." : ("Chyba: " + e.message), "err");
+        }
       });
     });
-  } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+    el.querySelectorAll(".cfg-reset").forEach((b) =>
+      b.addEventListener("click", () => save(b.dataset.key, defByKey[b.dataset.key].default)));
+  } catch (e) { showState(el, "error", "Nepodařilo se načíst nastavení: " + e.message); }
 }
 
 async function loadCadence() {

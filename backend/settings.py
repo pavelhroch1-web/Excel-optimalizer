@@ -76,11 +76,15 @@ def get(namespace: str, key: str, context: dict | None = None):
 def set_value(namespace: str, key: str, value, scope: str = "global", scope_value=None) -> None:
     stored = json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else \
         ("true" if value is True else "false" if value is False else str(value))
+    # SQLite treats NULL as distinct in a UNIQUE index, so a NULL scope_value
+    # would make ON CONFLICT never match and every save would append a duplicate
+    # row. Global settings therefore store '' (not NULL) as the scope_value so
+    # the upsert updates in place.
     db.run(
         "INSERT INTO settings (namespace, key, value, scope, scope_value) VALUES (?,?,?,?,?) "
         "ON CONFLICT(namespace, key, scope, scope_value) DO UPDATE SET "
         "value=excluded.value, updated_at=datetime('now')",
-        (namespace, key, stored, scope, scope_value))
+        (namespace, key, stored, scope, scope_value if scope_value is not None else ""))
 
 
 # ---- saved views (dashboard / report / map) -------------------------------

@@ -939,6 +939,15 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .cfg-item-n { font-weight: 600; font-size: 13px; }
 .cfg-item-d { font-size: 12px; color: var(--text-3); margin-top: 2px; max-width: 46ch; }
 .cfg-item input[type=number], .cfg-item input[type=text], .cfg-item select { width: 130px; flex: none; }
+/* Settings card: grouped sections + json editor + override/reset */
+.cfg-group { margin-bottom: var(--sp-5); }
+.cfg-group-h { font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-3); font-weight: var(--fw-semibold); margin: 0 0 var(--sp-2); }
+.cfg-item-r { display: flex; align-items: center; gap: var(--sp-2); flex: none; }
+.cfg-json { width: 210px; flex: none; font-family: var(--mono); font-size: var(--fs-2xs);
+  resize: vertical; min-height: 34px; }
+.cfg-ovr { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.cfg-reset { padding: 4px 9px; line-height: 1; }
 .cfg-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); z-index: 100;
   background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 999px; font-size: 13px; font-weight: 600;
   box-shadow: var(--shadow-3); opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; }
