@@ -13,6 +13,17 @@ regionální manažer**: ví, co je obchodně nejdůležitější, postaví logi
 kolem povinných návštěv, volnou kapacitu využije na nejhodnotnější okolní POS a
 vytvoří TourPlan, který jde reálně odjet v pracovní době.
 
+**Technici = objednaná dodavatelská kapacita.** Z pohledu businessu si objednávám
+kapacitu (technik-dny) u agentury. Zda někdo dnes odpracoval 4 h a jiný 10 h je
+odpovědnost **agentury, ne planneru** — planner neoptimalizuje chování
+jednotlivců. Planner řeší: **jak s objednanou kapacitou obsloužit co nejvyšší
+obchodní hodnotu sítě**, jestli kapacita stačí na cílovou kadenci, kde hrozí
+neobsloužené segmenty a kolik kapacity žádá konkrétní kampaň.
+
+**TourPlan není cíl sám o sobě.** Je to *výsledek manažerského rozhodnutí* o tom,
+jakou část sítě chceme v daném období obsloužit při dostupné objednané kapacitě
+(vrstva [S] níže).
+
 **Optimalizační cíl:** ne využití hodin, ne počet návštěv, ale **co nejvyšší
 obchodní hodnota obsloužené sítě při dostupné kapacitě.** Kapacita je *omezení*,
 ne cíl. Business Gain, PPT, kadence, geografie, predikce trvání a naučená
@@ -89,6 +100,12 @@ Vstupy (PPT, Activity Plan, config, business rules)
         │                          │
         └────────────┬─────────────┘
                      ▼
+[S] COVERAGE & CAMPAIGN PLANNING  (strategie, Velín — rozhoduje SE PRVNÍ):
+      - které segmenty/partnery obsloužit / vyloučit
+      - cílová kadence per segment · předpověď rizika neobsloužení
+      - simulace kampaně · potřebná vs. objednaná kapacita (feasibility)
+      → výstup = ROZSAH + cíle, které řídí taktické plánování níže
+                     ▼
 [C] Business priorita každého POS  (0–100, plně vysvětlitelná)
                      ▼
 [D] Mikro-clustering  (stejné centrum / pár desítek metrů = 1 jednotka)
@@ -111,6 +128,49 @@ Vstupy (PPT, Activity Plan, config, business rules)
 
 Každá vrstva se dá ladit a testovat samostatně. **[C] rozhoduje CO, [E0]+[E]
 rozhodují JAK to rozložit do období a dní.**
+
+---
+
+## 3b. [S] Coverage & Campaign Planning (strategická vrstva, Velín)
+
+**Rozhoduje se jako první.** Tady manažer rozhodne, *jakou část sítě* chce v
+období obsloužit — a systém řekne, jestli na to objednaná kapacita stačí. Teprve
+výstup (rozsah + cíle) řídí taktické plánování [C]–[E]. TourPlan je až výsledek
+tohoto rozhodnutí.
+
+**A) Segmentový model (konfigurovatelný z Velínu, žádná pravidla v kódu)**
+- Segment = konfigurovatelná kombinace existujících dimenzí: typ terminálu
+  (velký / malý / B), kategorie (LI, GECO…), partner / řetězec, region…
+- Definice segmentů, jejich cílová kadence a priorita se nastavují v administraci,
+  protože se mění podle kampaní, partnerů a obchodní strategie.
+
+**B) Coverage stav a riziko**
+- **Poslední návštěva podle segmentů** (B terminály, malé terminály, LI, partneři…).
+- **Předpověď, kdy segment vypadne z cílové kadence** (z poslední návštěvy +
+  cílové kadence segmentu → časová osa rizika neobsloužení).
+- Kde vzniká riziko neobsloužených segmentů.
+
+**C) Simulace kampaně**
+- Manažer vybere rozsah, např. *„na Vánoce objet velké + malé terminály bez LI"*.
+- Systém spočítá **potřebnou kapacitu** a porovná s **objednanou**:
+
+```
+poptávka(rozsah)  =  Σ_segment  (počet POS × návštěv/období dle kadence
+                                 × predikované trvání [Fáze 1]  +  přejezdy)
+nabídka           =  objednané technik-dny × naučená denní kapacita [standard]
+feasibility       =  poptávka ≤ nabídka ?
+```
+- Pokud objednaná kapacita nepokryje zvolený rozsah → **upozornění + velikost
+  mezery** (kolik kapacity chybí / co vyřadit / o kolik navýšit objednávku).
+
+**D) Výběr rozsahu z Velínu**
+- Zahrnout / vyloučit segmenty, partnery, kategorie.
+- Výstup vrstvy [S] = **množina POS v rozsahu + cílová kadence + priority kampaní**,
+  které vstupují do [C] (priorita) a [E0] (kostra období).
+
+**Vše konfigurovatelné z administrace (Velínu)** — segmenty, kadence, priority,
+zahrnutí/vyloučení. Deterministické a auditovatelné; využívá naučené modely
+(trvání, kapacita) jen jako vstupy do výpočtu feasibility.
 
 ---
 
@@ -391,6 +451,8 @@ Draft → Optimalizace → Kontrola → Publikace → Monitoring → Nový Draft
 | `duration_model` | Hierarchické odhady trvání (p50/p75) per typ × řetězec × region × (tech), přepočítávané z historie. **(Fáze 1 — hotovo.)** |
 | `learned_stats` | Rodina firemních standardů stejným vzorem (jízdní časy, sezónnost, dopad kampaní, frekvence, efekt dofillu…). `duration_model` je první instancí. |
 | `capacity_standard` | Doporučená denní produktivní kapacita (p60/p70) per role, přepočítávaná z historie. |
+| `segment_definitions` | Konfigurovatelné segmenty (typ terminálu / kategorie / partner / region) + cílová kadence + priorita — z Velínu, ne v kódu. |
+| `coverage_scopes` | Uložené rozsahy / simulace kampaní (které segmenty zahrnout/vyloučit) + výsledek feasibility. |
 | `pos_priors` | Naučené hodnotové priory + objem/jistota dat (pro shrinkage). |
 | `pos_clusters` | Předpočítané mikro-clustery (stejné centrum / pěší docházka). |
 | `capacity_reservations` | Manažerské rezervace kapacity (schůzky, školení, inventura, „30 % volné") — den/blok nebo % období. |
@@ -434,15 +496,16 @@ Vše append-only, v souladu se zbytkem operační paměti.
 ## 17. Fázování implementace (návrh)
 
 1. **[A] Predikce trvání** — kolektivní model p50/p75 + hierarchie. **(Hotovo.)**
-2. **[D] Mikro-clustering** — předpočet clusterů.
-3. **[M] Manažerský pre-load** — rezervace kapacity + ruční fixní úkoly.
-4. **[C] Business priorita** — skóre + zdůvodnění nad existujícími pravidly.
-5. **[A+] Další firemní standardy** — jízdní časy, kapacita (normativní),
-   sezónnost, frekvence — stejným vzorem jako Fáze 1.
-6. **[E0] Kostra období** — rozvržení povinností + ručních úkolů do dní.
-7. **[E] Stavba dne** — kotva + okruh + dofill + OSRM proveditelnost.
-8. **[F] Lifecycle** — draft → publikace (immutable) → monitoring → nový draft.
-9. **Mapa** — plánovací režim nad GIS vrstvou.
+2. **[D] Mikro-clustering** — předpočet clusterů. **(Hotovo.)**
+3. **[A] Naučená kapacita** — mírně ambiciózní standard per role. **(Hotovo.)**
+4. **[S] Coverage & Campaign Planning** — segmenty, kadence-riziko, simulace
+   kampaně, feasibility poptávka vs. objednaná kapacita. Konfigurovatelné z Velínu.
+5. **[M] Manažerský pre-load** — rezervace kapacity + ruční fixní úkoly.
+6. **[C] Business priorita** — skóre + zdůvodnění nad existujícími pravidly.
+7. **[E0] Kostra období** — rozvržení povinností + ručních úkolů do dní.
+8. **[E] Stavba dne** — kotva + okruh + Business Gain dofill + OSRM proveditelnost.
+9. **[F] Lifecycle** — draft → publikace (immutable) → monitoring → nový draft.
+10. **Mapa** — plánovací režim nad GIS vrstvou.
 
 Každá fáze má vlastní testy a nechává engine pravidel [B] beze změny.
 
