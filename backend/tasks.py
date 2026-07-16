@@ -98,6 +98,68 @@ def create(t: dict) -> dict:
     return {"created": len(ids), "ids": ids}
 
 
+def bulk_create(pos_rows, type_id, deadline=None, priority=None, est_minutes=None,
+                combinable=None) -> dict:
+    """Create one task per POS in `pos_rows` (each {pos, quantity?, note?}) with a
+    single shared activity type / deadline / priority. The practical way tasks
+    are created — an uploaded list, not one by one."""
+    tt = db.get("SELECT default_minutes, default_priority, combinable FROM task_types WHERE id=?", (type_id,))
+    dt = tt[0] if tt else {"default_minutes": 5, "default_priority": 3, "combinable": 1}
+    made, skipped = 0, 0
+    known = {str(r["pos_id"]) for r in db.get("SELECT pos_id FROM pos_master")}
+    for row in pos_rows:
+        pos = str(row.get("pos") or row.get("pos_id") or "").strip()
+        if not pos or pos not in known:
+            skipped += 1; continue
+        db.run("INSERT INTO tasks(type_id, pos_id, deadline, est_minutes, priority, combinable, quantity, note) "
+               "VALUES(?,?,?,?,?,?,?,?)",
+               (type_id, pos, deadline, est_minutes if est_minutes is not None else dt["default_minutes"],
+                priority if priority is not None else dt["default_priority"],
+                (1 if combinable else 0) if combinable is not None else None,
+                row.get("quantity"), row.get("note")))
+        made += 1
+    return {"created": made, "skipped": skipped}
+
+
+_POS_HEADERS = ("pos", "pos id", "posid", "číslo", "cislo", "id pos", "terminál", "terminal")
+_QTY_HEADERS = ("počet", "pocet", "ks", "kusů", "kusu", "množství", "mnozstvi", "quantity", "qty")
+
+
+def parse_bulk_excel(path: str) -> list:
+    """Read an uploaded Excel of POS (+ optional quantity/note) into rows."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    it = ws.iter_rows(values_only=True)
+    header = [str(h).strip().lower() if h is not None else "" for h in (next(it, None) or [])]
+    def find(cands):
+        for i, h in enumerate(header):
+            if any(c == h or c in h for c in cands):
+                return i
+        return None
+    pi = find(_POS_HEADERS)
+    if pi is None:
+        pi = 0                                  # fall back to first column
+    qi = find(_QTY_HEADERS)
+    ni = find(("poznámka", "poznamka", "note"))
+    rows = []
+    for r in it:
+        if pi >= len(r) or r[pi] in (None, ""):
+            continue
+        pos = str(r[pi]).strip()
+        pos = pos[:-2] if pos.endswith(".0") else pos     # excel float ids
+        row = {"pos": pos}
+        if qi is not None and qi < len(r) and r[qi] not in (None, ""):
+            try:
+                row["quantity"] = int(float(r[qi]))
+            except (ValueError, TypeError):
+                pass
+        if ni is not None and ni < len(r) and r[ni] not in (None, ""):
+            row["note"] = str(r[ni])
+        rows.append(row)
+    return rows
+
+
 def set_status(task_id: int, status: str) -> dict:
     db.run("UPDATE tasks SET status=?, updated_at=datetime('now') WHERE id=?", (status, task_id))
     return {"id": task_id, "status": status}

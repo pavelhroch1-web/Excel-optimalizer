@@ -31,7 +31,7 @@ import sys
 import tempfile
 
 import openpyxl
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -1370,6 +1370,30 @@ if LOCAL_MODE:
     @app.post("/api/planner/tasks", dependencies=[Depends(require_auth)])
     def planner_task_create(body: dict):
         return _tasks.create(body)
+
+    @app.post("/api/planner/tasks/bulk", dependencies=[Depends(require_auth)])
+    def planner_tasks_bulk(body: dict):
+        """Create tasks for many POS at once from a parsed list (rows =
+        [{pos, quantity?, note?}]) with one shared type/deadline/priority."""
+        return _tasks.bulk_create(body.get("rows", []), body.get("type_id"),
+                                  body.get("deadline"), body.get("priority"),
+                                  body.get("est_minutes"), body.get("combinable"))
+
+    @app.post("/api/planner/tasks/bulk-upload", dependencies=[Depends(require_auth)])
+    async def planner_tasks_bulk_upload(file: UploadFile = File(...), type_id: int = Form(...),
+                                        deadline: str | None = Form(None), priority: int | None = Form(None),
+                                        est_minutes: float | None = Form(None)):
+        """Upload an Excel of POS (+ optional quantity/note) → one task per POS."""
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+            tmp.write(await file.read()); path = tmp.name
+        try:
+            rows = _tasks.parse_bulk_excel(path)
+        finally:
+            os.unlink(path)
+        res = _tasks.bulk_create(rows, type_id, deadline, priority, est_minutes)
+        res["parsed"] = len(rows)
+        return res
 
     @app.put("/api/planner/tasks/{task_id}/status", dependencies=[Depends(require_auth)])
     def planner_task_status(task_id: int, body: dict):

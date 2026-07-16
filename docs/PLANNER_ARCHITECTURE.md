@@ -59,6 +59,7 @@ heuristikou „jako manažer"**, ne exaktním solverem (viz §12).
 | # | Rozhodnutí |
 |---|------------|
 | **Území** | Každý technik plánuje **pouze svoje vlastní POS** (`pos_master.technician`). Planner mezi techniky nic nepřehazuje. Přesuny jsou manažerské rozhodnutí mimo engine. |
+| **OZ mimo plánování** | Plánovací vrstvy pracují **pouze s techniky**. OZ se v plánování vůbec nevyskytují — jsou jen v **reportovacím režimu**, kde je lze zapnout/vypnout. |
 | **Priorita** | Vzniká z kombinace všech business vstupů (PPT, kadence, must-visit, kampaně, historie SalesApp, další existující pravidla) — ne jen z PPT. Business logiky už v systému existují, znovu se nevymýšlejí. |
 | **Učení** | **Kolektivní** — z dat celé ČR, ne z jednotlivce. Cíl = běžný až mírně nadprůměrný technik, **bez extrémů**. Personalizace regionu/technika až při dostatku kvalitních dat, nikdy ne jako základ. |
 | **Predikce trvání** | Stejná filozofie — z historie celé ČR (typ POS × řetězec × druh práce). Výchozí model = běžný až mírně nadprůměrný technik. |
@@ -240,8 +241,33 @@ dodatku, instalace služby, jednorázová akce, inventura, cokoli za rok přijde
   zvyšuje prioritu) a do **manažerského pre-loadu [M]** (ruční jednorázové úkoly
   jsou zvláštním případem Task Engine).
 
-Task Engine je **průřezová vrstva**: eviduje úkoly, počítá jejich naléhavost vůči
-deadlinu a napojuje je na plánování. Deterministické, plně konfigurovatelné.
+**Hromadné vytváření (bulk import) — hlavní režim.** V praxi úkoly nevznikají po
+jednom. Typicky přijde Excel se sloupci **POS + počet kusů**. Manažer ho jen
+nahraje, jednou nastaví typ aktivity, deadline (např. +2 měsíce), prioritu a
+případně odhad času — engine **automaticky založí úkoly pro všechny POS**. Žádné
+ruční zakládání stovek úkolů. Stejný princip pro materiály, dodatky, inventury…
+
+Task Engine je **průřezová vrstva**: eviduje úkoly (hromadně i jednotlivě), počítá
+jejich naléhavost vůči deadlinu a napojuje je na plánování. Deterministické, plně
+konfigurovatelné.
+
+---
+
+## 3f. Activity Plan — dlouhodobý kalendář kampaní (ne seznam úkolů)
+
+Vedle Task Engine stojí **Activity Plan**: dlouhodobý plán business kampaní, ne
+seznam úkolů. Typicky **rok dopředu** naplánované **Losy** a přibližně **Loterie**
+— v praxi většinou jen 2 řádky (výjimečně třetí ad-hoc), definované **po týdnech
+s prioritou**.
+
+Planner z Activity Planu **automaticky počítá** a upozorňuje:
+- **za kolik dní vyprší** poslední publikovaný TourPlan,
+- **jak dlouhý TourPlan** je teď optimální (doporučená délka horizontu),
+- jestli plánovanou kampaň **při objednané kapacitě stihneme** (feasibility),
+- případně **jakou kapacitu objednat navíc**, aby se stihla.
+
+Activity Plan tak přímo řídí délku plánovacího horizontu [§10] a vstupuje do
+feasibility [S]. Konfigurovatelný z Velínu (týdny × priorita).
 
 ---
 
