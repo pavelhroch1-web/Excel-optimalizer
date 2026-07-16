@@ -48,8 +48,24 @@ Ten ZIP pak jen přeneseš na firemní PC.
 - Měsíční souhrn: KPI, mapa sítě, coverage & riziko, detaily technik/den/POS,
 - konfigurace se ukládá do složky (`FieldForceData/`).
 
+## Aktualizace (data a konfigurace zůstávají)
+
+Aplikace (`FieldForceOptimizer.exe` + `_internal/`) a tvá data (`FieldForceData/`)
+jsou ve složce **vedle sebe**. Nová verze mění jen app soubory, ne data.
+
+**Postup aktualizace:**
+1. Rozbal nový ZIP **do existující složky aplikace** (přepiš `.exe` a `_internal/`).
+2. Složku **`FieldForceData/` nech být.**
+3. Spusť nový `.exe`.
+
+Nová verze si sama doplní do stávající databáze případné nové tabulky/sloupce
+(migrace jsou pouze přidávající), **tvá data i konfigurace zůstanou zachované.**
+Ověřeno na reálné databázi: po „upgradu" přežila konfigurace, POS, návštěvy i
+segmenty; nové tabulky (`tasks`, `task_types`) a sloupce se doplnily samy.
+
+> Tip: `FieldForceData/` si klidně zálohuj zkopírováním (je to jen složka se
+> souborem `fieldforce.db`). Přenesením této složky přeneseš i všechna data.
+
 ## Poznámky
 - **Mapy:** pozadí (silnice, města) a routování po silnicích potřebují internet.
   Bez internetu se trasy kreslí jako přímky a data-vrstvy fungují dál.
-- **Aktualizace:** nová verze = nový ZIP; složku `FieldForceData/` si přeneseš,
-  data zůstanou.
