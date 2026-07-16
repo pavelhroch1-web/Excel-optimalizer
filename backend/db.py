@@ -51,6 +51,44 @@ def db_path() -> str:
     return os.environ.get("FFO_DB_PATH") or os.path.join(data_dir(), "fieldforce.db")
 
 
+def _seed_db_path() -> str | None:
+    """Bundled default DB used to seed a fresh install. Configurable via
+    FFO_SEED_DB; otherwise looked up in the PyInstaller bundle or the repo at
+    seed/fieldforce.db. Returns None when no seed is available (empty start)."""
+    override = os.environ.get("FFO_SEED_DB")
+    if override:
+        return override if os.path.exists(override) else None
+    candidates = []
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        candidates.append(os.path.join(base, "seed", "fieldforce.db"))
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates.append(os.path.join(os.path.dirname(here), "seed", "fieldforce.db"))
+    return next((c for c in candidates if os.path.exists(c)), None)
+
+
+def bootstrap_db() -> bool:
+    """First-run seed: if there is no runtime DB yet AND a bundled seed DB is
+    available, copy it into the data dir so the app is usable immediately after
+    download. NEVER overwrites an existing runtime DB (so a later user import is
+    preserved). Returns True only when a copy actually happened.
+
+    This only changes how the runtime DB is *initialised* — every endpoint still
+    reads exclusively from the runtime DB, and the import pipeline still fully
+    rebuilds it from new exports."""
+    target = os.environ.get("FFO_DB_PATH") or os.path.join(data_dir(), "fieldforce.db")
+    if os.path.exists(target):
+        return False  # never overwrite an existing runtime DB
+    seed = _seed_db_path()
+    if not seed:
+        return False
+    import shutil
+    tmp = target + ".seedtmp"
+    shutil.copyfile(seed, tmp)
+    os.replace(tmp, target)  # atomic: no half-copied DB on a crash mid-copy
+    return True
+
+
 def _schema_sql() -> str:
     # In a PyInstaller bundle schema.sql sits next to this module in _MEIPASS.
     path = _SCHEMA

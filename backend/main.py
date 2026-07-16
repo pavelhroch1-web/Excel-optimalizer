@@ -58,14 +58,20 @@ app = FastAPI(title="Field Force Optimizer API")
 if LOCAL_MODE:
     import db  # noqa: E402
 
+    # First-run bootstrap: if there is no runtime DB yet and the build bundled a
+    # default one, copy it into the data dir so the app is usable immediately
+    # after download. Never overwrites an existing DB (a later user import wins).
+    db.bootstrap_db()
     # Create the schema EAGERLY at import time: some routes seed config at
     # module load (e.g. task_types via seed_default_types below), which runs
     # BEFORE the startup event — on a fresh DB (first .exe launch) the tables
-    # would not exist yet and the import would crash. init_db() is idempotent.
+    # would not exist yet and the import would crash. init_db() is idempotent,
+    # so it also safely migrates a bundled seed DB.
     db.init_db()
 
     @app.on_event("startup")
     def _init_local_db() -> None:
+        db.bootstrap_db()
         db.init_db()
 
 _allowed_origins = os.environ.get("ALLOWED_ORIGIN", "*")

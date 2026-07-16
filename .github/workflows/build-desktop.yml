@@ -49,9 +49,18 @@ jobs:
             '--add-data','web;web',
             '--add-data','backend/schema.sql;.',
             '--add-data','workbook/FieldForceOptimizer_V11_scaffold.xlsx;workbook',
-            '--add-data','sample_data;sample_data',
-            'desktop_app.py'
+            '--add-data','sample_data;sample_data'
           )
+          # Bundle the default seed DB if one was produced for this build, so a
+          # freshly downloaded app is usable immediately (copied to the runtime
+          # dir on first launch, never overwriting a later user import).
+          if (Test-Path 'seed/fieldforce.db') {
+            $pyargs += @('--add-data','seed/fieldforce.db;seed')
+            Write-Host 'Bundling seed/fieldforce.db into the build.'
+          } else {
+            Write-Host 'No seed/fieldforce.db present - build ships with an empty DB (import to fill).'
+          }
+          $pyargs += 'desktop_app.py'
           python -m PyInstaller @pyargs
 
       - name: Zip portable folder
