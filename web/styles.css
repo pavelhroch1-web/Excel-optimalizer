@@ -980,3 +980,6 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .task-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 6px; font-size: 12.5px; background: var(--panel-2); }
 .task-u { width: 8px; height: 8px; border-radius: 50%; } .task-u.hs-ok { background: #0F7C77; } .task-u.hs-mid { background: #D9A441; } .task-u.hs-bad { background: #C0392B; }
 .task-n { font-weight: 550; } .task-m { color: var(--text-3); font-size: 11px; white-space: nowrap; }
+/* Bulk úkoly — stejný filtrovací řádek jako jinde (žádné nové vzory) */
+.bulk-grid { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; margin-top: 10px; }
+.bulk-grid .fsel, .bulk-grid .filelabel { margin: 0; }

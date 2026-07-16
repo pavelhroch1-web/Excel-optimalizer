@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=56">
+<link rel="stylesheet" href="styles.css?v=57">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -26,7 +26,7 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v56</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v57</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard"><span class="si-ico" data-ico="grid"></span> Přehled</button>
       <button class="side-item" data-nav="import"><span class="si-ico" data-ico="upload"></span> Import dat</button>
@@ -106,6 +106,19 @@
         </div>
         <p id="auto-import-result" class="result"></p>
         <div id="import-summary"></div>
+      </section>
+
+      <section class="card">
+        <h2>Hromadné úkoly z Excelu <span class="badge">Task Engine</span></h2>
+        <p class="hint">Nahraj Excel se sloupci <strong>POS + počet kusů</strong> (nepovinně poznámka). Vyber typ aktivity, deadline a prioritu – systém založí úkol pro každý POS. Úkoly se pak automaticky zobrazí u návštěvy daného POS.</p>
+        <div class="bulk-grid">
+          <label class="fsel">Typ aktivity <select id="bulk-type"></select></label>
+          <label class="fsel">Deadline <input type="date" id="bulk-deadline"></label>
+          <label class="fsel">Priorita <select id="bulk-priority"><option value="1">1 – nejvyšší</option><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option><option value="5">5</option></select></label>
+          <label class="filelabel">Excel (POS + počet)<input type="file" id="bulk-file" accept=".xlsx"></label>
+          <button id="bulk-submit" class="primary">Založit úkoly</button>
+        </div>
+        <p id="bulk-result" class="result"></p>
       </section>
 
       <section class="card">
@@ -572,6 +585,6 @@
   </div>
 </div>
 
-<script src="app.js?v=56"></script>
+<script src="app.js?v=57"></script>
 </body>
 </html>

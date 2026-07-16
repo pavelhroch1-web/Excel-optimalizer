@@ -3102,6 +3102,42 @@ function bindSummary(scope) {
   loadCoverage();
 }
 
+// Bulk task upload (Task Engine) — one activity type for many POS from Excel.
+async function initBulkTasks() {
+  const sel = document.getElementById("bulk-type");
+  if (!sel) return;
+  if (!sel.dataset.loaded) {
+    try {
+      const t = await apiJson("/api/planner/task-types");
+      sel.innerHTML = (t.types || []).map((x) =>
+        `<option value="${x.id}">${esc(x.name)}${x.combinable ? "" : " (vlastní návštěva)"}</option>`).join("");
+      sel.dataset.loaded = "1";
+    } catch (e) { sel.innerHTML = `<option>chyba: ${esc(e.message)}</option>`; }
+  }
+  const btn = document.getElementById("bulk-submit");
+  if (btn && !btn.dataset.bound) {
+    btn.dataset.bound = "1";
+    btn.onclick = async () => {
+      const file = document.getElementById("bulk-file").files[0];
+      const res = document.getElementById("bulk-result");
+      if (!file) { res.textContent = "Vyber Excel se sloupci POS + počet."; return; }
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("type_id", document.getElementById("bulk-type").value);
+      fd.append("priority", document.getElementById("bulk-priority").value);
+      const dl = document.getElementById("bulk-deadline").value;
+      if (dl) fd.append("deadline", dl);
+      res.textContent = "Zakládám úkoly…";
+      try {
+        const r = await fetch("/api/planner/tasks/bulk-upload", { method: "POST", body: fd });
+        const d = await r.json();
+        res.className = "result ok";
+        res.textContent = `Hotovo: založeno ${d.created} úkolů z ${d.parsed} řádků${d.skipped ? `, přeskočeno ${d.skipped} (neznámé POS)` : ""}.`;
+      } catch (e) { res.className = "result err"; res.textContent = "Chyba: " + e.message; }
+    };
+  }
+}
+
 // [S] Coverage & riziko podle segmentů (konfigurovatelné z Velínu).
 async function loadCoverage() {
   const host = document.getElementById("sum-coverage");
@@ -3710,6 +3746,7 @@ function showView(name) {
     }
     if (name === "analytics" && typeof loadRactTechnicians === "function") loadRactTechnicians();
     if (name === "summary" && typeof initSummary === "function") initSummary();
+    if (name === "import" && typeof initBulkTasks === "function") initBulkTasks();
     if (name === "tourplan" && typeof loadStrategyModes === "function") { loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); }
   }
   window.scrollTo(0, 0);
