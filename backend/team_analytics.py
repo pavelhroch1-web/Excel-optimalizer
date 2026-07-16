@@ -52,6 +52,17 @@ def overview(days_back: int = 21, role: str = "TECHNIK") -> dict:
     if not techs:
         return {"technicians": [], "team": {}, "note": f"Nejsou žádní aktivní lidé (role {role})."}
 
+    # Region: the technicians table is not reliably filled, so take the SalesApp
+    # truth (Agency region on each visit) — each technician's most common region.
+    # Same source as diagnostics.company_overview so regions match everywhere.
+    for r in db.get(
+            "SELECT technician, region, COUNT(*) n FROM salesapp_visits "
+            "WHERE technician IS NOT NULL AND region IS NOT NULL AND region<>'' "
+            "GROUP BY technician, region ORDER BY technician, n DESC"):
+        t = techs.get(r["technician"])
+        if t is not None and not t.get("region"):
+            t["region"] = r["region"]
+
     gps = {str(r["pos_id"]): (r["gps_x"], r["gps_y"])
            for r in db.get("SELECT pos_id, gps_x, gps_y FROM pos_master")}
     cutoff = (datetime.date.today() - datetime.timedelta(days=days_back)).isoformat()
