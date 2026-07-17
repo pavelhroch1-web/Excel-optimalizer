@@ -25,15 +25,12 @@ _DAY = {"MON": 1, "TUE": 2, "WED": 3, "THU": 4, "FRI": 5}
 
 
 def _base_state():
-    """Snapshot state prepared for a HYPOTHETICAL replan: keep POS_MASTER /
-    config / last-visit reality, but clear any prior plan + week locks so the
-    scenario plans the whole horizon fresh (a simulation, never persisted)."""
-    path = store.snapshot_temp()
-    try:
-        state = state_xlsx.load_state(path)
-    finally:
-        import os
-        os.remove(path)
+    """State for a HYPOTHETICAL replan, assembled from the SQLite runtime state
+    (the single source of truth): POS_MASTER / config / last-visit reality, with
+    any prior plan + week locks cleared so the scenario plans the whole horizon
+    fresh (a simulation, never persisted)."""
+    import runtime_state
+    state = runtime_state.build()
     for sheet in ("MANAGER_PLAN", "MANAGER_PLAN_PUBLISHED", "PLAN_LIFECYCLE"):
         if state.get(sheet):
             state[sheet] = [state[sheet][0]]   # header only
@@ -121,7 +118,8 @@ def assess(mode: str, start_week: int, length: int,
 
     sim = simulate(mode, start_week, length, visits_per_tech_week, tech_count)
 
-    path = store.snapshot_temp()
+    import runtime_state
+    path = runtime_state.to_temp_xlsx()
     try:
         sc = brain.preflight(path, start_week, length, mode, visits_per_tech_week, tech_count)
     finally:
