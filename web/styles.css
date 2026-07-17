@@ -607,6 +607,41 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 .tdt-gauge .hc-arc { fill: none; stroke-width: 4; stroke-linecap: round; pathLength: 100; stroke: var(--good, #157F5A); }
 .tdt-gauge.crit .hc-arc { stroke: var(--bad); } .tdt-gauge.warn .hc-arc { stroke: var(--warn); }
 .tdt-score { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
+.tdt-gauge.primary .hc-arc { stroke-width: 5; }
+.tdt-gauge.primary { width: 50px; height: 50px; }
+.tdt-gauge.primary svg { width: 50px; height: 50px; }
+.tdt-gauge.primary .tdt-score { font-size: 16px; }
+.tdt-glabel { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 3px;
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; color: var(--text-3); white-space: nowrap; }
+.tdt-gauge { margin-bottom: 14px; margin-right: 6px; }
+#td-title { gap: 20px; }
+/* Technician Score component bars */
+.td-scomps { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.td-scomp { display: grid; grid-template-columns: 180px 1fr auto; align-items: center; gap: 12px; font-size: 12px; }
+.tsc-l { color: var(--text-2); }
+.tsc-bar { height: 8px; border-radius: 6px; background: var(--panel-2); overflow: hidden; }
+.tsc-bar > span { display: block; height: 100%; background: var(--good, #157F5A); border-radius: 6px; }
+.tsc-v { color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Plan SLA */
+.td-sla { display: flex; gap: 18px; align-items: center; padding: 14px 16px; border-radius: var(--r-md);
+  border: 1px solid var(--border); margin-bottom: 14px; flex-wrap: wrap; }
+.td-sla.bad { background: color-mix(in srgb, var(--bad) 9%, transparent); }
+.td-sla.warn { background: color-mix(in srgb, var(--warn) 9%, transparent); }
+.td-sla.ok { background: var(--good-soft, #DEF0E7); }
+.tsla-big { font-size: 26px; font-weight: 700; display: flex; flex-direction: column; line-height: 1.05; }
+.tsla-big span { font-size: 11px; font-weight: 500; color: var(--text-3); }
+.tsla-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px; flex: 1; }
+.tsla-grid > div { display: flex; flex-direction: column; }
+.tsla-grid b { font-size: 18px; font-weight: 700; } .tsla-grid span { font-size: 10.5px; color: var(--text-3); }
+.tsla-grid .tsla-bad b { color: var(--bad); }
+/* Per-technician alerts */
+.td-alerts { display: flex; flex-direction: column; gap: 6px; }
+.td-alert { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: var(--r-sm, 8px);
+  border: 1px solid var(--border); font-size: 12px; }
+.td-alert .ta-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); flex: none; }
+.td-alert.warn .ta-dot { background: var(--warn); } .td-alert.crit .ta-dot { background: var(--bad); }
+.td-alert.crit { background: color-mix(in srgb, var(--bad) 6%, transparent); }
+.ta-msg { flex: 1; } .ta-ts { color: var(--text-3); font-variant-numeric: tabular-nums; }
 .tdt-name { font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
 .tdt-role { font-size: 11px; font-weight: 600; color: var(--text-3); background: var(--panel-2); padding: 2px 8px; border-radius: 20px; margin-left: 6px; }
 .tdt-sub { font-size: 12px; color: var(--text-3); margin-top: 2px; }

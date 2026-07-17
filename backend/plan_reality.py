@@ -75,7 +75,7 @@ def fulfillment(week_from: int, week_to: int, tolerance: int = 1) -> dict:
     def T(name):
         return per_tech.setdefault(name or "?", {"technician": name or "?", "planned": 0,
                                                  "done": 0, "doneShifted": 0, "missed": 0,
-                                                 "wrongTech": 0})
+                                                 "wrongTech": 0, "extra": 0})
 
     done = missed = shifted = wrong = 0
     planned_keys = set()
@@ -96,11 +96,16 @@ def fulfillment(week_from: int, week_to: int, tolerance: int = 1) -> dict:
         else:
             missed += 1; t["missed"] += 1
 
-    # extra (mimořádné): actual visits to a POS in a week that was not planned
+    # extra (mimořádné): actual visits to a POS in a week that was not planned.
+    # Attribute per technician too (TECHNIK-role visitors) so the technician
+    # detail can show "POS navštívené mimo plán".
     extra = 0
     for (pos, wk), visits in actual.items():
         if week_from <= wk <= week_to and (pos, wk) not in planned_keys:
             extra += len(visits)
+            for v in visits:
+                if str(v.get("role") or "").upper().startswith("TECHNIK") and v.get("tech"):
+                    T(v["tech"])["extra"] += 1
 
     total = len(planned)
     for t in per_tech.values():

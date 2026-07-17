@@ -3324,16 +3324,23 @@ function _tdSelectTab(tab) {
   document.querySelectorAll("#td-tabs .td-tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
 }
 
+function _tdGauge(sc, label, shortLabel, cls) {
+  const tone = sc == null || sc === "—" ? "" : (sc < 70 ? "crit" : (sc < 80 ? "warn" : "ok"));
+  const v = sc == null ? "—" : sc;
+  return `<div class="tdt-gauge ${tone} ${cls || ""}" title="${esc(label)}">
+      <svg viewBox="0 0 44 44"><circle class="hc-bg" cx="22" cy="22" r="18"></circle>
+      <circle class="hc-arc" cx="22" cy="22" r="18" style="stroke-dasharray:${v === "—" ? 0 : Math.round(v)} 100"></circle></svg>
+      <div class="tdt-score">${v}</div><div class="tdt-glabel">${esc(shortLabel)}</div></div>`;
+}
+
 function renderTdHeader() {
   const p = _td.p, h = p.health || {};
-  const sc = h.healthScore != null ? h.healthScore : "—";
-  const tone = sc === "—" ? "" : (sc < 70 ? "crit" : (sc < 80 ? "warn" : "ok"));
+  const hs = h.healthScore != null ? h.healthScore : null;
+  const ts = (p.score || {}).score != null ? p.score.score : null;
   document.getElementById("td-title").innerHTML =
-    `<div class="tdt-gauge ${tone}"><svg viewBox="0 0 44 44"><circle class="hc-bg" cx="22" cy="22" r="18"></circle>
-       <circle class="hc-arc" cx="22" cy="22" r="18" style="stroke-dasharray:${sc === "—" ? 0 : Math.round(sc)} 100"></circle></svg>
-       <div class="tdt-score">${sc}</div></div>
+    `${_tdGauge(ts, "Technician Score", "Score", "primary")}${_tdGauge(hs, "Health Score", "Health")}
      <div><div class="tdt-name">${esc(p.technician)} <span class="tdt-role">${esc(p.role)}</span></div>
-       <div class="tdt-sub">Health Score · ${p.daysWorked} odpracovaných dní · ${(p.kpi || {}).visits ?? "—"} návštěv</div></div>`;
+       <div class="tdt-sub">Technician Score = doručení plánu + produktivita · Health Score = efektivita trasy · ${p.daysWorked} dní · ${(p.kpi || {}).visits ?? "—"} návštěv</div></div>`;
 }
 
 function renderTdTab(tab) {
@@ -3934,11 +3941,68 @@ function _tdPrehled(p) {
       ${_tdKpi("Ztracené hodiny", d.lostHours, " h")}
       ${_tdKpi("Podíl na cestě", k.onPosRatioPct != null ? (100 - k.onPosRatioPct) : null, "%")}
     </div>
+    ${_tdScoreBlock(p)}
+    ${_tdSlaBlock(p)}
     ${fulfil}
     ${narr}
     ${opp}
     ${why ? `<div class="td-sec">Proč nízké Health Score</div><div class="td-whys">${why}</div>` : ""}
+    ${_tdAlertsBlock(p)}
   </div>`;
+}
+
+// Technician Score breakdown — how the objective components (all from existing
+// engine/analytics aggregates) combine into the score. Shows the manager WHY
+// the score is what it is, with the exact weights.
+function _tdScoreBlock(p) {
+  const s = p.score; if (!s || s.score == null) return "";
+  const c = s.components || {}, w = s.weights || {};
+  const row = (label, val, unit, weight) => {
+    if (val == null) return "";
+    return `<div class="td-scomp"><span class="tsc-l">${esc(label)}</span>
+      <span class="tsc-bar"><span style="width:${Math.max(0, Math.min(100, val))}%"></span></span>
+      <span class="tsc-v">${_fmtNum(val)}${unit || ""}${weight != null ? ` · váha ${Math.round(weight * 100)} %` : ""}</span></div>`;
+  };
+  const basis = s.basis === "withPlan" ? "vč. plnění publikovaného plánu" : "bez publikovaného plánu (jen terénní signály)";
+  return `<div class="td-sec">Technician Score = ${s.score} <span class="pd-chip">${esc(basis)}</span></div>
+    <div class="td-scomps">
+      ${row("Plnění plánu", c.fulfilmentPct, " %", w.fulfilment)}
+      ${row("Produktivita (percentil týmu)", c.productivityPercentile, " %", w.productivity)}
+      ${row("Podíl času na POS", c.onPosRatioPct, " %", w.onPos)}
+    </div>`;
+}
+
+// Plan SLA: did the technician deliver the published plan on time?
+function _tdSlaBlock(p) {
+  const s = p.planSla; if (!s || !s.planned) return "";
+  const tone = (s.metPct == null ? "" : (s.metPct < 60 ? "bad" : (s.metPct < 80 ? "warn" : "ok")));
+  return `<div class="td-sec">SLA plnění plánu</div>
+    <div class="td-sla ${tone}">
+      <div class="tsla-big">${s.metPct ?? "—"} %<span>splněno (vč. skluzu)</span></div>
+      <div class="tsla-grid">
+        <div><b>${s.onTime}</b><span>včas (${s.onTimePct ?? "—"} %)</span></div>
+        <div><b>${s.shifted}</b><span>se skluzem</span></div>
+        <div class="tsla-bad"><b>${s.missed}</b><span>nesplněno</span></div>
+        <div class="tsla-bad"><b>${s.pastDue}</b><span>po termínu, nenavštíveno</span></div>
+        <div><b>${s.extra}</b><span>mimo plán</span></div>
+        <div><b>${s.wrongTech}</b><span>jiným technikem</span></div>
+      </div>
+    </div>`;
+}
+
+// Per-technician alerts the engine already raised — the "proof" behind warnings.
+function _tdAlertsBlock(p) {
+  const a = p.alerts || []; if (!a.length) return "";
+  const rows = a.slice(0, 12).map((x) => {
+    const sev = (x.severity || "").toLowerCase();
+    const cls = sev.includes("crit") || sev === "high" ? "crit" : (sev.includes("warn") || sev === "med" ? "warn" : "");
+    return `<div class="td-alert ${cls}"><span class="ta-dot"></span>
+      <span class="ta-msg">${esc(x.message || x.kind || "upozornění")}</span>
+      <span class="ta-ts">${esc((x.ts || "").slice(0, 10))}</span></div>`;
+  }).join("");
+  return `<div class="td-sec">Upozornění enginu k technikovi <span class="pd-chip">${a.length}</span></div>
+    <p class="pd-sub">Konkrétní upozornění, která engine k tomuto technikovi vygeneroval — důkaz za varováními.</p>
+    <div class="td-alerts">${rows}</div>`;
 }
 
 function _tdAnomalie(p) {
@@ -3954,9 +4018,13 @@ function _tdAnomalie(p) {
   const missedBlock = mp.hasPlan ? `<div class="td-sec">${ico("alert")} Naplánované POS, kolem kterých jel, ale nenavštívil je <span class="pd-chip">${mp.count}</span></div>
       <p class="pd-sub">Silný signál neodvedené práce — plánovaný POS byl do ${3} km od skutečné trasy v daném týdnu, přesto zůstal nenavštívený.</p>
       ${missed || "<p class='pd-sub'>Žádné takové případy.</p>"}` : "";
+  const sla = p.planSla || {};
+  const offPlan = sla.extra ? `<div class="td-sec">POS navštívené mimo plán <span class="pd-chip">${sla.extra}</span></div>
+      <p class="pd-sub">Návštěvy technika na POS, které v daném týdnu nebyly v publikovaném plánu — práce navíc mimo zadání.</p>` : "";
   return `<div class="td-scroll">
     <div class="td-sec">Příčiny neefektivity (dle síly odchylky)</div>${causes}
     ${missedBlock}
+    ${offPlan}
     ${combo ? `<div class="td-sec">Promarněné spojení s visibilitou <span class="pd-chip">${combo.savedTrips} cest</span></div>
       <p class="pd-sub">Potenciál ~${combo.savedKm} km / ~${combo.savedMin} min spojením s návštěvami kvůli kampani.</p>` : ""}
   </div>`;

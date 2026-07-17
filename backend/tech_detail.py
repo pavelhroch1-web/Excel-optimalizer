@@ -125,11 +125,18 @@ def profile(name: str, days_back: int = 120) -> dict:
             for d in route.get("days", []) if d.get("stopCount")]
     days.sort(key=lambda d: d["date"], reverse=True)
 
+    # SLA + Technician Score (objective, reuses the aggregates above where it can)
+    import tech_score
+    score = tech_score.compute(name, days_back=days_back, team=ov,
+                               fulfil_all=(f if wa is not None else None))
+
     return {
         "technician": name, "role": role, "daysBack": days_back,
         "kpi": kpi, "health": health, "diagnosis": diag,
         "fulfilment": fulfil, "missedPast": missed_past_pos(name),
         "days": days, "daysWorked": len(days),
+        "score": score.get("technicianScore"), "planSla": score.get("planSla"),
+        "productivity": score.get("productivity"), "alerts": score.get("alerts"),
     }
 
 
