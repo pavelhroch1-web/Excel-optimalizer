@@ -2236,6 +2236,71 @@ function _initDropZone() {
   ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("over"); }));
   dz.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) importFile(f); });
   _initTypedImport();
+  _initWorkbookImport();
+}
+
+// ---- Import Center: data health + full-workbook import ----------------------
+const _DH_META = {
+  pos_master: ["POS v síti", "provozovny"],
+  salesapp_visits: ["Návštěvy", "SalesApp historie"],
+  campaigns: ["Kampaně", "Activity Plan"],
+  technicians: ["Osoby", "technici / OZ"],
+  published_plans: ["Publikované řádky", "TourPlan"],
+  draft_plans: ["Řádky návrhu", "aktuální draft"],
+  closed_pos: ["Uzavřené POS", "neaktivní"],
+  snapshots: ["Snapshoty", "verze / záznamy"],
+  route_metrics: ["Trasy", "GIS metriky"],
+};
+async function initImportCenter() {
+  const host = document.getElementById("data-health");
+  if (!host) return;
+  host.innerHTML = skeleton({ rows: 2 });
+  try {
+    const [counts, dims] = await Promise.all([
+      apiJson("/api/data/summary"),
+      apiJson("/api/summary/dimensions").catch(() => null),
+    ]);
+    const tiles = Object.keys(_DH_META).filter((k) => k in counts).map((k) => {
+      const [label, sub] = _DH_META[k];
+      const v = counts[k];
+      const cls = (k === "pos_master" || k === "salesapp_visits") && !v ? "bad" : "";
+      return tile(label, _fmtNum(v), sub, cls);
+    }).join("");
+    const range = dims && dims.dataFrom
+      ? `<p class="pd-sub">Data návštěv: <b>${esc(dims.dataFrom)}</b> – <b>${esc(dims.dataTo)}</b>${dims.dataTo ? " · " + _freshness(dims.dataTo) : ""}</p>`
+      : `<p class="pd-sub">Zatím žádné návštěvy — naimportuj SalesApp export.</p>`;
+    host.innerHTML = `<div class="pl-tiles">${tiles}</div>` + range;
+  } catch (e) { showState(host, "error", "Nepodařilo se načíst stav dat: " + e.message); }
+}
+function _freshness(iso) {
+  const d = Math.floor((Date.now() - new Date(iso + "T00:00:00").getTime()) / 86400000);
+  if (d <= 0) return "dnes";
+  if (d === 1) return "včera";
+  return `před ${d} dny`;
+}
+function _initWorkbookImport() {
+  const inp = document.getElementById("wb-file");
+  if (!inp || inp.dataset.ready) return;
+  inp.dataset.ready = "1";
+  inp.addEventListener("change", async () => {
+    const f = inp.files[0]; if (!f) return;
+    inp.value = "";
+    const res = document.getElementById("wb-result");
+    const sum = document.getElementById("wb-summary");
+    res.textContent = "Importuji workbook…"; sum.innerHTML = "";
+    try {
+      const fd = new FormData(); fd.append("workbook", f);
+      const resp = await apiFetch("/api/import/workbook", { method: "POST", body: fd });
+      const d = await resp.json();
+      if (!resp.ok) throw new Error(d.detail || "import selhal");
+      const c = d.counts || {};
+      res.innerHTML = `<span class="ok">Workbook naimportován: ${esc(f.name)}</span>`;
+      sum.innerHTML = `<div class="pl-tiles">` +
+        Object.entries(c).map(([k, v]) => tile(_DH_META[k] ? _DH_META[k][0] : k, _fmtNum(typeof v === "object" ? (v.total ?? v.count ?? 0) : v), "naimportováno")).join("") + `</div>`;
+      initImportCenter();
+      if (typeof loadStatus === "function") loadStatus();
+    } catch (err) { res.innerHTML = `<span class="err">Chyba importu: ${esc(err.message)}</span>`; }
+  });
 }
 
 // Explicit, template-based import: pick the type, download a template, upload it.
@@ -2302,6 +2367,8 @@ async function loadAlerts() {
     el.innerHTML = renderAlerts(list);
   } catch (e) { /* ignore */ }
 }
+
+on("dh-refresh", "click", () => initImportCenter());
 
 on("alerts-refresh", "click", async () => {
   const el = document.getElementById("alerts-out");
@@ -5152,7 +5219,7 @@ function showView(name) {
         && !document.getElementById("techscore-out").innerHTML) initTechScore();
     if (name === "pos" && typeof initPosView === "function") initPosView();
     if (name === "summary" && typeof initSummary === "function") initSummary();
-    if (name === "import" && typeof initBulkTasks === "function") initBulkTasks();
+    if (name === "import" && typeof initBulkTasks === "function") { initImportCenter(); initBulkTasks(); }
     if (name === "tourplan" && typeof loadStrategyModes === "function") { initPlannerStudio(); loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); loadCampaigns && loadCampaigns(); loadCoverage && loadCoverage(); }
   }
   window.scrollTo(0, 0);

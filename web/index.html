@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=94">
+<link rel="stylesheet" href="styles.css?v=95">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -26,7 +26,7 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v94</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v95</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard" title="Přehled"><span class="si-ico" data-ico="grid"></span><span class="si-label">Přehled</span></button>
       <button class="side-item" data-nav="import" title="Import dat"><span class="si-ico" data-ico="upload"></span><span class="si-label">Import dat</span></button>
@@ -95,9 +95,28 @@
     <!-- ==================== VIEW: IMPORT ==================== -->
     <div class="view hidden" data-view="import">
       <div class="view-head">
-        <h1>Import dat</h1>
-        <p>Dvě cesty: nahoře <strong>rychlý drag-drop</strong> (systém se pokusí typ poznat sám), níže <strong>import podle typu se šablonami</strong> (typ vybíráš ty – vždy sedí). POS se ukládají trvale včetně historie změn.</p>
+        <h1>Import Center</h1>
+        <p>Přehled naimportovaných dat a jejich čerstvosti, nahrání nových feedů. Dvě cesty importu: <strong>rychlý drag-drop</strong> (typ se rozpozná sám) a <strong>import podle typu se šablonami</strong>. POS se ukládají trvale včetně historie změn.</p>
       </div>
+
+      <!-- DATA HEALTH: what is loaded + how fresh -->
+      <section class="card">
+        <h2>Stav dat <span class="badge">runtime databáze</span></h2>
+        <p class="hint">Co je právě v systému. Toto jsou data, nad kterými běží plánovač, analytika i dashboardy.</p>
+        <div class="row" style="margin-bottom:10px"><button id="dh-refresh" class="ghost">Obnovit</button></div>
+        <div id="data-health"></div>
+      </section>
+
+      <!-- FULL WORKBOOK IMPORT -->
+      <section class="card">
+        <h2>Import celého workbooku <span class="badge">všechny listy najednou</span></h2>
+        <p class="hint">Nahraj kompletní Excel workbook (POS_MASTER, SalesApp, Activity Plan…) — naimportují se všechny rozpoznané listy v jednom kroku. Pro dílčí feedy použij drag-drop nebo import podle typu níže.</p>
+        <div class="imp-acts">
+          <label class="filelabel imp-up">Nahrát workbook (.xlsx)<input type="file" id="wb-file" accept=".xlsx"></label>
+        </div>
+        <p id="wb-result" class="result"></p>
+        <div id="wb-summary"></div>
+      </section>
 
       <section class="card">
         <div id="drop-zone" class="drop-zone">
@@ -778,6 +797,6 @@
   </div>
 </div>
 
-<script src="app.js?v=94"></script>
+<script src="app.js?v=95"></script>
 </body>
 </html>
