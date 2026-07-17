@@ -3967,7 +3967,7 @@ function _tdBindDays() {
     }));
 }
 
-const _tdDay = { name: null, date: null, radius: 250, showNearby: true, map: null };
+const _tdDay = { name: null, date: null, radius: 250 };
 
 async function openTechDay(name, date, radius) {
   const host = document.getElementById("td-day-detail");
@@ -4015,49 +4015,49 @@ async function openTechDay(name, date, radius) {
       ${d.road && d.road.source === "osrm" ? `<span class="tp-b ok">trasa po silnicích ${d.road.km} km</span>` : ""}</div>`;
     const radBtns = [100, 250, 500, 1000].map((r) => `<button class="rad-btn${_tdDay.radius === r ? " on" : ""}" data-rad="${r}">${r} m</button>`).join("");
     const controls = `<div class="td-mapctl">
-      <label class="mc-tog"><input type="checkbox" id="td-nearby-tog"${_tdDay.showNearby ? " checked" : ""}> POS v okolí trasy</label>
-      <span class="mc-rad">Okruh: <span class="rad-seg">${radBtns}</span></span></div>`;
+      <span class="mc-rad">Projetí do okruhu: <span class="rad-seg">${radBtns}</span></span></div>`;
     host.innerHTML = `<div class="td-day-head">${esc(date)} · ${posCount} POS · ${roadKm ?? "—"} km silnicí · ${d.workHours ?? "—"} h v terénu</div>
       ${mgr}
       ${_tdTimeBar(d)}
       ${optLine}${proof}${controls}
-      <div id="td-map" class="td-map td-map-lg"></div>
+      <div class="td-sec">Pořadí návštěv (skutečná trasa dne)</div>${_tdDaySeq(d)}
       <div class="td-sec">Timeline dne</div><div class="td-timeline">${tl}</div>`;
     host.querySelectorAll(".rad-btn").forEach((b) => b.onclick = () => openTechDay(name, date, +b.dataset.rad));
-    const tog = document.getElementById("td-nearby-tog");
-    if (tog) tog.onchange = () => { _tdDay.showNearby = tog.checked; _tdDrawDayMap(d); };
-    _tdDrawDayMap(d);
   } catch (e) { host.innerHTML = `<p class="result err" style="padding:20px">${esc(e.message)}</p>`; }
 }
 
-// Full GIS day map (Leaflet + OSM): road route, optimal ordering, visited /
-// missed-planned / drove-past-nearby POS. Falls back to the offline SVG.
-function _tdDrawDayMap(d) {
-  const host = document.getElementById("td-map");
-  if (!host) return;
-  if (typeof L === "undefined") { _tdDrawMap(d); return; }
-  const stops = (d.stops || []).filter((s) => (s.kind || "pos") === "pos" && s.lat != null);
-  if (_tdDay.map) { _tdDay.map.remove(); _tdDay.map = null; }
-  const m = L.map(host, { preferCanvas: true }).setView([49.8, 15.5], 8);
-  _tdDay.map = m;
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(m);
-  // optimal road route (dashed green) under the actual
-  if (d.optimalRoad && d.optimalRoad.geometry) L.polyline(d.optimalRoad.geometry, { color: "#0F7C77", weight: 3, opacity: 0.7, dashArray: "8 7" }).addTo(m);
-  // actual road route (solid red)
-  const road = d.road && d.road.geometry && d.road.geometry.length > 1 ? d.road.geometry : stops.map((s) => [s.lat, s.lon]);
-  L.polyline(road, { color: "#C0392B", weight: 4, opacity: 0.85 }).addTo(m);
-  // nearby drove-past POS (orange)
-  if (_tdDay.showNearby) (d.nearbyPos || []).forEach((p) => L.circleMarker([p.lat, p.lon], { radius: 4, color: "#E67E22", weight: 1, fillColor: "#F39C12", fillOpacity: 0.7 })
-    .bindPopup(`<b>${esc(p.name || p.pos)}</b><br>${esc(p.city || "")}<br>projel do ${p.distM} m, nenavštívil`).addTo(m));
-  // missed planned POS (red diamonds via marker)
-  (d.missedPlanned || []).forEach((p) => L.circleMarker([p.lat, p.lon], { radius: p.drovePast ? 9 : 6, color: "#fff", weight: 2, fillColor: p.drovePast ? "#C0392B" : "#E5484D", fillOpacity: 1 })
-    .bindPopup(`<b>${esc(p.name || p.pos)}</b><br>${esc(p.city || "")}<br>naplánováno, nenavštíveno${p.drovePast ? "<br><b>projel kolem!</b>" : ""}`).addTo(m));
-  // visited stops (numbered green)
-  stops.forEach((s, i) => L.circleMarker([s.lat, s.lon], { radius: 11, color: "#fff", weight: 2, fillColor: "#0F7C77", fillOpacity: 1 })
-    .bindPopup(`<b>${i + 1}. ${esc(s.name || s.pos)}</b><br>${_hm(s.started)}–${_hm(s.finished)} · ${s.onPosMin != null ? Math.round(s.onPosMin) + " min na POS" : ""}`).addTo(m));
-  const pts = road.concat(stops.map((s) => [s.lat, s.lon]));
-  if (pts.length) m.fitBounds(pts, { padding: [28, 28] });
-  setTimeout(() => m.invalidateSize(), 150);
+// Order-sequence route strip (no GPS): the day as a chain of stops in the order
+// they were actually visited, plus planned-but-missed POS. Always renders — it
+// needs only sequence + times, never coordinates. Geographic map lives in the
+// dedicated Map dashboard.
+function _tdDaySeq(d) {
+  const kindShort = { break: "pauza", office: "středisko", prospect: "akvizice", other: "ostatní" };
+  let seq = 0;
+  const nodes = (d.stops || []).map((s) => {
+    const isPos = (s.kind || "pos") === "pos";
+    if (!isPos) {
+      return `<div class="seqn seqn-x" title="${esc(kindShort[s.kind] || s.kind)} · ${_hm(s.started)}–${_hm(s.finished)}">` +
+        `<span class="seqn-i">•</span><span class="seqn-name">${esc(kindShort[s.kind] || s.kind)}</span></div>`;
+    }
+    seq++;
+    const on = s.onPosMin != null ? Math.round(s.onPosMin) + " min" : "";
+    const short = s.onPosMin != null && s.onPosMin < 3;
+    return `<div class="seqn${short ? " short" : ""}" title="${esc(s.name || s.pos)} · na POS ${on}">` +
+      `<span class="seqn-i">${seq}</span>` +
+      `<span class="seqn-name">${esc(s.name || s.pos)}</span>` +
+      `<span class="seqn-meta">${_hm(s.started)}${on ? " · " + on : ""}</span></div>`;
+  });
+  const chain = nodes.length
+    ? `<div class="td-seq"><div class="td-seq-track">${nodes.join('<span class="seq-arrow">→</span>')}</div></div>`
+    : "<p class='pd-sub'>Žádné zastávky pro tento den.</p>";
+  const missed = (d.missedPlanned || []);
+  const missedRow = missed.length
+    ? `<div class="td-seq-missed"><span class="tsm-lbl">Naplánováno, nenavštíveno</span>` +
+      missed.slice(0, 20).map((p) =>
+        `<span class="seqn miss${p.drovePast ? " drove" : ""}" title="${esc(p.city || "")}${p.drovePast ? " · projel kolem" : ""}">` +
+        `<span class="seqn-name">${esc(p.name || p.pos)}</span></span>`).join("") + `</div>`
+    : "";
+  return chain + missedRow;
 }
 
 // Day time budget as a single stacked bar that adds up to the workday.
@@ -4073,40 +4073,6 @@ function _tdTimeBar(d) {
   const bar = segs.map((s) => `<span class="tb-seg" style="width:${(100 * s[1] / tot).toFixed(1)}%;background:${s[3]}" title="${s[2]}: ${_fmtHM(s[1])}"></span>`).join("");
   const leg = segs.map((s) => `<span class="tb-leg"><i style="background:${s[3]}"></i>${s[2]} ${_fmtHM(s[1])}</span>`).join("");
   return `<div class="td-timebar"><div class="tb-bar">${bar}</div><div class="tb-legend">${leg}</div></div>`;
-}
-
-// Offline route map: self-contained SVG (no tiles, no internet). Projects the
-// GPS points, draws the real route (solid red) and the optimal ordering (dashed
-// green), numbered stops. Works in the portable/offline build.
-function _tdDrawMap(d) {
-  const host = document.getElementById("td-map");
-  if (!host) return;
-  const pts = d.stops.filter((s) => (s.kind || "pos") === "pos" && s.lat != null && s.lon != null);
-  if (pts.length < 1) { host.innerHTML = "<p class='pd-sub' style='padding:12px'>Bez GPS souřadnic.</p>"; return; }
-  const W = host.clientWidth || 640, H = host.clientHeight || 360, pad = 34;
-  const latRef = pts.reduce((a, s) => a + s.lat, 0) / pts.length;
-  const kx = Math.cos(latRef * Math.PI / 180);
-  const xs = pts.map((s) => s.lon * kx), ys = pts.map((s) => s.lat);
-  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-  const spanX = (maxX - minX) || 1e-4, spanY = (maxY - minY) || 1e-4;
-  const sc = Math.min((W - 2 * pad) / spanX, (H - 2 * pad) / spanY);
-  const offX = (W - sc * spanX) / 2, offY = (H - sc * spanY) / 2;
-  const PX = (s) => offX + (s.lon * kx - minX) * sc;
-  const PY = (s) => H - (offY + (s.lat - minY) * sc);   // north up
-  const path = (idx) => idx.map((i, k) => `${k ? "L" : "M"}${PX(pts[i]).toFixed(1)},${PY(pts[i]).toFixed(1)}`).join(" ");
-  const seqIdx = pts.map((_, i) => i);
-  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" class="td-svgmap">`;
-  if (d.optimal && d.optimal.order && d.optimal.order.length === pts.length) {
-    svg += `<path d="${path(d.optimal.order)}" fill="none" stroke="#0F7C77" stroke-width="2.4" stroke-dasharray="7 6" opacity="0.85"/>`;
-  }
-  svg += `<path d="${path(seqIdx)}" fill="none" stroke="#C0392B" stroke-width="2.6" opacity="0.9"/>`;
-  pts.forEach((s, i) => {
-    const x = PX(s).toFixed(1), y = PY(s).toFixed(1);
-    svg += `<circle cx="${x}" cy="${y}" r="12" fill="#C0392B" stroke="#fff" stroke-width="2"><title>${esc(String(i + 1) + ". " + (s.name || s.pos))}</title></circle>`;
-    svg += `<text x="${x}" y="${y}" dy="4" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">${i + 1}</text>`;
-  });
-  svg += `</svg>`;
-  host.innerHTML = svg;
 }
 
 function _hm(iso) { const m = String(iso || "").match(/(\d{1,2}:\d{2})/); return m ? m[1] : "—"; }

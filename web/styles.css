@@ -1019,6 +1019,22 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .ops-reg-n { font-weight: var(--fw-semibold); font-size: var(--fs-sm); }
 .ops-reg-x { font-size: var(--fs-xs); color: var(--text-2); font-variant-numeric: tabular-nums; }
 @media (max-width: 640px) { .ops-act-go { display: none; } }
+/* Order-sequence route strip (technician detail day view, no GPS) */
+.td-seq { overflow-x: auto; padding: 4px 2px 8px; }
+.td-seq-track { display: flex; align-items: stretch; gap: 2px; min-width: min-content; }
+.seq-arrow { align-self: center; color: var(--text-3); font-size: var(--fs-sm); flex: none; padding: 0 2px; }
+.seqn { display: flex; flex-direction: column; gap: 2px; flex: none; max-width: 150px; padding: 7px 10px;
+  border: 1px solid var(--border); border-left: 3px solid var(--good); border-radius: var(--r-md); background: var(--panel-2); }
+.seqn.short { border-left-color: var(--warn); }
+.seqn.seqn-x { border-left-color: var(--border-2); background: var(--bg-2); justify-content: center; opacity: .8; }
+.seqn-i { font-size: var(--fs-2xs); font-weight: var(--fw-bold); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.seqn-name { font-size: var(--fs-xs); font-weight: var(--fw-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seqn-meta { font-size: var(--fs-2xs); color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.td-seq-missed { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.tsm-lbl { font-size: var(--fs-2xs); font-weight: var(--fw-bold); text-transform: uppercase; letter-spacing: .04em; color: var(--bad); }
+.seqn.miss { flex-direction: row; padding: 4px 9px; border-left-width: 3px; border-left-color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 6%, var(--panel-2)); max-width: none; }
+.seqn.miss.drove { border-left-style: double; }
 .cfg-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); z-index: 100;
   background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 999px; font-size: 13px; font-weight: 600;
   box-shadow: var(--shadow-3); opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; }
