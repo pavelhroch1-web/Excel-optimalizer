@@ -3188,9 +3188,10 @@ function _teamKpi(t, m) {
   return { total_visits: t.totalVisits, total_km: t.totalKm, coverage_overdue: t.totalOverdue,
            plan_fulfilment_pct: t.planFulfilmentPct }[m];
 }
-function _fmtNum(v) {
+function _fmtNum(v, dec) {
   if (v == null) return "—";
   const n = Number(v);
+  if (dec != null) return n.toLocaleString("cs-CZ", { minimumFractionDigits: dec, maximumFractionDigits: dec });
   return Math.abs(n) >= 1000 ? n.toLocaleString("cs-CZ", { maximumFractionDigits: 0 }) : (Math.round(n * 10) / 10);
 }
 function _fmtHM(minutes) {
@@ -3350,6 +3351,187 @@ function renderTdTab(tab) {
   else if (tab === "anomalie") el.innerHTML = _tdAnomalie(p);
   else if (tab === "dny") { el.innerHTML = _tdDny(p); _tdBindDays(); }
   else if (tab === "trendy") { el.innerHTML = trendPanelHtml("technician", _td.name); bindTrendPanel(el); }
+  else if (tab === "vyhodnoceni") { el.innerHTML = _tdLongtermShell(); _tdLoadLongterm(_ltPeriod); }
+}
+
+// ===================== LONG-TERM EVALUATION (Dlouhodobě) =====================
+// Priority 3: a manager-facing long-term read of ONE technician over a chosen
+// period (7 / 30 / 90 / custom days). Pure UI composition of EXISTING backend
+// endpoints — profile (diagnosis, planSla, missedPast, score, health) recomputed
+// for the window, /api/trends for the technician AND their region, and the
+// Health-Score ranking for the peer percentile. No new backend, no new metric:
+// the "conclusions" are the engine's own z-scores / percentiles / counts phrased
+// as sentences.
+let _ltPeriod = 90;
+const _LT_PRESETS = [[7, "7 dní"], [30, "30 dní"], [90, "90 dní"], [180, "180 dní"], [365, "1 rok"]];
+
+function _tdLongtermShell() {
+  const btns = _LT_PRESETS.map(([d, l]) =>
+    `<button class="lt-pbtn${d === _ltPeriod ? " on" : ""}" data-days="${d}">${l}</button>`).join("");
+  return `<div class="td-scroll">
+    <div class="lt-head">
+      <div class="lt-presets">${btns}</div>
+      <label class="lt-custom">vlastní (dní)
+        <input type="number" id="lt-custom-days" min="7" max="1000" placeholder="např. 120" value="">
+        <button class="lt-pbtn" id="lt-custom-go">Zobrazit</button></label>
+    </div>
+    <div id="lt-body"><p class="pd-sub" style="padding:20px">Načítám dlouhodobé vyhodnocení…</p></div>
+  </div>`;
+}
+
+function _tdBindLongterm() {
+  document.querySelectorAll("#td-body .lt-pbtn[data-days]").forEach((b) =>
+    b.addEventListener("click", () => _tdLoadLongterm(+b.dataset.days)));
+  const go = document.getElementById("lt-custom-go");
+  if (go) go.addEventListener("click", () => {
+    const v = parseInt(document.getElementById("lt-custom-days").value, 10);
+    if (v >= 7) _tdLoadLongterm(v);
+  });
+}
+
+async function _tdLoadLongterm(days) {
+  _ltPeriod = days;
+  // reflect active preset
+  document.querySelectorAll("#td-body .lt-pbtn[data-days]").forEach((b) =>
+    b.classList.toggle("on", +b.dataset.days === days));
+  _tdBindLongterm();
+  const host = document.getElementById("lt-body");
+  if (host) host.innerHTML = skeleton({ rows: 5 });
+  const name = _td.name, enc = encodeURIComponent;
+  try {
+    const [prof, tr, health] = await Promise.all([
+      apiJson(`/api/technician/${enc(name)}?days_back=${days}`),
+      apiJson(`/api/trends?entity=${enc(name)}&type=technician&grain=week&days_back=${days}`).catch(() => ({ series: [] })),
+      apiJson(`/api/insights/health?days_back=${days}`).catch(() => ({ technicians: [] })),
+    ]);
+    const region = (prof.health || {}).region || (prof.kpi || {}).region || null;
+    let regTr = { series: [] };
+    if (region) regTr = await apiJson(`/api/trends?entity=${enc(region)}&type=region&grain=week&days_back=${days}`).catch(() => ({ series: [] }));
+    if (!host) return;
+    host.innerHTML =
+      _tdConclusions(prof, tr, regTr, health, days, region) +
+      _tdLtDiagnostics(prof, tr, days) +
+      _tdLtCharts(tr, regTr);
+  } catch (e) {
+    if (host) host.innerHTML = `<p class="result err" style="padding:20px">${esc(e.message)}</p>`;
+  }
+}
+
+// average of a numeric metric over a trend series (ignoring nulls)
+function _serAvg(series, key) {
+  const xs = (series || []).map((p) => p[key]).filter((v) => v != null);
+  return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+}
+
+// trend direction: compare the mean of the first third vs the last third
+function _trendDir(series, key) {
+  const s = (series || []).filter((p) => p[key] != null);
+  if (s.length < 4) return { dir: "flat", pct: 0 };
+  const n = Math.max(1, Math.floor(s.length / 3));
+  const first = _serAvg(s.slice(0, n), key), last = _serAvg(s.slice(-n), key);
+  if (first == null || last == null || first === 0) return { dir: "flat", pct: 0 };
+  const pct = Math.round(100 * (last - first) / Math.abs(first));
+  return { dir: Math.abs(pct) < 8 ? "flat" : (pct > 0 ? "up" : "down"), pct };
+}
+
+// peer percentile by Health Score (higher score = better). Returns {rank,total,pct}
+function _healthRank(health, name) {
+  const ts = (health.technicians || []).filter((t) => t.healthScore != null);
+  if (!ts.length) return null;
+  const sorted = [...ts].sort((a, b) => a.healthScore - b.healthScore); // worst first
+  const idx = sorted.findIndex((t) => t.technician === name);
+  if (idx < 0) return null;
+  return { rank: idx + 1, total: sorted.length,
+           pct: Math.round(100 * (idx + 1) / sorted.length),
+           score: sorted[idx].healthScore };
+}
+
+// Manager conclusions: sentences that explain WHY, each backed by a concrete
+// number from the engine's own outputs. Nothing computed here that the backend
+// didn't already produce — only phrasing + trivial ratios of existing values.
+function _tdConclusions(prof, tr, regTr, health, days, region) {
+  const out = [];
+  const push = (tone, text) => out.push({ tone, text });
+  const diag = prof.diagnosis || {}, pr = diag.profile || {};
+  const sla = prof.planSla || {}, mp = prof.missedPast || {};
+
+  // 1) productivity vs region
+  const meProd = _serAvg(tr.series, "visitsPerWorkHour");
+  const regProd = _serAvg(regTr.series, "visitsPerWorkHour");
+  if (meProd != null && regProd != null && regProd > 0) {
+    const diff = Math.round(100 * (meProd - regProd) / regProd);
+    if (diff <= -10) push("bad", `Dlouhodobě vykazuje o ${Math.abs(diff)} % nižší produktivitu než region${region ? " " + region : ""} (${_fmtNum(meProd, 2)} vs ${_fmtNum(regProd, 2)} návštěv/h).`);
+    else if (diff >= 10) push("ok", `Produktivita je o ${diff} % vyšší než region${region ? " " + region : ""} (${_fmtNum(meProd, 2)} vs ${_fmtNum(regProd, 2)} návštěv/h).`);
+  }
+  // 2) missed planned POS
+  const missed = mp.count ?? sla.missed;
+  if (missed) push(missed >= 20 ? "bad" : "warn", `Za posledních ${days} dní minul ${missed} plánovaných POS${mp.count ? " (jel kolem nich, ale nenavštívil je)" : ""}.`);
+  // 3) transfer vs planner optimum
+  if (pr.orderingRatio && pr.orderingRatio > 1.05) {
+    const longer = Math.round((pr.orderingRatio - 1) * 100);
+    push(longer >= 25 ? "bad" : "warn", `Průměrný přejezd je o ${longer} % delší než optimální trasa plánovače${pr.excessKm ? ` (${_fmtNum(pr.excessKm)} km navíc za období)` : ""}.`);
+  }
+  // 4) peer percentile
+  const hr = _healthRank(health, prof.technician);
+  if (hr) {
+    if (hr.pct <= 10) push("bad", `V rámci sledovaných techniků patří mezi 10 % nejslabších (Health Score ${hr.score}, pořadí ${hr.rank}/${hr.total}).`);
+    else if (hr.pct <= 25) push("warn", `Patří mezi 25 % slabších techniků (Health Score ${hr.score}, pořadí ${hr.rank}/${hr.total}).`);
+    else if (hr.pct >= 90) push("ok", `Patří mezi 10 % nejsilnějších techniků (Health Score ${hr.score}, pořadí ${hr.rank}/${hr.total}).`);
+  }
+  // 5) worsening / improving trend (productivity)
+  const dir = _trendDir(tr.series, "visitsPerWorkHour");
+  if (dir.dir === "down") push("bad", `Dlouhodobě ztrácí výkon — produktivita v období klesla o ${Math.abs(dir.pct)} %.`);
+  else if (dir.dir === "up") push("ok", `Výkon dlouhodobě roste — produktivita v období vzrostla o ${dir.pct} %.`);
+  // 6) plan SLA headline
+  if (sla.planned) push(sla.metPct < 60 ? "bad" : (sla.metPct < 80 ? "warn" : "ok"),
+    `Plnění publikovaného plánu za období: ${sla.metPct} % (${sla.onTime} včas, ${sla.shifted} se skluzem, ${sla.missed} nesplněno).`);
+
+  const cards = out.map((c) => `<div class="lt-concl ${c.tone}"><span class="lc-dot"></span><span>${esc(c.text)}</span></div>`).join("");
+  return `<div class="td-sec">Manažerské závěry <span class="pd-chip">${days} dní</span></div>
+    ${out.length ? cards : "<p class='pd-sub'>Pro zvolené období není dost dat pro objektivní závěry (potřeba delší období nebo více návštěv).</p>"}`;
+}
+
+// Long-term diagnostic signals — each a concrete number from existing outputs.
+function _tdLtDiagnostics(prof, tr, days) {
+  const diag = prof.diagnosis || {}, sla = prof.planSla || {}, mp = prof.missedPast || {};
+  const causes = diag.causes || [];
+  const cause = (f) => causes.find((c) => c.factor === f);
+  const sig = [];
+  const add = (tone, label, val, note) => sig.push({ tone, label, val, note });
+  if (mp.count) add("bad", "Opakovaně vynechané POS", mp.count, "plánované, projeté, nenavštívené");
+  const gap = cause("suspiciousGapPerDay") || (diag.profile && diag.profile.suspiciousGapPerDay ? { note: "" } : null);
+  if (cause("travelShare")) add("warn", "Vysoký podíl času na cestě", cause("travelShare").value + " %", cause("travelShare").note);
+  const prodC = cause("visitsPerWorkHour") || cause("posPerDay");
+  if (prodC) add("warn", "Nízká produktivita", prodC.value + (prodC.unit || ""), prodC.note);
+  if (cause("orderingRatio")) add("warn", "Špatné pořadí návštěv", cause("orderingRatio").value + "×", cause("orderingRatio").note);
+  if (cause("avgLegKm")) add("warn", "Rozptýlená oblast", cause("avgLegKm").value + " km", cause("avgLegKm").note);
+  if (sla.extra) add("info", "Časté jízdy mimo plán", sla.extra, "návštěvy mimo publikovaný plán");
+  if (sla.pastDue) add("bad", "POS po termínu", sla.pastDue, "naplánované, dosud nenavštívené");
+  const dir = _trendDir(tr.series, "visitsPerWorkHour");
+  if (dir.dir === "down") add("bad", "Zhoršující se trend", Math.abs(dir.pct) + " %", "pokles produktivity v období");
+  if (!sig.length) return "";
+  const rows = sig.map((s) => `<div class="lt-sig ${s.tone}">
+    <div class="ls-top"><span class="ls-label">${esc(s.label)}</span><span class="ls-val">${esc(String(s.val))}</span></div>
+    <div class="ls-note">${esc(s.note || "")}</div></div>`).join("");
+  return `<div class="td-sec">Dlouhodobá diagnostika</div><div class="lt-sigs">${rows}</div>`;
+}
+
+// Trend charts over the period (reuse the offline line chart). Region average is
+// shown as a reference line label under each where available.
+function _tdLtCharts(tr, regTr) {
+  const metrics = [
+    ["visitsPerWorkHour", "Produktivita (návštěvy / h)", "", 2],
+    ["visits", "Počet návštěv", "", 0],
+    ["onPosHours", "Čas na POS", " h", 1],
+  ];
+  const s = tr.series || [];
+  if (s.length < 2) return `<div class="td-sec">Trendy</div><p class="pd-sub">Pro zvolené období není dost bodů pro graf.</p>`;
+  const charts = metrics.map(([k, l, u, d]) => {
+    const reg = _serAvg(regTr.series, k);
+    const ref = reg != null ? `<div class="lt-ref">průměr regionu: ${_fmtNum(reg, d)}${u}</div>` : "";
+    return `<div class="tp-chart"><div class="tp-chart-t">${l}</div>${_lineChart(s, k, u, d)}${ref}</div>`;
+  }).join("");
+  return `<div class="td-sec">Trendy v období</div><div class="lt-charts">${charts}</div>`;
 }
 
 // ---- Reusable trend graphs (technician or region), offline SVG line charts ----

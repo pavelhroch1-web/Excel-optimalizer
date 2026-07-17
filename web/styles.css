@@ -642,6 +642,30 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 .td-alert.warn .ta-dot { background: var(--warn); } .td-alert.crit .ta-dot { background: var(--bad); }
 .td-alert.crit { background: color-mix(in srgb, var(--bad) 6%, transparent); }
 .ta-msg { flex: 1; } .ta-ts { color: var(--text-3); font-variant-numeric: tabular-nums; }
+/* Long-term evaluation tab */
+.lt-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.lt-presets, .lt-custom { display: inline-flex; align-items: center; gap: 6px; }
+.lt-custom { font-size: 12px; color: var(--text-3); }
+.lt-custom input { width: 92px; }
+.lt-pbtn { padding: 6px 12px; border: 1px solid var(--border); background: var(--panel); border-radius: 999px;
+  font-size: 12px; font-weight: 600; cursor: pointer; color: var(--text-2); }
+.lt-pbtn.on { background: var(--accent, #157F5A); color: #fff; border-color: transparent; }
+.lt-concl { display: flex; align-items: flex-start; gap: 10px; padding: 11px 14px; border-radius: var(--r-md);
+  border: 1px solid var(--border); margin-bottom: 8px; font-size: 13px; line-height: 1.4; }
+.lt-concl .lc-dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 4px; flex: none; background: var(--text-3); }
+.lt-concl.bad { background: color-mix(in srgb, var(--bad) 8%, transparent); } .lt-concl.bad .lc-dot { background: var(--bad); }
+.lt-concl.warn { background: color-mix(in srgb, var(--warn) 8%, transparent); } .lt-concl.warn .lc-dot { background: var(--warn); }
+.lt-concl.ok { background: var(--good-soft, #DEF0E7); } .lt-concl.ok .lc-dot { background: var(--good, #157F5A); }
+.lt-sigs { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.lt-sig { padding: 12px 14px; border-radius: var(--r-md); border: 1px solid var(--border); }
+.lt-sig.bad { border-left: 3px solid var(--bad); } .lt-sig.warn { border-left: 3px solid var(--warn); }
+.lt-sig.info { border-left: 3px solid var(--text-3); }
+.ls-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ls-label { font-size: 12px; font-weight: 650; } .ls-val { font-size: 18px; font-weight: 700; }
+.lt-sig.bad .ls-val { color: var(--bad); }
+.ls-note { font-size: 11px; color: var(--text-3); margin-top: 3px; }
+.lt-charts { display: grid; grid-template-columns: 1fr; gap: 16px; }
+.lt-ref { font-size: 11px; color: var(--text-3); margin-top: 4px; }
 .tdt-name { font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
 .tdt-role { font-size: 11px; font-weight: 600; color: var(--text-3); background: var(--panel-2); padding: 2px 8px; border-radius: 20px; margin-left: 6px; }
 .tdt-sub { font-size: 12px; color: var(--text-3); margin-top: 2px; }
