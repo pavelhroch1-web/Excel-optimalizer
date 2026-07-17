@@ -218,27 +218,14 @@
         </div>
       </section>
 
-      <!-- 2) PLANNING FILTERS -->
+      <!-- 2) PLANNING FILTERS -> now a pointer to the SQLite model configurator -->
       <section class="card">
         <h2>2 · Plánovací filtry <span class="badge">terminály · partneři · kategorie · kampaně</span></h2>
-        <p class="hint">Stejná pravidla jako v Excelu. <strong>Neomezují jen zobrazení – omezují vstupní množinu Planning Engine</strong>, takže se TourPlan generuje jen z vybraných POS. Ulož je před krokem „Generovat".</p>
-        <div class="rules-block"><h3>Druh terminálu (malý / střední / velký)</h3><div id="rules-terminal" class="toggle-list"></div></div>
-        <div class="rules-block"><h3>Partner / obchodní síť</h3><div id="rules-market" class="toggle-list"></div></div>
-        <div class="rules-block"><h3>Kategorie (pravidlo)</h3><div id="rules-category" class="dropdown-list"></div></div>
-        <div class="rules-block">
-          <h3>Kampaně</h3>
-          <div id="rules-campaigns-wrap">
-            <table id="rules-campaigns-table">
-              <thead><tr><th>Typ</th><th>Kampaň</th><th>Od týdne</th><th>Do týdne</th><th>Priorita</th><th>Override gap</th></tr></thead>
-              <tbody id="rules-campaigns-body"></tbody>
-            </table>
-          </div>
+        <p class="hint">Které druhy terminálů, partnery, kategorie a kampaně (Activity plán) Planning Engine plánuje, se nastavuje na jednom místě: <strong>Nastavení → Plánovací model</strong>. Ukládá se do SQLite a <strong>engine to čte přímo z runtime stavu</strong> při každém generování – žádný Excel, žádná dvojkolejnost.</p>
+        <div class="row" style="margin-top:12px">
+          <button id="ps-goto-model" class="primary" data-nav="settings">Otevřít Plánovací model →</button>
+          <span class="hint" style="align-self:center">terminály · partneři · kategorie · Activity plán</span>
         </div>
-        <div class="row">
-          <button id="reload-rules-btn" class="ghost">Obnovit</button>
-          <button id="save-rules-btn" class="primary">Uložit pravidla</button>
-        </div>
-        <p id="rules-result" class="result"></p>
       </section>
 
       <!-- OVERRIDE & EXCEPTIONS (from Planner card) -->
@@ -697,7 +684,7 @@
           <div id="cadence-out"></div>
         </section>
 
-        <section class="card">
+        <section class="card" id="model-config-card">
           <h2>Terminály, partneři, kategorie, kampaně <span class="badge">zaškrtávátka · projeví se v enginu</span></h2>
           <p class="hint">Celý plánovací model z UI, bez zásahu do kódu: které druhy terminálů, partnery a kategorie zahrnout do plánu, a Activity plán (kampaně) s prioritou a oknem. Velikost terminálu a partner jsou atributy z importu (SalesApp) – zde se jen zapínají/vypínají. Nový typ = nový řádek v importu, ne vývoj.</p>
           <div class="row">

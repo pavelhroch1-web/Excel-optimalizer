@@ -46,7 +46,6 @@ import candidates as candidates_mod  # noqa: E402
 import decision as decision_mod  # noqa: E402
 import pipeline  # noqa: E402
 import plan_io  # noqa: E402
-import rules_io  # noqa: E402
 import state_xlsx  # noqa: E402
 import store  # noqa: E402
 
@@ -124,11 +123,6 @@ class AddPosRequest(BaseModel):
     day: str
     technician: str
     pos_id: str
-
-
-class SaveRulesRequest(BaseModel):
-    sheet: str
-    rows: list[dict]
 
 
 class CloudGenerateRequest(BaseModel):
@@ -681,58 +675,13 @@ def cloud_download(start_week: int = 0):
 
 
 # --------------------------------------------------------------------------
-# rules (config) - read/edit the manager rule tables on the current draft
-# (or the latest snapshot if no draft yet). Not one of the 7 core features,
-# kept working so rule tweaks are possible without opening Excel.
+# The old GET/POST /api/rules endpoints (terminal / market / category /
+# activity toggles written back to the draft workbook) have been removed.
+# That whole planning model is now edited through the SQLite-backed
+# configurator — GET/PUT /api/model — and applied to the runtime state by
+# db_state.configure() -> model_config.apply_to_state() right before the
+# engine runs. One source of truth (SQLite), no draft-workbook write path.
 # --------------------------------------------------------------------------
-
-def _rules_source_path() -> str:
-    path = _tmp()
-    if store.draft_exists():
-        store.download_draft(path)
-    else:
-        store.download_latest_snapshot(path)
-    return path
-
-
-@app.get("/api/rules", dependencies=[Depends(require_auth)])
-def get_rules():
-    path = _rules_source_path()
-    try:
-        sheets = rules_io.read_all_rule_sheets(path)
-        # Campaigns are held in the SQLite `campaigns` table (the same source
-        # the engine's ACTIVITY_PLAN is built from), not in the config workbook,
-        # so read them from there — the workbook sheet is legacy/empty.
-        campaigns = [
-            {"TYPE": r["kind"], "ACTIVITY": r["name"], "START_WEEK": r["start_week"],
-             "END_WEEK": r["end_week"], "PRIORITY": r["priority"], "OVERRIDE_GAP": r["override_gap"]}
-            for r in db.get("SELECT kind, name, start_week, end_week, priority, override_gap "
-                            "FROM campaigns ORDER BY start_week, name")
-        ] or sheets["ACTIVITY_PLAN"]
-        return {
-            "terminal": sheets["TERMINAL_RULES"],
-            "market": sheets["MARKET_RULES"],
-            "category": sheets["CATEGORY_RULES"],
-            "campaigns": campaigns,
-        }
-    finally:
-        os.remove(path)
-
-
-@app.post("/api/rules", dependencies=[Depends(require_auth)])
-def save_rules(body: SaveRulesRequest):
-    if body.sheet not in rules_io.RULE_SHEETS:
-        raise HTTPException(status_code=400, detail=f"Neznama tabulka pravidel: {body.sheet}")
-    if not store.draft_exists():
-        raise HTTPException(status_code=409, detail="Pravidla lze upravit az po nahrani exportu (v Draftu).")
-    path = _tmp()
-    store.download_draft(path)
-    try:
-        rules_io.write_rule_sheet(path, body.sheet, body.rows)
-        store.save_draft(path, f"Upravit {body.sheet}")
-        return {"ok": True}
-    finally:
-        os.remove(path)
 
 
 # --------------------------------------------------------------------------
@@ -1617,7 +1566,7 @@ if LOCAL_MODE:
 
     import sys as _sys
 
-    from fastapi.responses import HTMLResponse, Response
+    from fastapi.responses import FileResponse, HTMLResponse, Response
     from fastapi.staticfiles import StaticFiles
 
     def _web_dir() -> str:
@@ -1641,6 +1590,13 @@ if LOCAL_MODE:
     def _index():
         with open(os.path.join(_WEB, "index.html"), encoding="utf-8") as f:
             return f.read()
+
+    @app.get("/favicon.ico")
+    def _favicon():
+        ico = os.path.join(_WEB, "favicon.ico")
+        if os.path.exists(ico):
+            return FileResponse(ico)
+        return Response(status_code=204)  # no icon shipped: silence the 404
 
     # Everything else (app.js, styles.css, ...) straight from web/.
     app.mount("/", StaticFiles(directory=_WEB), name="web")
