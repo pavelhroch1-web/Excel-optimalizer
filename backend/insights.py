@@ -71,7 +71,8 @@ def _context(days_back: int) -> dict:
     for t in techs:
         v = t.get("visits") or 0
         t["travelPerVisit"] = round(t["travelMin"] / v, 1) if v else None
-    return {"overview": ov, "techs": techs, "days_back": days_back}
+    excluded = {r["name"] for r in db.get("SELECT name FROM technicians WHERE excluded=1")}
+    return {"overview": ov, "techs": techs, "days_back": days_back, "excluded": excluded}
 
 
 # ---- detectors: each returns a list of findings ----------------------------
@@ -210,6 +211,13 @@ def insights(days_back: int = 90) -> dict:
         except Exception as e:  # noqa: BLE001 - one detector must not break the rest
             findings.append(_finding(det.__name__, None, "info",
                                      f"Detektor selhal: {e}", [], entity_type="system"))
+    # Drop findings about blacklisted technicians (test/service accounts) — one
+    # choke point so every detector honors the exclusion, even those that query
+    # salesapp_visits directly.
+    excluded = ctx.get("excluded") or set()
+    if excluded:
+        findings = [f for f in findings
+                    if not (f.get("entityType") == "technician" and f.get("entityId") in excluded)]
     findings.sort(key=lambda f: (_SEV_RANK.get(f["severity"], 3),
                                  -max((abs(w.get("z", 0)) for w in f["why"]), default=0)))
     return {"daysBack": days_back, "count": len(findings),

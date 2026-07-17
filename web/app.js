@@ -1852,21 +1852,28 @@ async function loadTechnicians() {
   try {
     let list = (await apiJson("/api/technicians")).technicians;
     if (filter) list = list.filter((t) => t.role === filter);
-    el.innerHTML = `<table class="pd-score-table"><thead><tr><th>Jméno</th><th>Role</th><th>Aktivní</th></tr></thead><tbody>` +
+    const excl = list.filter((t) => t.excluded).length;
+    el.innerHTML = `<table class="pd-score-table"><thead><tr><th>Jméno</th><th>Role</th><th>Aktivní</th>` +
+      `<th title="Testovací/služební účty — skryté ze všech analýz, alertů i mapy">Vyřadit</th></tr></thead><tbody>` +
       list.map((t) =>
-        `<tr><td>${esc(t.name)}${t.manual_role ? " ✎" : ""}</td>` +
-        `<td><select data-tech="${esc(t.name)}" class="tech-role">` +
+        `<tr class="${t.excluded ? "tr-excluded" : ""}"><td>${esc(t.name)}${t.manual_role ? " ✎" : ""}</td>` +
+        `<td><select data-tech="${esc(t.name)}" class="tech-role"${t.excluded ? " disabled" : ""}>` +
         _ROLES.map((r) => `<option ${r === t.role ? "selected" : ""}>${r}</option>`).join("") + `</select></td>` +
-        `<td><input type="checkbox" class="tech-active" data-tech="${esc(t.name)}" ${t.active ? "checked" : ""}></td></tr>`).join("") +
-      `</tbody></table><p class="hint">${list.length} osob. ✎ = ručně nastaveno.</p>`;
-    el.querySelectorAll(".tech-role").forEach((s) => s.addEventListener("change", async () => {
-      await postJsonPut(`/api/technicians/${encodeURIComponent(s.dataset.tech)}`, { role: s.value });
-      loadAlerts();
-    }));
-    el.querySelectorAll(".tech-active").forEach((cb) => cb.addEventListener("change", async () => {
-      await postJsonPut(`/api/technicians/${encodeURIComponent(cb.dataset.tech)}`, { active: cb.checked });
-      loadAlerts();
-    }));
+        `<td><input type="checkbox" class="tech-active" data-tech="${esc(t.name)}" ${t.active ? "checked" : ""}${t.excluded ? " disabled" : ""}></td>` +
+        `<td><input type="checkbox" class="tech-excluded" data-tech="${esc(t.name)}" ${t.excluded ? "checked" : ""} title="Vyřadit z analytiky (test/služební účet)"></td></tr>`).join("") +
+      `</tbody></table><p class="hint">${list.length} osob${excl ? ` · ${excl} vyřazeno` : ""}. ✎ = role ručně nastavena · Vyřadit = skrýt testovací účty ze všech přehledů.</p>`;
+    // Any people change also rebuilds the alert feed so blacklisted/reclassified
+    // people appear or disappear from the Operations Center immediately.
+    const applyAndRecompute = async (name, body) => {
+      await postJsonPut(`/api/technicians/${encodeURIComponent(name)}`, body);
+      try { await postJson("/api/alerts/recompute", {}); } catch (e) { /* non-fatal */ }
+    };
+    el.querySelectorAll(".tech-role").forEach((s) => s.addEventListener("change", () =>
+      applyAndRecompute(s.dataset.tech, { role: s.value }).then(loadAlerts)));
+    el.querySelectorAll(".tech-active").forEach((cb) => cb.addEventListener("change", () =>
+      applyAndRecompute(cb.dataset.tech, { active: cb.checked }).then(loadAlerts)));
+    el.querySelectorAll(".tech-excluded").forEach((cb) => cb.addEventListener("change", () =>
+      applyAndRecompute(cb.dataset.tech, { excluded: cb.checked }).then(() => { loadAlerts(); loadTechnicians(); })));
   } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
 }
 

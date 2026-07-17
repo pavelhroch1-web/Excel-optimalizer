@@ -140,6 +140,9 @@ def init_db() -> None:
         ttcols = {r[1] for r in conn.execute("PRAGMA table_info(task_types)")}
         if ttcols and "category" not in ttcols:
             conn.execute("ALTER TABLE task_types ADD COLUMN category TEXT DEFAULT 'other'")
+        techcols = {r[1] for r in conn.execute("PRAGMA table_info(technicians)")}
+        if techcols and "excluded" not in techcols:
+            conn.execute("ALTER TABLE technicians ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0")
         conn.commit()
     finally:
         conn.close()

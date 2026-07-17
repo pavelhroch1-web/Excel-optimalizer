@@ -746,10 +746,11 @@ if LOCAL_MODE:
     class TechnicianUpdate(BaseModel):
         role: str | None = None
         active: bool | None = None
+        excluded: bool | None = None
 
     @app.get("/api/technicians", dependencies=[Depends(require_auth)])
     def list_technicians():
-        rows = db.get("SELECT name, role, manual_role, active, region, capacity_per_week "
+        rows = db.get("SELECT name, role, manual_role, active, excluded, region, capacity_per_week "
                       "FROM technicians ORDER BY role, name")
         return {"technicians": [dict(r) for r in rows]}
 
@@ -760,9 +761,15 @@ if LOCAL_MODE:
             sets += ["role=?", "manual_role=1"]; params.append(body.role)
         if body.active is not None:
             sets.append("active=?"); params.append(1 if body.active else 0)
+        if body.excluded is not None:
+            sets.append("excluded=?"); params.append(1 if body.excluded else 0)
         if sets:
             params.append(name)
             db.run(f"UPDATE technicians SET {', '.join(sets)}, updated_at=datetime('now') WHERE name=?", tuple(params))
+            # role/active/exclude change the peer baselines -> drop cached profiles
+            # so insights and the technician detail reflect it without a restart.
+            import diagnostics  # noqa: E402
+            diagnostics.invalidate_cache()
         return {"ok": True}
 
     # Automatic import: drop a file, the system detects its type and processes it.

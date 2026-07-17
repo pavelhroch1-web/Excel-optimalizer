@@ -81,8 +81,13 @@ def _has_col(table, col) -> bool:
 def list_alerts(limit: int = 100) -> list[dict]:
     rows = db.get("SELECT id, ts, entity_type, entity_id, payload FROM events "
                   "WHERE kind='alert' ORDER BY id DESC LIMIT ?", (limit,))
+    # Hide alerts for blacklisted people even if they were persisted before the
+    # exclusion (so toggling exclude removes them from the feed immediately).
+    excluded = {r["name"] for r in db.get("SELECT name FROM technicians WHERE excluded=1")}
     out = []
     for r in rows:
+        if r["entity_type"] == "technician" and r["entity_id"] in excluded:
+            continue
         d = dict(r)
         try:
             d["payload"] = json.loads(d["payload"]) if d["payload"] else {}

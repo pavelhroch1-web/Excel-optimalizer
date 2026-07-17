@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS technicians (
     area              TEXT,
     capacity_per_week INTEGER,
     active            INTEGER NOT NULL DEFAULT 1,
+    excluded          INTEGER NOT NULL DEFAULT 0,        -- 1 = blacklist (test accounts): hidden from ALL analytics unconditionally
     attributes        TEXT,                              -- JSON escape hatch
     created_at        TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at        TEXT NOT NULL DEFAULT (datetime('now'))

@@ -48,7 +48,7 @@ def overview(days_back: int = 21, role: str = "TECHNIK") -> dict:
     role (TECHNIK by default; OZ shown only when explicitly requested)."""
     techs = {r["name"]: dict(r) for r in db.get(
         "SELECT name, capacity_per_week, region FROM technicians "
-        "WHERE role=? AND active=1", (role.upper(),))}
+        "WHERE role=? AND active=1 AND excluded=0", (role.upper(),))}
     if not techs:
         return {"technicians": [], "team": {}, "note": f"Nejsou žádní aktivní lidé (role {role})."}
 

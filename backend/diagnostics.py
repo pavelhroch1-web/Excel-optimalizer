@@ -169,7 +169,7 @@ def _all_profiles(days_back: int) -> dict:
     if days_back in _profiles_cache:
         return _profiles_cache[days_back]
     names = [r["name"] for r in db.get(
-        "SELECT name FROM technicians WHERE role='TECHNIK' AND active=1")]
+        "SELECT name FROM technicians WHERE role='TECHNIK' AND active=1 AND excluded=0")]
     profs = {}
     for n in names:
         p = route_profile(n, days_back)

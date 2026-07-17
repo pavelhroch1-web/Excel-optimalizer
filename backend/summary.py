@@ -97,7 +97,7 @@ def dimensions() -> dict:
         "SELECT market, COUNT(*) c FROM pos_master WHERE market IS NOT NULL AND market<>'' "
         "GROUP BY market ORDER BY c DESC")]
     techs = [{"name": r["name"], "role": r["role"], "active": bool(r["active"])}
-             for r in db.get("SELECT name, role, active FROM technicians ORDER BY name")]
+             for r in db.get("SELECT name, role, active FROM technicians WHERE excluded=0 ORDER BY name")]
     campaigns = [r["name"] for r in db.get(
         "SELECT DISTINCT name FROM campaigns WHERE name IS NOT NULL AND name<>'' ORDER BY name")] \
         if db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='campaigns'") else []
@@ -115,7 +115,9 @@ def _people(role: str, region: str | None, active: str | None,
             technician: str | None, region_map: dict) -> list:
     """The technicians in scope after who-filters (role / region / active /
     single technician)."""
-    q = "SELECT name, role, active FROM technicians WHERE 1=1"
+    # excluded=0 is unconditional: blacklisted test accounts never appear in any
+    # analytics, regardless of the active/inactive/all filter above.
+    q = "SELECT name, role, active FROM technicians WHERE excluded=0"
     params: list = []
     if role in ("TECHNIK", "OZ"):
         q += " AND role=?"; params.append(role)

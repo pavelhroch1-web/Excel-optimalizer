@@ -124,7 +124,7 @@ def reality(week_from: int | None = None, week_to: int | None = None) -> dict:
     Only role=TECHNIK & active=1 count - OZ/Admin/Manager are excluded per the
     technician configuration."""
     tech_ok = {r["name"] for r in db.get(
-        "SELECT name FROM technicians WHERE role='TECHNIK' AND active=1")}
+        "SELECT name FROM technicians WHERE role='TECHNIK' AND active=1 AND excluded=0")}
     rows = db.get("SELECT technician, pos_id, visitor_role, visit_date, real_duration, "
                   "started_at, finished_at FROM salesapp_visits "
                   "WHERE technician IS NOT NULL AND visit_date IS NOT NULL")
