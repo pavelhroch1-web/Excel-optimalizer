@@ -612,6 +612,17 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 .td-tab { border: none; background: transparent; color: var(--text-2); font-size: 13px; font-weight: 600; padding: 6px 16px; border-radius: 999px; cursor: pointer; }
 .td-tab.on { background: var(--accent); color: #fff; }
 .td-body { flex: 1; overflow: auto; }
+/* Narrow screens: the overlay header can't fit name + tabs + close on one row,
+   so title/close share the top row and the tab pills wrap to their own
+   horizontally scrollable row instead of clipping the last tab. */
+@media (max-width: 680px) {
+  .td-overlay { padding: 8px; }
+  .td-head { flex-wrap: wrap; gap: 10px 12px; padding: 12px 14px; }
+  #td-title { order: 1; flex: 1; min-width: 0; }
+  #td-close { order: 2; margin-left: auto; }
+  .td-tabs { order: 3; width: 100%; overflow-x: auto; justify-content: flex-start; -webkit-overflow-scrolling: touch; }
+  .td-tab { flex: none; white-space: nowrap; }
+}
 .td-scroll { padding: 20px 22px; }
 .td-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .td-kpi { border: 1px solid var(--border); border-radius: var(--r-md); padding: 11px 13px; background: var(--panel-2); }

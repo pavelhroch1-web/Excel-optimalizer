@@ -4549,6 +4549,13 @@ async function dashOps(host) {
 
     host.querySelectorAll(".ops-chip[data-nav]").forEach((b) =>
       b.addEventListener("click", () => showView(b.dataset.nav)));
+    // Drill to the technician detail. The global [data-diagnose] handler is
+    // scoped to the home cockpit (#op-brief), so bind these rows explicitly.
+    host.querySelectorAll(".ops-act[data-diagnose]").forEach((el) => {
+      const go = () => openTechDetail(el.dataset.diagnose);
+      el.addEventListener("click", go);
+      el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+    });
   } catch (e) { showState(host, "error", "Nepodařilo se načíst Operations Center: " + e.message); }
 }
 
@@ -4589,7 +4596,7 @@ async function dashOverview(host) {
       (company && company.bestRegion ? ` · nejlepší region ${esc(company.bestRegion.region)}` : "") + `</p>` + attn;
 
     host.querySelectorAll(".tech-link").forEach((el) =>
-      el.addEventListener("click", () => drillToTechnician(el.dataset.tech)));
+      el.addEventListener("click", () => openTechDetail(el.dataset.tech)));
   } catch (e) { showState(host, "error", "Nepodařilo se načíst overview: " + e.message); }
 }
 
@@ -4630,7 +4637,7 @@ async function dashCapacity(host) {
 
     host.innerHTML = std + list;
     host.querySelectorAll(".tech-link").forEach((el) =>
-      el.addEventListener("click", () => drillToTechnician(el.dataset.tech)));
+      el.addEventListener("click", () => openTechDetail(el.dataset.tech)));
   } catch (e) { showState(host, "error", "Nepodařilo se načíst kapacitu: " + e.message); }
 }
 
@@ -4701,7 +4708,7 @@ async function dashKpi(host) {
 
     host.innerHTML = tiles + prodList + segList + kmList;
     host.querySelectorAll(".tech-link").forEach((el) =>
-      el.addEventListener("click", () => drillToTechnician(el.dataset.tech)));
+      el.addEventListener("click", () => openTechDetail(el.dataset.tech)));
   } catch (e) { showState(host, "error", "Nepodařilo se načíst KPI: " + e.message); }
 }
 
@@ -4751,6 +4758,7 @@ async function dashMaps(host) {
   _dmap.groups = {};
   _dmap.map = L.map(el, { preferCanvas: true, scrollWheelZoom: true }).setView([49.8, 15.5], 7);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(_dmap.map);
+  window._ffoDmap = _dmap;  // introspection handle (debugging / UI tests)
   host.querySelectorAll("input[data-dlayer]").forEach((cb) => cb.onchange = () => { _dmap.layers[cb.dataset.dlayer] = cb.checked; _dmapApply(cb.dataset.dlayer); });
   const tsel = document.getElementById("dmap-tech");
   if (tsel) tsel.onchange = () => { _dmap.technician = tsel.value; _dmapLoad(); };
