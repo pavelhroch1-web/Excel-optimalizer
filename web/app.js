@@ -4483,46 +4483,57 @@ function initDashboards() {
 // (team) and regional attention (company). Every signal drills to detail.
 const _OPS_SEV = { risk: ["bad", "Riziko"], warn: ["warn", "Pozor"], info: ["", "Info"] };
 async function dashOps(host) {
-  host.innerHTML = skeleton({ rows: 5 });
+  host.innerHTML = skeleton({ rows: 6 });
   try {
-    const [ins, due, team, company] = await Promise.all([
+    const [ins, due, team, company, alertsR, cov] = await Promise.all([
       apiJson("/api/insights?days_back=120"),
       apiJson("/api/live/next-due").catch(() => null),
       apiJson("/api/analytics/team?days_back=120").catch(() => null),
       apiJson("/api/insights/company?days_back=120").catch(() => null),
+      apiJson("/api/alerts").catch(() => null),
+      apiJson("/api/planner/coverage").catch(() => null),
     ]);
     const findings = ins.findings || [];
     const risk = findings.filter((f) => f.severity === "risk").length;
     const warn = findings.filter((f) => f.severity === "warn").length;
     const dueC = (due && due.counts) || {};
     const tt = (team && team.team) || {};
+    const alerts = (alertsR && alertsR.alerts) || [];
+    const segs = (cov && cov.segments) || [];
+    const segRisk = segs.filter((s) => s.coveragePct != null && s.minCoveragePct != null && s.coveragePct < s.minCoveragePct)
+      .sort((a, b) => (b.overduePct || 0) - (a.overduePct || 0));
 
-    // headline verdict — the one thing to know on open
-    const totalUrgent = risk + (dueC.overdue ? 1 : 0);
-    const hlTone = risk || dueC.overdue > 40 ? "bad" : (warn || dueC.overdue ? "warn" : "ok");
-    const hlBig = risk ? `${risk} ${risk === 1 ? "případ vyžaduje" : "případů vyžaduje"} pozornost`
-      : (warn ? `${warn} věcí ke kontrole` : "Vše pod kontrolou");
+    // headline verdict — the one thing a dispatcher needs on open
+    const problems = risk + segRisk.length + (dueC.overdue > 40 ? 1 : 0);
+    const hlTone = problems ? "bad" : ((warn || alerts.length || dueC.overdue) ? "warn" : "ok");
+    const hlBits = [];
+    if (risk) hlBits.push(`${risk} rizik`);
+    if (segRisk.length) hlBits.push(`${segRisk.length} segmentů pod SLA`);
+    if (alerts.length) hlBits.push(`${alerts.length} alertů`);
+    const hlBig = hlBits.length ? "Dnes řešit: " + hlBits.join(" · ") : (warn ? `${warn} věcí ke kontrole` : "Vše pod kontrolou");
     const hlSub = [];
     if (dueC.overdue) hlSub.push(`${_fmtNum(dueC.overdue)} POS po termínu`);
     if (dueC.neverVisited) hlSub.push(`${dueC.neverVisited} nikdy nenavštíveno`);
-    if (tt.overloaded) hlSub.push(`${tt.overloaded} přetížených techniků`);
-    if (company && company.totalLostHours) hlSub.push(`${_fmtNum(company.totalLostHours)} h rezervy`);
-
-    const headline = `<div class="ops-hl tone-${hlTone}"><div class="ops-hl-big">${esc(hlBig)}</div>` +
+    if (tt.overloaded) hlSub.push(`${tt.overloaded} přetížených`);
+    if (company && company.totalLostHours) hlSub.push(`${_fmtNum(company.totalLostHours)} h ušetřitelných`);
+    const today = new Date().toLocaleDateString("cs-CZ", { weekday: "long", day: "numeric", month: "long" });
+    const headline = `<div class="ops-hl tone-${hlTone}"><div class="ops-hl-date">Ranní briefing · ${esc(today)}</div>` +
+      `<div class="ops-hl-big">${esc(hlBig)}</div>` +
       `<div class="ops-hl-sub">${hlSub.map(esc).join(" · ") || "Žádné akutní resty."}</div></div>`;
 
-    // signal chips — quick counts, each leads somewhere
+    // signal chips
     const chip = (n, label, tone, nav) =>
       `<button class="ops-chip ${tone || ""}"${nav ? ` data-nav="${nav}"` : ""}><b>${n}</b><span>${esc(label)}</span></button>`;
     const chips = `<div class="ops-chips">` +
       chip(_fmtNum(dueC.overdue || 0), "POS po termínu", dueC.overdue ? "bad" : "good", "dashboard") +
       chip(dueC.neverVisited || 0, "nikdy nenavštíveno", dueC.neverVisited ? "warn" : "good", "dashboard") +
+      chip(segRisk.length, "segmentů pod SLA", segRisk.length ? "bad" : "good") +
       chip(tt.overloaded || 0, "přetížení", tt.overloaded ? "bad" : "good") +
       chip(tt.slack || 0, "rezerva", tt.slack ? "warn" : "") +
       chip(company ? _fmtNum(company.totalLostHours || 0) : "—", "h ušetřitelných", "warn") +
       `</div>`;
 
-    // ranked action list — the core: who + what + why + drill
+    // ENGINE RECOMMENDATIONS — the core: who + what + why + drill
     const why1 = (w) => typeof w === "string" ? w : (w.label || w.metric || "");
     const actions = findings.length ? `<div class="ops-actions">` + findings.map((f) => {
       const [tone, sevL] = _OPS_SEV[f.severity] || ["", f.severity];
@@ -4533,18 +4544,40 @@ async function dashOps(host) {
         `<div class="ops-act-body"><div class="ops-act-head">${esc(f.headline)}</div>` +
         `<div class="ops-act-whys">${whys}</div></div>` +
         (drill ? `<span class="ops-act-go">Rozbor →</span>` : "") + `</div>`;
-    }).join("") + `</div>` : stateHTML("empty", "Žádné nálezy — síť běží v normálu.");
+    }).join("") + `</div>` : stateHTML("empty", "Žádná doporučení — síť běží v normálu.");
 
-    // regions needing attention (from company)
+    // ALERT FEED (persisted engine alerts)
+    const _ALSEV = { risk: ["bad", "Riziko"], warn: ["warn", "Pozor"], info: ["", "Info"] };
+    const alertBlock = alerts.length ? `<div class="pl-section">Alerty <span class="pd-chip">${alerts.length}</span></div>` +
+      `<div class="ops-actions">` + alerts.slice(0, 12).map((a) => {
+        const p = a.payload || {};
+        const [tone, sevL] = _ALSEV[p.severity] || ["", p.severity || ""];
+        const drill = a.entity_type === "technician" && a.entity_id;
+        return `<div class="ops-act sev-${tone}"${drill ? ` data-diagnose="${esc(a.entity_id)}" role="button" tabindex="0"` : ""}>` +
+          `<span class="ops-act-sev ${tone}">${esc(sevL)}</span>` +
+          `<div class="ops-act-body"><div class="ops-act-head">${esc(p.message || (a.entity_id + ": " + (p.type || "")))}</div></div>` +
+          (drill ? `<span class="ops-act-go">Rozbor →</span>` : "") + `</div>`;
+      }).join("") + `</div>` : "";
+
+    // SLA BY SEGMENT (coverage below the segment's minimum)
+    const slaBlock = segRisk.length ? `<div class="pl-section">SLA v riziku — segmenty pod minimem</div>` +
+      `<div class="split-list">` + segRisk.map((s) => {
+        const w = Math.max(0, Math.min(s.coveragePct || 0, 100));
+        return `<div class="split-row"><span class="split-name">${esc(s.name)}</span>` +
+          `<div class="split-bar cap-bar" title="${_fmtNum(s.posCount)} POS · min ${s.minCoveragePct} %"><span class="cap-fill over" style="width:${w}%"></span></div>` +
+          `<span class="split-pct low">${s.coveragePct} % <span class="ops-sla-min">/ ${s.minCoveragePct} %</span></span></div>`;
+      }).join("") + `</div>` : "";
+
+    // regions needing attention
     const regs = (company && company.regions || []).slice(0, 3);
     const regBlock = regs.length ? `<div class="pl-section">Regiony vyžadující pozornost</div>` +
       `<div class="ops-regs">` + regs.map((r, i) =>
         `<div class="ops-reg${i === 0 ? " top" : ""}"><span class="ops-reg-n">${esc(r.region)}</span>` +
         `<span class="ops-reg-x">${_fmtNum(r.lostPerTech || 0)} h/tech · ${r.efficiencyPct != null ? r.efficiencyPct + " % na POS" : "—"} · ${r.technicians} tech</span></div>`).join("") + `</div>` : "";
 
-    host.innerHTML = headline + chips +
-      `<div class="pl-section">Na co se dnes zaměřit <span class="pd-chip">${findings.length} nálezů · ${risk} riziko / ${warn} pozor</span></div>` +
-      actions + regBlock;
+    host.innerHTML = headline + chips + alertBlock +
+      `<div class="pl-section">Doporučení enginu <span class="pd-chip">${findings.length} nálezů · ${risk} riziko / ${warn} pozor</span></div>` +
+      actions + slaBlock + regBlock;
 
     host.querySelectorAll(".ops-chip[data-nav]").forEach((b) =>
       b.addEventListener("click", () => showView(b.dataset.nav)));
