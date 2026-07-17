@@ -30,6 +30,10 @@ def _header_index(ws) -> dict[str, int]:
 
 def _read_rule_sheet_from_wb(wb, sheet_name: str) -> list[dict]:
     key_cols, editable_cols = RULE_SHEETS[sheet_name]
+    # A config-only scaffold (or any workbook that never carried this sheet)
+    # simply has no rows for it — treat an absent sheet as empty, don't crash.
+    if sheet_name not in wb.sheetnames:
+        return []
     ws = wb[sheet_name]
     idx = _header_index(ws)
     cols = list(dict.fromkeys(key_cols + editable_cols))  # de-dup, keep order

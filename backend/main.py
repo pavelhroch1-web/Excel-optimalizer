@@ -635,18 +635,27 @@ def cloud_generate(body: CloudGenerateRequest):
 
 @app.get("/api/cloud/status", dependencies=[Depends(require_auth)])
 def cloud_status():
-    """Status of the newest workflow run + whether its Excel artifact is ready."""
-    run = gh.latest_run(WORKFLOW_FILE)
+    """Status of the newest workflow run + whether its Excel artifact is ready.
+    Cloud generation is optional (GitHub Actions); when it isn't configured —
+    the normal case for the local desktop app — report it as unavailable rather
+    than erroring, since the local Planner generates without it."""
+    try:
+        run = gh.latest_run(WORKFLOW_FILE)
+    except Exception as e:  # noqa: BLE001 - GH not configured / offline
+        return {"run": None, "ready": False, "available": False, "reason": str(e)}
     ready = False
     if run and run["status"] == "completed" and run["conclusion"] == "success":
         ready = gh.run_artifact(run["id"], ARTIFACT_NAME) is not None
-    return {"run": run, "ready": ready}
+    return {"run": run, "ready": ready, "available": True}
 
 
 @app.get("/api/cloud/download", dependencies=[Depends(require_auth)])
 def cloud_download(start_week: int = 0):
     """Stream the Excel from the newest successful run's artifact."""
-    run = gh.latest_run(WORKFLOW_FILE)
+    try:
+        run = gh.latest_run(WORKFLOW_FILE)
+    except Exception as e:  # noqa: BLE001 - cloud generation not configured
+        raise HTTPException(status_code=404, detail=f"Cloudové generování není dostupné: {e}")
     art = gh.run_artifact(run["id"], ARTIFACT_NAME) if run else None
     if not art:
         raise HTTPException(status_code=404,
@@ -683,11 +692,20 @@ def get_rules():
     path = _rules_source_path()
     try:
         sheets = rules_io.read_all_rule_sheets(path)
+        # Campaigns are held in the SQLite `campaigns` table (the same source
+        # the engine's ACTIVITY_PLAN is built from), not in the config workbook,
+        # so read them from there — the workbook sheet is legacy/empty.
+        campaigns = [
+            {"TYPE": r["kind"], "ACTIVITY": r["name"], "START_WEEK": r["start_week"],
+             "END_WEEK": r["end_week"], "PRIORITY": r["priority"], "OVERRIDE_GAP": r["override_gap"]}
+            for r in db.get("SELECT kind, name, start_week, end_week, priority, override_gap "
+                            "FROM campaigns ORDER BY start_week, name")
+        ] or sheets["ACTIVITY_PLAN"]
         return {
             "terminal": sheets["TERMINAL_RULES"],
             "market": sheets["MARKET_RULES"],
             "category": sheets["CATEGORY_RULES"],
-            "campaigns": sheets["ACTIVITY_PLAN"],
+            "campaigns": campaigns,
         }
     finally:
         os.remove(path)
