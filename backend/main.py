@@ -341,53 +341,61 @@ async def draft_upload(
 # 2) generate -> run Planning on the Draft
 # --------------------------------------------------------------------------
 
+def _generate_from_runtime(mode: str, start_week: int, length: int,
+                           visits_per_tech_week: float | None, source: str = "generate") -> dict:
+    """The single generation path: build the engine state from the SQLite
+    runtime state, run Planning under mode/horizon, save it as the current draft
+    (so Review / edits / Publish work), mirror it into draft_plans, and record
+    the run. No workbook upload, no snapshot — one source of truth."""
+    import db_state
+    import route_planner
+    import runtime_state
+    state = runtime_state.build()
+    db_state.configure(state, mode, start_week, length, visits_per_tech_week)
+    cands_out: list = []
+    rej_out: list = []
+    messages = pipeline.run_planning(state, start_week, length,
+                                     candidates_out=cands_out, rejected_out=rej_out)
+    path = _tmp()
+    try:
+        state_xlsx.save_state(state, path)
+        store.save_draft(path, f"Generovat ({source}): tyden {start_week}, delka {length}, rezim {mode}",
+                         meta={"source": "runtime_state", "generatedAt": _now_iso(),
+                               "engineVersion": ENGINE_VERSION})
+    finally:
+        os.remove(path)
+    route_planner.materialize_draft_plans(state)
+    summary = pipeline._summarize(state, start_week, length)
+    try:
+        import history
+        assessment = history.run_assessment_from_candidates(cands_out, rej_out)
+        assessment.update({k: summary.get(k) for k in summary if k not in assessment})
+        summary["run_id"] = history.record_planner_run(
+            source, mode, start_week, length, visits_per_tech_week, result=assessment)
+        summary["assessment"] = assessment
+    except Exception:  # noqa: BLE001 - never block planning on memory write
+        pass
+    return {"messages": messages, "summary": summary}
+
+
 @app.post("/api/draft/generate", dependencies=[Depends(require_auth)])
 def draft_generate(body: GenerateRequest):
+    # Local desktop: generate straight from the SQLite runtime state — the
+    # unified path (no uploaded snapshot draft).
+    if LOCAL_MODE:
+        return _generate_from_runtime(body.mode, body.start_week, body.length,
+                                      body.visits_per_tech_week, source="generate")
+    # Hosted/cloud path: runs on the uploaded draft workbook (Field Brain sets
+    # goals/weights via config; the Planning Engine algorithm is unchanged).
     path = _require_draft_path()
     try:
         state = state_xlsx.load_state(path)
-        if LOCAL_MODE:
-            # Desktop: the Planning Engine reads its config from the DB
-            # (business_rules + settings) via db_state; algorithm unchanged.
-            import db_state
-            db_state.configure(state, body.mode, body.start_week, body.length,
-                               body.visits_per_tech_week)
-            _local_after_generate = True
-        else:
-            _local_after_generate = False
-            # Field Brain: a strategy mode + capacity only change goals/weights
-            # via config; the Planning Engine algorithm is unchanged.
-            brain_mod.apply_mode(state, body.mode)
-            brain_mod.apply_capacity(state, body.visits_per_tech_week)
-        # Capture the engine's candidate scoring + rejections in the SAME run
-        # (no re-run) so the memory can store this decision's assessment.
-        cands_out: list = [] if LOCAL_MODE else None
-        rej_out: list = [] if LOCAL_MODE else None
-        messages = pipeline.run_planning(state, body.start_week, body.length,
-                                         candidates_out=cands_out, rejected_out=rej_out)
+        brain_mod.apply_mode(state, body.mode)
+        brain_mod.apply_capacity(state, body.visits_per_tech_week)
+        messages = pipeline.run_planning(state, body.start_week, body.length)
         state_xlsx.save_state(state, path)
         store.save_draft(path, f"Generovat tour plan: tyden {body.start_week}, delka {body.length}, rezim {body.mode}")
-        if _local_after_generate:
-            # Persist the plan into draft_plans for the Route Planner / analytics.
-            import route_planner
-            route_planner.materialize_draft_plans(state)
         summary = pipeline._summarize(state, body.start_week, body.length)
-        if LOCAL_MODE:
-            # Long-term memory: record this run append-only with its inputs, the
-            # config fingerprint that produced it, and its full assessment
-            # (planned / unserved by reason / score distribution) - so the
-            # decision can be replayed and compared later.
-            try:
-                import history
-                assessment = history.run_assessment_from_candidates(cands_out or [], rej_out)
-                assessment.update({k: summary.get(k) for k in summary if k not in assessment})
-                run_id = history.record_planner_run(
-                    "generate", body.mode, body.start_week, body.length,
-                    body.visits_per_tech_week, result=assessment)
-                summary["run_id"] = run_id
-                summary["assessment"] = assessment
-            except Exception:  # noqa: BLE001 - never block planning on memory write
-                pass
         return {"messages": messages, "summary": summary}
     finally:
         os.remove(path)
@@ -1085,38 +1093,9 @@ if LOCAL_MODE:
     @app.post("/api/planner/generate-runtime", dependencies=[Depends(require_auth)])
     def planner_generate_runtime(body: SimRequest):
         """Generate a draft straight from the SQLite runtime state — no upload.
-        This is the GUI path Import -> ... -> generate: build the engine state
-        from the DB, run Planning under the chosen mode/horizon, and save it as
-        the current draft so Review / manual edits / Publish work as usual."""
-        import db_state
-        import route_planner
-        import runtime_state
-        state = runtime_state.build()
-        db_state.configure(state, body.mode, body.start_week, body.length,
-                           body.visits_per_tech_week)
-        cands_out: list = []
-        rej_out: list = []
-        messages = pipeline.run_planning(state, body.start_week, body.length,
-                                         candidates_out=cands_out, rejected_out=rej_out)
-        path = _tmp()
-        state_xlsx.save_state(state, path)
-        store.save_draft(path, f"Generovat z runtime stavu: tyden {body.start_week}, "
-                               f"delka {body.length}, rezim {body.mode}",
-                         meta={"source": "runtime_state", "generatedAt": _now_iso(),
-                               "engineVersion": ENGINE_VERSION})
-        route_planner.materialize_draft_plans(state)
-        summary = pipeline._summarize(state, body.start_week, body.length)
-        try:
-            import history
-            assessment = history.run_assessment_from_candidates(cands_out, rej_out)
-            assessment.update({k: summary.get(k) for k in summary if k not in assessment})
-            summary["run_id"] = history.record_planner_run(
-                "generate-runtime", body.mode, body.start_week, body.length,
-                body.visits_per_tech_week, result=assessment)
-        except Exception:  # noqa: BLE001 - never block planning on memory write
-            pass
-        os.remove(path)
-        return {"messages": messages, "summary": summary}
+        Same single generation path as /api/draft/generate in local mode."""
+        return _generate_from_runtime(body.mode, body.start_week, body.length,
+                                      body.visits_per_tech_week, source="generate-runtime")
 
     import planner_advisor  # noqa: E402
 

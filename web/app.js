@@ -5240,7 +5240,7 @@ const _PS_STAGES = [
 ];
 // map: substring of a section's <h2> -> stage id
 const _PS_MAP = [
-  ["Nahrát exporty", "data"],
+  ["Vstupní data", "data"],
   ["Plánovací filtry", "params"],
   ["Strategie a pre-flight", "scenarios"],
   ["Predikce a scénáře", "scenarios"],
@@ -5293,6 +5293,8 @@ function initPlannerStudio() {
     `<span class="ps-step-t"><b>${esc(s.label)}</b><span>${esc(s.sub)}</span></span></button>`).join("");
   rail.querySelectorAll(".ps-step").forEach((b) =>
     b.addEventListener("click", () => setPlannerStage(b.dataset.stage)));
+  const goImport = document.getElementById("ps-goto-import");
+  if (goImport && !goImport.dataset.ready) { goImport.dataset.ready = "1"; goImport.addEventListener("click", () => showView("import")); }
   initScenarioWorkbench();
   setPlannerStage(_psStage);
 }
@@ -5307,10 +5309,35 @@ function setPlannerStage(id) {
     b.classList.toggle("on", on); b.setAttribute("aria-pressed", on ? "true" : "false");
   });
   // convenience: entering a stage pulls its fresh data
+  if (id === "data") _psLoadDataHealth();
   if (id === "edits" && typeof loadDraft === "function") loadDraft();
   if (id === "publish" && typeof loadVersions === "function") loadVersions();
   const rail = view.querySelector("#ps-rail");
   if (rail) rail.scrollIntoView({ block: "nearest" });
+}
+
+// Compact data-health for the Planner "Vstupní data" stage — same runtime
+// state the engine plans over, so the dispatcher sees what's loaded.
+async function _psLoadDataHealth() {
+  const host = document.getElementById("ps-data-health");
+  if (!host) return;
+  host.innerHTML = skeleton({ rows: 1 });
+  try {
+    const [counts, dims] = await Promise.all([
+      apiJson("/api/data/summary"),
+      apiJson("/api/summary/dimensions").catch(() => null),
+    ]);
+    const keys = ["pos_master", "salesapp_visits", "campaigns", "technicians"];
+    const tiles = keys.filter((k) => k in counts).map((k) => {
+      const meta = (typeof _DH_META !== "undefined" && _DH_META[k]) || [k, ""];
+      const empty = (k === "pos_master" || k === "salesapp_visits") && !counts[k];
+      return tile(meta[0], _fmtNum(counts[k]), meta[1], empty ? "bad" : "");
+    }).join("");
+    const fresh = dims && dims.dataFrom
+      ? `<p class="pd-sub">Návštěvy ${esc(dims.dataFrom)} – ${esc(dims.dataTo)}${dims.dataTo ? " · " + _freshness(dims.dataTo) : ""}</p>`
+      : `<p class="pd-sub">Zatím žádné návštěvy — naimportuj SalesApp v Import Center.</p>`;
+    host.innerHTML = `<div class="pl-tiles">${tiles}</div>` + fresh;
+  } catch (e) { showState(host, "error", "Nepodařilo se načíst stav dat: " + e.message); }
 }
 
 // ---- Scenario workbench: simulate / assess / what-if over the runtime state --

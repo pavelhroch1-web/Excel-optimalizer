@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=95">
+<link rel="stylesheet" href="styles.css?v=96">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -26,7 +26,7 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v95</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v96</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard" title="Přehled"><span class="si-ico" data-ico="grid"></span><span class="si-label">Přehled</span></button>
       <button class="side-item" data-nav="import" title="Import dat"><span class="si-ico" data-ico="upload"></span><span class="si-label">Import dat</span></button>
@@ -207,20 +207,15 @@
         <div id="campaigns-out"></div>
       </section>
 
-      <!-- 1) UPLOAD -->
+      <!-- 1) DATA — single source of truth is the imported SQLite runtime state -->
       <section class="card">
-        <h2>1 · Nahrát exporty</h2>
-        <p class="hint">Nahraj čerstvé exporty. Návrh vždy naváže na poslední publikovanou verzi – publikovaný plán se nikdy nezmění.</p>
-        <form id="upload-form">
-          <label class="filelabel">SalesApp exporty (týdenní, můžeš vybrat víc)
-            <input type="file" id="salesapp-files" accept=".xlsx" multiple>
-          </label>
-          <label class="filelabel">POS export (nepovinné – když nenahraješ, síť se vezme z posledního snapshotu)
-            <input type="file" id="pos-export" accept=".xlsx">
-          </label>
-          <button type="submit" id="upload-btn" class="primary">Nahrát a vytvořit návrh</button>
-        </form>
-        <p id="upload-result" class="result"></p>
+        <h2>Vstupní data <span class="badge">runtime stav · SQLite</span></h2>
+        <p class="hint">Plánovač počítá nad naimportovanými daty (POS, návštěvy, kampaně) — jeden zdroj pravdy. Data nahraješ a spravuješ v <strong>Import Center</strong>; tady se z nich rovnou generují scénáře a návrh.</p>
+        <div id="ps-data-health"></div>
+        <div class="row" style="margin-top:12px">
+          <button id="ps-goto-import" class="primary" data-nav="import">Otevřít Import Center →</button>
+          <span class="hint" style="align-self:center">nahrát / aktualizovat exporty</span>
+        </div>
       </section>
 
       <!-- 2) PLANNING FILTERS -->
@@ -797,6 +792,6 @@
   </div>
 </div>
 
-<script src="app.js?v=95"></script>
+<script src="app.js?v=96"></script>
 </body>
 </html>
