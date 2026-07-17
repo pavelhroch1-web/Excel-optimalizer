@@ -5120,9 +5120,96 @@ function showView(name) {
     if (name === "pos" && typeof initPosView === "function") initPosView();
     if (name === "summary" && typeof initSummary === "function") initSummary();
     if (name === "import" && typeof initBulkTasks === "function") initBulkTasks();
-    if (name === "tourplan" && typeof loadStrategyModes === "function") { loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); loadCampaigns && loadCampaigns(); loadCoverage && loadCoverage(); }
+    if (name === "tourplan" && typeof loadStrategyModes === "function") { initPlannerStudio(); loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); loadCampaigns && loadCampaigns(); loadCoverage && loadCoverage(); }
   }
   window.scrollTo(0, 0);
+}
+
+// ===================== PLANNER STUDIO =====================
+// Turns the TourPlan section into a staged dispatcher workflow: one stage of the
+// TourPlan lifecycle at a time, driven by a stepper rail. The existing section
+// cards are untouched — each is tagged with the stage it belongs to and shown
+// only on that stage, so all existing wiring keeps working.
+const _PS_STAGES = [
+  { id: "data", label: "Data", sub: "Vstupní exporty" },
+  { id: "params", label: "Parametry", sub: "Filtry a výjimky" },
+  { id: "scenarios", label: "Scénáře", sub: "Simulace · what-if" },
+  { id: "review", label: "Review", sub: "Generování a kandidáti" },
+  { id: "edits", label: "Úpravy", sub: "Ruční zásahy do draftu" },
+  { id: "publish", label: "Publish & Export", sub: "Verze · export · cloud" },
+];
+// map: substring of a section's <h2> -> stage id
+const _PS_MAP = [
+  ["Nahrát exporty", "data"],
+  ["Plánovací filtry", "params"],
+  ["Override, priority", "params"],
+  ["Strategie a pre-flight", "scenarios"],
+  ["Predikce a scénáře", "scenarios"],
+  ["Plánovací simulace", "scenarios"],
+  ["Co kdyby", "scenarios"],
+  ["Generovat TourPlan", "review"],
+  ["Kandidáti POS", "review"],
+  ["Coverage podle segment", "review"],
+  ["Kampaně", "review"],
+  ["Návrh a ruční úpravy", "edits"],
+  ["Publikovat TourPlan", "publish"],
+  ["Route Planner", "publish"],
+  ["Historie publikovaných verzí", "publish"],
+  ["plán v cloudu", "publish"],
+];
+let _psStage = "data";
+function _psStageOf(sec) {
+  const h2 = sec.querySelector("h2");
+  const t = h2 ? h2.textContent : "";
+  for (const [needle, stage] of _PS_MAP) if (t.includes(needle)) return stage;
+  return null;
+}
+function initPlannerStudio() {
+  const view = document.querySelector('.view[data-view="tourplan"]');
+  if (!view) return;
+  // tag every section card with its stage (idempotent)
+  view.querySelectorAll("section.card").forEach((sec) => {
+    if (!sec.dataset.psStage) {
+      const s = _psStageOf(sec); if (s) sec.dataset.psStage = s;
+      // the old linear step numbers ("4 · Strategie…") clash with the stage
+      // numbers now, so drop the leading "N · " once per section.
+      const h2 = sec.querySelector("h2");
+      if (h2 && h2.firstChild && h2.firstChild.nodeType === 3)
+        h2.firstChild.textContent = h2.firstChild.textContent.replace(/^\s*\d+\s*·\s*/, "");
+    }
+  });
+  // build the rail once, right after the view head
+  let rail = view.querySelector("#ps-rail");
+  if (!rail) {
+    rail = document.createElement("div");
+    rail.id = "ps-rail";
+    rail.className = "ps-rail";
+    const head = view.querySelector(".view-head");
+    head.insertAdjacentElement("afterend", rail);
+  }
+  rail.innerHTML = _PS_STAGES.map((s, i) =>
+    `<button class="ps-step" data-stage="${s.id}" aria-pressed="false">` +
+    `<span class="ps-step-n">${i + 1}</span>` +
+    `<span class="ps-step-t"><b>${esc(s.label)}</b><span>${esc(s.sub)}</span></span></button>`).join("");
+  rail.querySelectorAll(".ps-step").forEach((b) =>
+    b.addEventListener("click", () => setPlannerStage(b.dataset.stage)));
+  setPlannerStage(_psStage);
+}
+function setPlannerStage(id) {
+  _psStage = id;
+  const view = document.querySelector('.view[data-view="tourplan"]');
+  if (!view) return;
+  view.querySelectorAll("section.card[data-ps-stage]").forEach((sec) =>
+    sec.classList.toggle("ps-hidden", sec.dataset.psStage !== id));
+  view.querySelectorAll("#ps-rail .ps-step").forEach((b) => {
+    const on = b.dataset.stage === id;
+    b.classList.toggle("on", on); b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  // convenience: entering a stage pulls its fresh data
+  if (id === "edits" && typeof loadDraft === "function") loadDraft();
+  if (id === "publish" && typeof loadVersions === "function") loadVersions();
+  const rail = view.querySelector("#ps-rail");
+  if (rail) rail.scrollIntoView({ block: "nearest" });
 }
 
 function _initNav() {

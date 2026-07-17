@@ -893,6 +893,23 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .view-head { margin: 6px 0 20px; }
 .view-head h1 { font-size: var(--fs-2xl); font-weight: var(--fw-bold); letter-spacing: -0.02em; margin: 0 0 6px; }
 .view-head p { font-size: var(--fs-md); color: var(--text-2); margin: 0; max-width: 82ch; line-height: 1.55; }
+/* Planner Studio — staged stepper rail */
+.ps-hidden { display: none !important; }
+.ps-rail { display: flex; gap: 6px; margin: 0 0 22px; padding: 6px; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: var(--r-lg); overflow-x: auto; position: sticky; top: 8px; z-index: 6; }
+.ps-step { flex: 1 1 0; min-width: 128px; display: flex; align-items: center; gap: 10px; text-align: left;
+  padding: 9px 12px; border: 1px solid transparent; border-radius: var(--r-md); background: transparent;
+  cursor: pointer; color: var(--text-2); transition: background var(--t1) var(--ease), border-color var(--t1) var(--ease); }
+.ps-step:hover { background: var(--bg-2); }
+.ps-step.on { background: var(--panel); border-color: var(--border-2); box-shadow: var(--shadow-1); color: var(--text); }
+.ps-step-n { flex: none; width: 24px; height: 24px; border-radius: 999px; display: grid; place-items: center;
+  font-size: var(--fs-xs); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums;
+  background: var(--bg-2); color: var(--text-3); border: 1px solid var(--border); }
+.ps-step.on .ps-step-n { background: var(--accent); color: #fff; border-color: var(--accent); }
+.ps-step-t { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.ps-step-t b { font-size: var(--fs-sm); font-weight: var(--fw-semibold); white-space: nowrap; }
+.ps-step-t span { font-size: var(--fs-2xs); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 720px) { .ps-step-t span { display: none; } .ps-step { min-width: 92px; } }
 
 /* drop zone (import) */
 .drop-zone { border: 2px dashed var(--border-2); border-radius: var(--r-lg); padding: 52px 24px; text-align: center;
