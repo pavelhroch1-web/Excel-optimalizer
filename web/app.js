@@ -5134,15 +5134,14 @@ const _PS_STAGES = [
   { id: "data", label: "Data", sub: "Vstupní exporty" },
   { id: "params", label: "Parametry", sub: "Filtry a výjimky" },
   { id: "scenarios", label: "Scénáře", sub: "Simulace · what-if" },
-  { id: "review", label: "Review", sub: "Generování a kandidáti" },
-  { id: "edits", label: "Úpravy", sub: "Ruční zásahy do draftu" },
+  { id: "review", label: "Review", sub: "Generování a návrh" },
+  { id: "edits", label: "Úpravy", sub: "Override · priorita · přeřazení" },
   { id: "publish", label: "Publish & Export", sub: "Verze · export · cloud" },
 ];
 // map: substring of a section's <h2> -> stage id
 const _PS_MAP = [
   ["Nahrát exporty", "data"],
   ["Plánovací filtry", "params"],
-  ["Override, priority", "params"],
   ["Strategie a pre-flight", "scenarios"],
   ["Predikce a scénáře", "scenarios"],
   ["Plánovací simulace", "scenarios"],
@@ -5151,7 +5150,8 @@ const _PS_MAP = [
   ["Kandidáti POS", "review"],
   ["Coverage podle segment", "review"],
   ["Kampaně", "review"],
-  ["Návrh a ruční úpravy", "edits"],
+  ["Návrh a ruční úpravy", "review"],
+  ["Override, priority", "edits"],
   ["Publikovat TourPlan", "publish"],
   ["Route Planner", "publish"],
   ["Historie publikovaných verzí", "publish"],
@@ -5193,6 +5193,7 @@ function initPlannerStudio() {
     `<span class="ps-step-t"><b>${esc(s.label)}</b><span>${esc(s.sub)}</span></span></button>`).join("");
   rail.querySelectorAll(".ps-step").forEach((b) =>
     b.addEventListener("click", () => setPlannerStage(b.dataset.stage)));
+  initScenarioWorkbench();
   setPlannerStage(_psStage);
 }
 function setPlannerStage(id) {
@@ -5210,6 +5211,142 @@ function setPlannerStage(id) {
   if (id === "publish" && typeof loadVersions === "function") loadVersions();
   const rail = view.querySelector("#ps-rail");
   if (rail) rail.scrollIntoView({ block: "nearest" });
+}
+
+// ---- Scenario workbench: simulate / assess / what-if over the runtime state --
+const _sim = { params: null, base: null };
+function initScenarioWorkbench() {
+  const modeSel = document.getElementById("sim-mode");
+  if (!modeSel || modeSel.dataset.ready) return;
+  modeSel.dataset.ready = "1";
+  apiJson("/api/strategy-modes").then((d) => {
+    modeSel.innerHTML = (d.modes || []).map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join("");
+  }).catch(() => {});
+  const wk = document.getElementById("sim-week");
+  if (wk && !wk.value) apiJson("/api/status").then((s) => { wk.value = (s && s.nextPlanWeek) || (s && s.lastPublishedWeek) || 30; }).catch(() => { wk.value = 30; });
+
+  on("sim-form", "submit", async (e) => {
+    e.preventDefault();
+    const p = {
+      mode: modeSel.value,
+      start_week: parseInt(document.getElementById("sim-week").value, 10),
+      length: parseInt(document.getElementById("sim-length").value, 10) || 1,
+      visits_per_tech_week: parseFloat(document.getElementById("sim-visits").value) || null,
+      tech_count: parseInt(document.getElementById("sim-techs").value, 10) || null,
+    };
+    _sim.params = p;
+    const out = document.getElementById("sim-out");
+    const res = document.getElementById("sim-result");
+    res.textContent = "Spouštím Planning Engine nad živým stavem…";
+    out.innerHTML = skeleton({ rows: 3 });
+    try {
+      const d = await postJson("/api/planner/simulate", p);
+      _sim.base = d;
+      res.textContent = "";
+      out.innerHTML = renderSimulate(d);
+      ["sim-assess-wrap", "sim-whatif-wrap", "sim-generate-row"].forEach((id) => {
+        const el = document.getElementById(id); if (el) el.style.display = "";
+      });
+      const wv = document.getElementById("sim-wi-visits"); if (wv && !wv.value) wv.value = p.visits_per_tech_week || 40;
+      document.getElementById("sim-assess-out").innerHTML = "";
+      document.getElementById("sim-whatif-out").innerHTML = "";
+    } catch (err) { res.innerHTML = `<span class="err">${esc(err.message)}</span>`; out.innerHTML = ""; }
+  });
+
+  on("sim-assess-btn", "click", async () => {
+    if (!_sim.params) return;
+    const out = document.getElementById("sim-assess-out");
+    out.innerHTML = skeleton({ rows: 2 });
+    try { out.innerHTML = renderAssess(await postJson("/api/planner/assess", _sim.params)); }
+    catch (err) { out.innerHTML = `<p class="result err">${esc(err.message)}</p>`; }
+  });
+
+  on("sim-whatif-form", "submit", async (e) => {
+    e.preventDefault();
+    if (!_sim.params) return;
+    const scenario = { ...
+      _sim.params,
+      visits_per_tech_week: parseFloat(document.getElementById("sim-wi-visits").value) || _sim.params.visits_per_tech_week,
+      tech_count: parseInt(document.getElementById("sim-wi-techs").value, 10) || _sim.params.tech_count,
+    };
+    const out = document.getElementById("sim-whatif-out");
+    out.innerHTML = skeleton({ rows: 1 });
+    try { out.innerHTML = renderWhatif(await postJson("/api/planner/whatif", { base: _sim.params, scenario })); }
+    catch (err) { out.innerHTML = `<p class="result err">${esc(err.message)}</p>`; }
+  });
+
+  on("sim-generate-btn", "click", async () => {
+    if (!_sim.params) return;
+    const btn = document.getElementById("sim-generate-btn");
+    btn.disabled = true; btn.textContent = "Generuji návrh…";
+    try {
+      await postJson("/api/planner/generate-runtime", _sim.params);
+      toast("Návrh vygenerován ze scénáře", "ok");
+      setPlannerStage("review");
+      if (typeof loadDraft === "function") loadDraft();
+    } catch (err) { toast("Chyba: " + err.message, "err"); }
+    finally { btn.disabled = false; btn.textContent = "Vygenerovat návrh z tohoto scénáře →"; }
+  });
+}
+
+function _simTechRow(t) {
+  const st = t.status === "over" ? "over" : (t.status === "under" ? "slack" : "ok");
+  const w = Math.max(3, Math.min(t.utilizationPct || 0, 100));
+  return `<div class="split-row"><span class="split-name">${esc(t.technician)}</span>` +
+    `<div class="split-bar cap-bar" title="${t.visits} návštěv · ${t.avgPerWeek}/týd · kapacita ${t.capacityPerWeek}"><span class="cap-fill ${st}" style="width:${w}%"></span></div>` +
+    `<span class="split-pct ${t.status === "over" ? "low" : ""}">${t.utilizationPct != null ? t.utilizationPct + " %" : "—"}</span></div>`;
+}
+function renderSimulate(d) {
+  const sc = d.scenario || {};
+  const weeks = Object.keys(d.plannedByWeek || {}).sort();
+  const tiles = `<div class="pl-tiles">` +
+    tile("Naplánováno návštěv", _fmtNum(d.plannedTotal || 0), `${weeks.length} týd. · ${sc.techCount || (d.perTechnician || []).length} techniků`) +
+    tile("Unikátních POS", _fmtNum(d.uniquePos || 0), "obslouženo v horizontu") +
+    tile("Kapacita/týden", sc.capacityPerWeek ?? "—", `${sc.visitsPerTechWeek || "—"} návštěv/technik`) +
+    tile("Regionů", (d.perRegion || []).length, "s naplánovanou prací") + `</div>`;
+  const byWeek = weeks.length ? `<div class="pl-section">Návštěvy po týdnech</div><div class="split-list">` +
+    weeks.map((w) => {
+      const v = d.plannedByWeek[w]; const mx = Math.max(...weeks.map((x) => d.plannedByWeek[x]), 1);
+      return `<div class="split-row"><span class="split-name">Týden ${esc(w)}</span>` +
+        `<div class="split-bar cap-bar"><span class="cap-fill ok" style="width:${100 * v / mx}%"></span></div>` +
+        `<span class="split-pct">${_fmtNum(v)}</span></div>`;
+    }).join("") + `</div>` : "";
+  const over = (d.perTechnician || []).filter((t) => t.status === "over").length;
+  const under = (d.perTechnician || []).filter((t) => t.status === "under").length;
+  const techs = (d.perTechnician || []).length ? `<div class="pl-section">Vytížení techniků <span class="pd-chip">${over} přetížených · ${under} s rezervou</span></div>` +
+    `<div class="split-list">` + (d.perTechnician || []).slice(0, 40).map(_simTechRow).join("") + `</div>` : "";
+  return tiles + byWeek + techs;
+}
+function _covRow(label, o) {
+  if (!o) return "";
+  const pct = o.pct != null ? o.pct : (o.covered && o.due ? Math.round(100 * o.covered / o.due) : 0);
+  const tone = pct >= 85 ? "ok" : (pct >= 55 ? "slack" : "over");
+  return `<div class="split-row"><span class="split-name">${esc(label)}</span>` +
+    `<div class="split-bar cap-bar"><span class="cap-fill ${tone}" style="width:${Math.min(pct, 100)}%"></span></div>` +
+    `<span class="split-pct">${pct} %</span></div>`;
+}
+function renderAssess(d) {
+  const c = d.coverage || {};
+  const cov = `<div class="pl-section">Pokrytí cílů</div><div class="split-list">` +
+    _covRow("CORE (klíčové POS)", c.core) + _covRow("Kadence (po termínu)", c.cadence) +
+    (c.neglect ? `<div class="split-row"><span class="split-name">Zanedbané POS</span><span class="split-pct" style="grid-column:2/4;text-align:left">${_fmtNum(c.neglect.cleared || 0)} vyřešeno · ${_fmtNum(c.neglect.remainingAfter || 0)} zbývá</span></div>` : "") +
+    `</div>`;
+  const proj = d.projection ? `<p class="pd-sub">${esc(typeof d.projection === "string" ? d.projection : (d.projection.text || `Pokrytí celé sítě odhadem za ${d.projection.weeksToFullCoverage || "?"} týdnů.`))}</p>` : "";
+  const notes = (d.notes || []).length ? `<div class="pl-section">Poznámky enginu</div><ul class="pd-list">` + d.notes.map((n) => `<li>${esc(typeof n === "string" ? n : (n.text || JSON.stringify(n)))}</li>`).join("") + `</ul>` : "";
+  const gaps = (d.gaps || []).length ? `<div class="pl-section">Mezery <span class="pd-chip">${d.gaps.length}</span></div><ul class="pd-list">` + d.gaps.slice(0, 8).map((g) => `<li>${esc(typeof g === "string" ? g : (g.label || g.text || JSON.stringify(g)))}</li>`).join("") + `</ul>` : "";
+  return cov + proj + gaps + notes;
+}
+function renderWhatif(d) {
+  const a = d.base || {}, b = d.scenario || {}, dl = d.delta || {};
+  const sign = (n) => (n > 0 ? "+" : "") + _fmtNum(n);
+  const cell = (label, av, bv, dv, tone) =>
+    `<div class="wi-col"><div class="wi-l">${esc(label)}</div><div class="wi-ab">${_fmtNum(av)} → <b>${_fmtNum(bv)}</b></div>` +
+    `<div class="wi-d ${dv > 0 ? "up" : dv < 0 ? "down" : ""}">${sign(dv)}</div></div>`;
+  return `<div class="wi-grid">` +
+    cell("Naplánováno návštěv", a.plannedTotal || 0, b.plannedTotal || 0, dl.plannedTotal || 0) +
+    cell("Unikátních POS", a.uniquePos || 0, b.uniquePos || 0, dl.uniquePos || 0) +
+    cell("Techniků v plánu", (a.perTechnician || []).length, (b.perTechnician || []).length, dl.technicians || 0) +
+    `</div>`;
 }
 
 function _initNav() {

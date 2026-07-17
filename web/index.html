@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=92">
+<link rel="stylesheet" href="styles.css?v=93">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -26,7 +26,7 @@
 <div id="app-screen" class="app-shell hidden">
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
-    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v92</span></div>
+    <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v93</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard" title="Přehled"><span class="si-ico" data-ico="grid"></span><span class="si-label">Přehled</span></button>
       <button class="side-item" data-nav="import" title="Import dat"><span class="si-ico" data-ico="upload"></span><span class="si-label">Import dat</span></button>
@@ -325,6 +325,43 @@
             <button type="submit" class="ghost">Porovnat se scénářem</button>
           </form>
           <div id="planner-compare"></div>
+        </div>
+      </section>
+
+      <!-- SCENARIO WORKBENCH: simulate / assess / what-if over the live runtime state -->
+      <section class="card sim-card">
+        <h2>Plánovací simulace <span class="badge">nad živým stavem · engine</span></h2>
+        <p class="hint">Spustí Planning Engine nad aktuálním runtime stavem (data z importu) na zvolený horizont. Nic se nepublikuje — je to rozhodovací nástroj. Ze scénáře pak můžeš rovnou vygenerovat návrh.</p>
+        <form id="sim-form" class="row">
+          <label>Strategie<select id="sim-mode"></select></label>
+          <label>Počáteční týden<input type="number" id="sim-week" min="1" max="53" required></label>
+          <label>Horizont (týdnů)<input type="number" id="sim-length" min="1" max="12" value="2" required></label>
+          <label>Návštěv/technik/týden<input type="number" id="sim-visits" min="1" value="40"></label>
+          <label>Techniků (nepovinné)<input type="number" id="sim-techs" min="1" placeholder="auto"></label>
+          <button type="submit" id="sim-btn" class="primary">Spustit simulaci</button>
+        </form>
+        <p id="sim-result" class="result"></p>
+        <div id="sim-out"></div>
+
+        <div class="pl-whatif" id="sim-assess-wrap" style="display:none">
+          <div class="pl-section">Posouzení pokrytí a kapacity (assess)</div>
+          <div class="row"><button id="sim-assess-btn" class="ghost">Posoudit tento scénář</button></div>
+          <div id="sim-assess-out"></div>
+        </div>
+
+        <div class="pl-whatif" id="sim-whatif-wrap" style="display:none">
+          <div class="pl-section">Co kdyby — porovnat variantu</div>
+          <form id="sim-whatif-form" class="row">
+            <label>Návštěv/technik/týden<input type="number" id="sim-wi-visits" min="1"></label>
+            <label>Techniků<input type="number" id="sim-wi-techs" min="1" placeholder="stejně"></label>
+            <button type="submit" class="ghost">Porovnat se základním scénářem</button>
+          </form>
+          <div id="sim-whatif-out"></div>
+        </div>
+
+        <div class="row" id="sim-generate-row" style="display:none">
+          <button id="sim-generate-btn" class="primary">Vygenerovat návrh z tohoto scénáře →</button>
+          <span class="hint" style="align-self:center">přejde do Review s hotovým draftem</span>
         </div>
       </section>
 
@@ -741,6 +778,6 @@
   </div>
 </div>
 
-<script src="app.js?v=92"></script>
+<script src="app.js?v=93"></script>
 </body>
 </html>

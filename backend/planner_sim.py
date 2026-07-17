@@ -119,11 +119,9 @@ def assess(mode: str, start_week: int, length: int,
     sim = simulate(mode, start_week, length, visits_per_tech_week, tech_count)
 
     import runtime_state
-    path = runtime_state.to_temp_xlsx()
-    try:
-        sc = brain.preflight(path, start_week, length, mode, visits_per_tech_week, tech_count)
-    finally:
-        os.remove(path)
+    # Work directly on the SQLite runtime state — no xlsx round-trip.
+    sc = brain.preflight(None, start_week, length, mode, visits_per_tech_week,
+                         tech_count, state=runtime_state.build())
 
     # Capacity/utilization from the ACTUAL multi-week plan (consistent with the
     # per-technician workload), not from preflight's candidate accounting.

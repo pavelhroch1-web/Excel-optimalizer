@@ -910,6 +910,15 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .ps-step-t b { font-size: var(--fs-sm); font-weight: var(--fw-semibold); white-space: nowrap; }
 .ps-step-t span { font-size: var(--fs-2xs); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 720px) { .ps-step-t span { display: none; } .ps-step { min-width: 92px; } }
+.sim-card .pl-tiles { margin-top: 4px; }
+.pd-list { margin: 4px 0 0; padding-left: 20px; font-size: var(--fs-sm); color: var(--text-2); }
+.pd-list li { margin: 2px 0; }
+.wi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 6px; }
+.wi-col { border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 12px; background: var(--panel-2); }
+.wi-l { font-size: var(--fs-xs); color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; }
+.wi-ab { font-size: var(--fs-md); font-variant-numeric: tabular-nums; margin-top: 3px; }
+.wi-d { font-size: var(--fs-sm); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; margin-top: 2px; color: var(--text-3); }
+.wi-d.up { color: var(--good); } .wi-d.down { color: var(--bad); }
 
 /* drop zone (import) */
 .drop-zone { border: 2px dashed var(--border-2); border-radius: var(--r-lg); padding: 52px 24px; text-align: center;

@@ -1064,6 +1064,42 @@ if LOCAL_MODE:
         return planner_sim.assess(body.mode, body.start_week, body.length,
                                   body.visits_per_tech_week, body.tech_count)
 
+    @app.post("/api/planner/generate-runtime", dependencies=[Depends(require_auth)])
+    def planner_generate_runtime(body: SimRequest):
+        """Generate a draft straight from the SQLite runtime state — no upload.
+        This is the GUI path Import -> ... -> generate: build the engine state
+        from the DB, run Planning under the chosen mode/horizon, and save it as
+        the current draft so Review / manual edits / Publish work as usual."""
+        import db_state
+        import route_planner
+        import runtime_state
+        state = runtime_state.build()
+        db_state.configure(state, body.mode, body.start_week, body.length,
+                           body.visits_per_tech_week)
+        cands_out: list = []
+        rej_out: list = []
+        messages = pipeline.run_planning(state, body.start_week, body.length,
+                                         candidates_out=cands_out, rejected_out=rej_out)
+        path = _tmp()
+        state_xlsx.save_state(state, path)
+        store.save_draft(path, f"Generovat z runtime stavu: tyden {body.start_week}, "
+                               f"delka {body.length}, rezim {body.mode}",
+                         meta={"source": "runtime_state", "generatedAt": _now_iso(),
+                               "engineVersion": ENGINE_VERSION})
+        route_planner.materialize_draft_plans(state)
+        summary = pipeline._summarize(state, body.start_week, body.length)
+        try:
+            import history
+            assessment = history.run_assessment_from_candidates(cands_out, rej_out)
+            assessment.update({k: summary.get(k) for k in summary if k not in assessment})
+            summary["run_id"] = history.record_planner_run(
+                "generate-runtime", body.mode, body.start_week, body.length,
+                body.visits_per_tech_week, result=assessment)
+        except Exception:  # noqa: BLE001 - never block planning on memory write
+            pass
+        os.remove(path)
+        return {"messages": messages, "summary": summary}
+
     import planner_advisor  # noqa: E402
 
     class AdviseRequest(SimRequest):

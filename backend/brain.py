@@ -113,12 +113,15 @@ def _sheet_idx(state, sheet):
     return rows, ({str(n): i for i, n in enumerate(rows[0])} if rows else {})
 
 
-def preflight(path: str, start_week: int, length: int, mode: str,
-              visits_per_tech_week: float | None, tech_count_override: int | None = None) -> dict:
+def preflight(path: str | None, start_week: int, length: int, mode: str,
+              visits_per_tech_week: float | None, tech_count_override: int | None = None,
+              state: dict | None = None) -> dict:
     """Simulate the horizon with the unchanged engine under `mode`+capacity and
     COMPUTE the business scorecard (coverage of every objective) BEFORE the
-    plan is committed. Read-only: nothing is persisted."""
-    state = xlsx_engine_io.read_state(path)
+    plan is committed. Read-only: nothing is persisted. Pass `state` to work on
+    an already-assembled engine state (e.g. the SQLite runtime state) and skip
+    the xlsx round-trip; otherwise the state is read from `path`."""
+    state = state if state is not None else xlsx_engine_io.read_state(path)
     meta = apply_mode(state, mode)
     apply_capacity(state, visits_per_tech_week)
     _set_control(state, "CAMPAIGN_START_WEEK", start_week)
