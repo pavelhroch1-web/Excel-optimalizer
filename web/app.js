@@ -4427,6 +4427,7 @@ const _DASH = [
   { id: "overview", label: "Overview", load: dashOverview },
   { id: "capacity", label: "Capacity", load: dashCapacity },
   { id: "kpi", label: "KPI", load: dashKpi },
+  { id: "maps", label: "Mapa", load: dashMaps },
 ];
 let _dashTab = "ops";
 function initDashboards() {
@@ -4702,6 +4703,115 @@ async function dashKpi(host) {
     host.querySelectorAll(".tech-link").forEach((el) =>
       el.addEventListener("click", () => drillToTechnician(el.dataset.tech)));
   } catch (e) { showState(host, "error", "Nepodařilo se načíst KPI: " + e.message); }
+}
+
+// --- Maps: interactive network map (isolated from the reporting map) ---
+// Reuses the /api/gis/network endpoint and the _posPopup helper; owns its own
+// Leaflet instance, state and DOM ids so it never collides with the reporting
+// map. No business logic here — every layer is what the backend computed.
+const _DMAP_LAYERS = [
+  ["visited", "Navštívené", "#12A594"],
+  ["unvisited", "Nenavštívené (plán)", "#E5484D"],
+  ["nearMissed", "Near-missed", "#F39C12"],
+  ["visibility", "Visibility", "#8E24AA"],
+  ["regions", "Regiony", "#5B7DB1"],
+  ["techs", "Technici", "#334155"],
+];
+const _dmap = { map: null, groups: {}, data: null, technician: "",
+  layers: { visited: true, unvisited: true, nearMissed: false, visibility: false, regions: false, techs: false },
+  period: null };
+
+async function dashMaps(host) {
+  host.innerHTML = skeleton({ rows: 4 });
+  let dims;
+  try { dims = await apiJson("/api/summary/dimensions"); }
+  catch (e) { showState(host, "error", "Nepodařilo se načíst mapu: " + e.message); return; }
+  // default to the last complete month with data (same rule as reporting)
+  let dto = dims.dataTo ? new Date(dims.dataTo + "T00:00:00") : new Date();
+  const lastDay = new Date(dto.getFullYear(), dto.getMonth() + 1, 0).getDate();
+  if (dto.getDate() < lastDay) dto = new Date(dto.getFullYear(), dto.getMonth() - 1, 1);
+  _dmap.period = { year: dto.getFullYear(), month: dto.getMonth() + 1 };
+  const techs = (dims.technicians || []).filter((t) => (t.role || "").toUpperCase() === "TECHNIK").map((t) => t.name).sort();
+
+  const toggles = _DMAP_LAYERS.map(([k, l, c]) =>
+    `<label class="gl-tog"><input type="checkbox" data-dlayer="${k}"${_dmap.layers[k] ? " checked" : ""}> <i style="background:${c}"></i>${l}</label>`).join("");
+  const techOpts = `<option value="">— celá síť —</option>` + techs.map((n) => `<option value="${esc(n)}"${_dmap.technician === n ? " selected" : ""}>${esc(n)}</option>`).join("");
+  host.innerHTML = `<div class="gis-wrap">
+    <div class="gis-bar">
+      <div class="gis-title">Mapa sítě <span class="gis-meta" id="dmap-meta"></span></div>
+      <div class="gis-gran"><select class="gg-sub" id="dmap-tech">${techOpts}</select></div>
+      <div class="gis-legend">${toggles}</div></div>
+    <div id="dmap-map" class="gis-map"></div>
+    <div class="gis-hint">Období ${_dmap.period.month}/${_dmap.period.year} · technik → jeho trasa dne · POS → detail · region → přiblížení. Bez GPS se POS na mapě nezobrazí (jsou v tabulkách).</div>
+  </div>`;
+
+  const el = document.getElementById("dmap-map");
+  if (typeof L === "undefined") { el.innerHTML = "<p class='pd-sub' style='padding:20px'>Mapa vyžaduje dlaždice OpenStreetMap (připojení).</p>"; return; }
+  if (_dmap.map) { _dmap.map.remove(); _dmap.map = null; }
+  _dmap.groups = {};
+  _dmap.map = L.map(el, { preferCanvas: true, scrollWheelZoom: true }).setView([49.8, 15.5], 7);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(_dmap.map);
+  host.querySelectorAll("input[data-dlayer]").forEach((cb) => cb.onchange = () => { _dmap.layers[cb.dataset.dlayer] = cb.checked; _dmapApply(cb.dataset.dlayer); });
+  const tsel = document.getElementById("dmap-tech");
+  if (tsel) tsel.onchange = () => { _dmap.technician = tsel.value; _dmapLoad(); };
+  setTimeout(() => _dmap.map && _dmap.map.invalidateSize(), 180);
+  _dmapLoad();
+}
+
+async function _dmapLoad() {
+  if (!_dmap.map) return;
+  const qs = new URLSearchParams({ period: "month", year: _dmap.period.year, month: _dmap.period.month, role: "TECHNIK", active: "active" });
+  if (_dmap.technician) { qs.set("technician", _dmap.technician); qs.set("include_optimal", "1"); }
+  const meta = document.getElementById("dmap-meta");
+  if (meta) meta.textContent = "načítám…";
+  try {
+    const d = await apiJson("/api/gis/network?" + qs.toString());
+    _dmap.data = d;
+    if (meta) meta.textContent = `${_fmtNum(d.counts.visited)} navštívených · ${_fmtNum(d.counts.unvisited)} minutých · ${_fmtNum(d.counts.nearMissed || 0)} near-missed`;
+    // clear any technician-only layer when leaving focus
+    if (_dmap.groups.routes) { _dmap.map.removeLayer(_dmap.groups.routes); delete _dmap.groups.routes; }
+    Object.keys(_dmap.layers).forEach((k) => _dmapApply(k));
+    _dmapRoutes();
+    if (d.bounds) _dmap.map.fitBounds(d.bounds, { padding: [24, 24] });
+  } catch (e) { if (meta) meta.textContent = "chyba: " + e.message; }
+}
+
+function _dmapApply(k) {
+  if (!_dmap.map || !_dmap.data) return;
+  if (_dmap.groups[k]) { _dmap.map.removeLayer(_dmap.groups[k]); delete _dmap.groups[k]; }
+  if (!_dmap.layers[k]) return;
+  const d = _dmap.data, g = L.layerGroup();
+  const mk = (p, opts, extra) => L.circleMarker([p.lat, p.lon], opts).bindPopup(_posPopup(p, extra), { minWidth: 220 }).addTo(g);
+  if (k === "visited") {
+    (d.visitedPos || []).forEach((p) => mk(p, { radius: Math.min(3 + Math.log2(p.visits + 1), 9), color: "#0F7C77", weight: 1, fillColor: "#12A594", fillOpacity: 0.75 },
+      `<div class="pp-row"><span>Stav</span><b style="color:#0F7C77">${p.visits}× navštíveno</b></div>`));
+  } else if (k === "unvisited") {
+    (d.unvisitedPos || []).forEach((p) => mk(p, { radius: 4, color: "#C0392B", weight: 1, fillColor: "#E5484D", fillOpacity: 0.7 },
+      `<div class="pp-row"><span>Stav</span><b style="color:#C0392B">plánováno, 0 návštěv</b></div>`));
+  } else if (k === "nearMissed") {
+    (d.nearMissed || []).forEach((p) => mk(p, { radius: 6, color: "#B9600E", weight: 2, fillColor: "#F39C12", fillOpacity: 0.9 },
+      `<div class="pp-row"><span>Stav</span><b style="color:#B9600E">near-missed — technik byl v oblasti</b></div>`));
+  } else if (k === "visibility") {
+    (d.visibility || []).forEach((p) => mk(p, { radius: Math.min(4 + Math.log2(p.visibility + 1), 9), color: "#6A1B9A", weight: 1, fillColor: "#8E24AA", fillOpacity: 0.75 },
+      `<div class="pp-row"><span>Visibilita</span><b style="color:#6A1B9A">${p.visibility}× náběh kampaně</b></div>`));
+  } else if (k === "regions") {
+    (d.regions || []).forEach((r) => L.circleMarker([r.lat, r.lon], { radius: 16, color: "#5B7DB1", weight: 2, fillColor: "#5B7DB1", fillOpacity: 0.25 })
+      .bindTooltip(`${esc(r.region)} · ${_fmtNum(r.visits)} návštěv`).on("click", () => _dmap.map.setView([r.lat, r.lon], 9)).addTo(g));
+  } else if (k === "techs") {
+    (d.technicians || []).forEach((t) => L.marker([t.lat, t.lon]).bindTooltip(`${esc(t.technician)} · ${_fmtNum(t.visits)} návštěv`)
+      .on("click", () => openTechDetail(t.technician)).addTo(g));
+  }
+  _dmap.groups[k] = g.addTo(_dmap.map);
+}
+
+// Technician focus: draw their real road route (solid) + optimal ordering (dashed).
+function _dmapRoutes() {
+  if (!_dmap.map || !_dmap.data || !_dmap.technician) return;
+  const d = _dmap.data, g = L.layerGroup();
+  (d.optimalRoutes || []).forEach((rt) => rt.geometry && L.polyline(rt.geometry, { color: "#0F7C77", weight: 3, opacity: 0.6, dashArray: "8 7" }).addTo(g));
+  (d.routes || []).forEach((rt) => rt.geometry && L.polyline(rt.geometry, { color: "#C0392B", weight: 4, opacity: 0.85 })
+    .on("click", () => openTechDay(_dmap.technician, rt.date)).bindTooltip(`${esc(rt.date || "")} · klikni pro přehrání dne`).addTo(g));
+  _dmap.groups.routes = g.addTo(_dmap.map);
 }
 
 // ============ Coverage by segment ============

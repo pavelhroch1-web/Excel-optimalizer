@@ -1177,6 +1177,7 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .gis-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; }
 .gl-tog { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-2); cursor: pointer; user-select: none; }
 .gl-tog input { accent-color: var(--accent, #0F7C77); }
+.gl-tog i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; flex: none; }
 .gis-map { height: 520px; width: 100%; background: var(--panel-2); }
 .gis-hint { font-size: 11px; color: var(--text-3); padding: 8px 16px; border-top: 1px solid var(--border); }
 .leaflet-popup-content { font-size: 12px; }
