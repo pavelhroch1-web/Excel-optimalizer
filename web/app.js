@@ -4457,10 +4457,11 @@ async function renderModel(m) {
 // Tabbed dashboards, each reusing existing endpoints (no duplicate logic).
 // Tabs are added release-by-release into _DASH.
 const _DASH = [
+  { id: "ops", label: "Operations Center", load: dashOps },
   { id: "overview", label: "Overview", load: dashOverview },
   { id: "capacity", label: "Capacity", load: dashCapacity },
 ];
-let _dashTab = "overview";
+let _dashTab = "ops";
 function initDashboards() {
   const tabs = document.getElementById("dash-tabs");
   if (!tabs) return;
@@ -4473,6 +4474,81 @@ function initDashboards() {
   const body = document.getElementById("dash-body");
   const d = _DASH.find((x) => x.id === _dashTab);
   if (d && body) d.load(body);
+}
+
+// --- Operations Center: "what do I focus on today?" ------------------------
+// The daily triage cockpit. The backend's detector engine (/api/insights) is the
+// brain — ranked, explainable findings (deviations, wasted travel, missed
+// campaign combos). Enriched with SLA risk (next-due), utilization extremes
+// (team) and regional attention (company). Every signal drills to detail.
+const _OPS_SEV = { risk: ["bad", "Riziko"], warn: ["warn", "Pozor"], info: ["", "Info"] };
+async function dashOps(host) {
+  host.innerHTML = skeleton({ rows: 5 });
+  try {
+    const [ins, due, team, company] = await Promise.all([
+      apiJson("/api/insights?days_back=120"),
+      apiJson("/api/live/next-due").catch(() => null),
+      apiJson("/api/analytics/team?days_back=120").catch(() => null),
+      apiJson("/api/insights/company?days_back=120").catch(() => null),
+    ]);
+    const findings = ins.findings || [];
+    const risk = findings.filter((f) => f.severity === "risk").length;
+    const warn = findings.filter((f) => f.severity === "warn").length;
+    const dueC = (due && due.counts) || {};
+    const tt = (team && team.team) || {};
+
+    // headline verdict — the one thing to know on open
+    const totalUrgent = risk + (dueC.overdue ? 1 : 0);
+    const hlTone = risk || dueC.overdue > 40 ? "bad" : (warn || dueC.overdue ? "warn" : "ok");
+    const hlBig = risk ? `${risk} ${risk === 1 ? "případ vyžaduje" : "případů vyžaduje"} pozornost`
+      : (warn ? `${warn} věcí ke kontrole` : "Vše pod kontrolou");
+    const hlSub = [];
+    if (dueC.overdue) hlSub.push(`${_fmtNum(dueC.overdue)} POS po termínu`);
+    if (dueC.neverVisited) hlSub.push(`${dueC.neverVisited} nikdy nenavštíveno`);
+    if (tt.overloaded) hlSub.push(`${tt.overloaded} přetížených techniků`);
+    if (company && company.totalLostHours) hlSub.push(`${_fmtNum(company.totalLostHours)} h rezervy`);
+
+    const headline = `<div class="ops-hl tone-${hlTone}"><div class="ops-hl-big">${esc(hlBig)}</div>` +
+      `<div class="ops-hl-sub">${hlSub.map(esc).join(" · ") || "Žádné akutní resty."}</div></div>`;
+
+    // signal chips — quick counts, each leads somewhere
+    const chip = (n, label, tone, nav) =>
+      `<button class="ops-chip ${tone || ""}"${nav ? ` data-nav="${nav}"` : ""}><b>${n}</b><span>${esc(label)}</span></button>`;
+    const chips = `<div class="ops-chips">` +
+      chip(_fmtNum(dueC.overdue || 0), "POS po termínu", dueC.overdue ? "bad" : "good", "dashboard") +
+      chip(dueC.neverVisited || 0, "nikdy nenavštíveno", dueC.neverVisited ? "warn" : "good", "dashboard") +
+      chip(tt.overloaded || 0, "přetížení", tt.overloaded ? "bad" : "good") +
+      chip(tt.slack || 0, "rezerva", tt.slack ? "warn" : "") +
+      chip(company ? _fmtNum(company.totalLostHours || 0) : "—", "h ušetřitelných", "warn") +
+      `</div>`;
+
+    // ranked action list — the core: who + what + why + drill
+    const why1 = (w) => typeof w === "string" ? w : (w.label || w.metric || "");
+    const actions = findings.length ? `<div class="ops-actions">` + findings.map((f) => {
+      const [tone, sevL] = _OPS_SEV[f.severity] || ["", f.severity];
+      const whys = (f.why || []).slice(0, 3).map((w) => `<span class="ops-why">${esc(why1(w))}</span>`).join("");
+      const drill = f.entityId && f.entityType === "technician";
+      return `<div class="ops-act sev-${tone}"${drill ? ` data-diagnose="${esc(f.entityId)}" role="button" tabindex="0"` : ""}>` +
+        `<span class="ops-act-sev ${tone}">${esc(sevL)}</span>` +
+        `<div class="ops-act-body"><div class="ops-act-head">${esc(f.headline)}</div>` +
+        `<div class="ops-act-whys">${whys}</div></div>` +
+        (drill ? `<span class="ops-act-go">Rozbor →</span>` : "") + `</div>`;
+    }).join("") + `</div>` : stateHTML("empty", "Žádné nálezy — síť běží v normálu.");
+
+    // regions needing attention (from company)
+    const regs = (company && company.regions || []).slice(0, 3);
+    const regBlock = regs.length ? `<div class="pl-section">Regiony vyžadující pozornost</div>` +
+      `<div class="ops-regs">` + regs.map((r, i) =>
+        `<div class="ops-reg${i === 0 ? " top" : ""}"><span class="ops-reg-n">${esc(r.region)}</span>` +
+        `<span class="ops-reg-x">${_fmtNum(r.lostPerTech || 0)} h/tech · ${r.efficiencyPct != null ? r.efficiencyPct + " % na POS" : "—"} · ${r.technicians} tech</span></div>`).join("") + `</div>` : "";
+
+    host.innerHTML = headline + chips +
+      `<div class="pl-section">Na co se dnes zaměřit <span class="pd-chip">${findings.length} nálezů · ${risk} riziko / ${warn} pozor</span></div>` +
+      actions + regBlock;
+
+    host.querySelectorAll(".ops-chip[data-nav]").forEach((b) =>
+      b.addEventListener("click", () => showView(b.dataset.nav)));
+  } catch (e) { showState(host, "error", "Nepodařilo se načíst Operations Center: " + e.message); }
 }
 
 // --- Overview: network health at a glance (team + company insights) ---
