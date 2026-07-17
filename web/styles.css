@@ -919,6 +919,7 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .wi-ab { font-size: var(--fs-md); font-variant-numeric: tabular-nums; margin-top: 3px; }
 .wi-d { font-size: var(--fs-sm); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; margin-top: 2px; color: var(--text-3); }
 .wi-d.up { color: var(--good); } .wi-d.down { color: var(--bad); }
+.draft-acts { display: flex; gap: 6px; white-space: nowrap; }
 
 /* drop zone (import) */
 .drop-zone { border: 2px dashed var(--border-2); border-radius: var(--r-lg); padding: 52px 24px; text-align: center;

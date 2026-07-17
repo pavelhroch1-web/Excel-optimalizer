@@ -515,9 +515,16 @@ async function loadDraft() {
       tdReason.textContent = r.REASON_FRIENDLY || r.REASON || "";
       tr.appendChild(tdReason);
       const tdBtn = document.createElement("td");
+      tdBtn.className = "draft-acts";
+      const reassign = document.createElement("button");
+      reassign.textContent = "Přeřadit";
+      reassign.className = "ghost small";
+      reassign.title = "Přeřadit tento POS na jiného technika v návrhu";
+      reassign.addEventListener("click", () => changeDraftTechnician(r.WEEK, r.POS, r.TECHNICIAN, r.NAZEV_PROVOZOVNY));
+      tdBtn.appendChild(reassign);
       const btn = document.createElement("button");
       btn.textContent = "Odebrat";
-      btn.className = "ghost small";
+      btn.className = "ghost small danger";
       btn.addEventListener("click", () => removePos(r.WEEK, r.POS, r.TECHNICIAN));
       tdBtn.appendChild(btn);
       tr.appendChild(tdBtn);
@@ -535,6 +542,32 @@ async function removePos(week, pos, tech) {
   } catch (err) {
     setResult("add-pos-result", "Chyba: " + err.message, "err");
   }
+}
+
+// Reassign a single POS in the draft to another technician (POST /api/draft/change-technician).
+let _draftTechs = null;
+async function changeDraftTechnician(week, pos, oldTech, name) {
+  if (!_draftTechs) {
+    try {
+      _draftTechs = (await apiJson("/api/technicians")).technicians
+        .filter((t) => t.role === "TECHNIK" && t.active && !t.excluded)
+        .map((t) => t.name).sort((a, b) => a.localeCompare(b, "cs"));
+    } catch (e) { _draftTechs = []; }
+  }
+  const opts = _draftTechs.filter((n) => n !== oldTech).map((n) => ({ value: n, label: n }));
+  const nt = await promptDialog({
+    title: "Přeřadit POS na jiného technika",
+    body: `POS ${pos}${name ? " · " + name : ""} · týden ${week} · nyní ${oldTech}`,
+    label: "Nový technik", options: opts.length ? opts : null,
+    placeholder: "přesné jméno technika", confirmText: "Přeřadit",
+  });
+  if (!nt || nt === oldTech) return;
+  try {
+    await postJson("/api/draft/change-technician",
+      { week, pos_id: String(pos), old_technician: oldTech, new_technician: nt });
+    toast(`POS ${pos} přeřazen na ${nt}`, "ok");
+    loadDraft();
+  } catch (err) { toast("Chyba přeřazení: " + err.message, "err"); }
 }
 
 on("add-pos-form", "submit", async (e) => {
