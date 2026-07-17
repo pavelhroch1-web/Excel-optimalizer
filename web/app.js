@@ -4426,6 +4426,7 @@ const _DASH = [
   { id: "ops", label: "Operations Center", load: dashOps },
   { id: "overview", label: "Overview", load: dashOverview },
   { id: "capacity", label: "Capacity", load: dashCapacity },
+  { id: "kpi", label: "KPI", load: dashKpi },
 ];
 let _dashTab = "ops";
 function initDashboards() {
@@ -4630,6 +4631,77 @@ async function dashCapacity(host) {
     host.querySelectorAll(".tech-link").forEach((el) =>
       el.addEventListener("click", () => drillToTechnician(el.dataset.tech)));
   } catch (e) { showState(host, "error", "Nepodařilo se načíst kapacitu: " + e.message); }
+}
+
+// --- KPI: productivity + SLA scorecard (rankings, not just aggregates) ---
+async function dashKpi(host) {
+  host.innerHTML = skeleton({ rows: 5 });
+  try {
+    const [team, cov, company] = await Promise.all([
+      apiJson("/api/analytics/team?days_back=90"),
+      apiJson("/api/planner/coverage").catch(() => null),
+      apiJson("/api/insights/company?days_back=90").catch(() => null),
+    ]);
+    const techs = team.technicians || [];
+    if (!techs.length) { showState(host, "empty", "Zatím nejsou data — naimportuj exporty."); return; }
+    const t = team.team || {};
+    const segs = (cov && cov.segments) || [];
+    const segOk = segs.filter((s) => s.coveragePct != null && s.minCoveragePct != null && s.coveragePct >= s.minCoveragePct).length;
+
+    const kmPerVisit = (x) => (x.visits ? x.totalKm / x.visits : null);
+    const avgKmVisit = (() => { const v = techs.filter((x) => x.visits); const s = v.reduce((a, x) => a + x.totalKm, 0); const n = v.reduce((a, x) => a + x.visits, 0); return n ? s / n : null; })();
+    const avgProd = (() => { const v = techs.filter((x) => x.visitsPerWorkHour != null); return v.length ? v.reduce((a, x) => a + x.visitsPerWorkHour, 0) / v.length : null; })();
+
+    const tiles = `<div class="pl-tiles">` +
+      tile("Ø produktivita", (avgProd != null ? avgProd.toFixed(2) : "—"), "návštěv / h") +
+      tile("Ø na POS", (t.avgOnPosRatioPct != null ? t.avgOnPosRatioPct + " %" : "—"), "z odpracovaného času",
+        t.avgOnPosRatioPct != null && t.avgOnPosRatioPct < 50 ? "bad" : "") +
+      tile("Ø km / návštěva", (avgKmVisit != null ? avgKmVisit.toFixed(1) : "—"), "cestovní zátěž") +
+      tile("Segmenty v SLA", segs.length ? `${segOk}/${segs.length}` : "—", "nad minimem", segs.length && segOk < segs.length ? "warn" : "good") +
+      tile("Přetížení", t.overloaded || 0, "nad kapacitou", t.overloaded ? "bad" : "good") +
+      tile("Rezerva", t.slack || 0, "pod kapacitou", t.slack ? "warn" : "") +
+      `</div>`;
+
+    // productivity ranking (visits per work hour), best first, bar vs field max
+    const prod = techs.filter((x) => x.visitsPerWorkHour != null).sort((a, b) => b.visitsPerWorkHour - a.visitsPerWorkHour);
+    const pmax = prod.length ? prod[0].visitsPerWorkHour || 1 : 1;
+    const pmed = prod.length ? prod[Math.floor(prod.length / 2)].visitsPerWorkHour : 0;
+    const prodList = prod.length ? `<div class="pl-section">Produktivita — návštěvy / h <span class="pd-chip">medián ${pmed != null ? pmed.toFixed(2) : "—"}</span></div>` +
+      `<div class="split-list">` + prod.map((x) => {
+        const w = Math.max(3, Math.min(100 * (x.visitsPerWorkHour || 0) / pmax, 100));
+        const tone = x.visitsPerWorkHour >= pmed ? "ok" : (x.visitsPerWorkHour >= pmed * 0.6 ? "slack" : "over");
+        return `<div class="split-row"><span class="split-name pos-link tech-link" data-tech="${esc(x.technician)}">${esc(x.technician)}</span>` +
+          `<div class="split-bar cap-bar" title="${x.visits} návštěv · ${x.onPosRatioPct != null ? x.onPosRatioPct + " % na POS" : ""}"><span class="cap-fill ${tone}" style="width:${w}%"></span></div>` +
+          `<span class="split-pct">${(x.visitsPerWorkHour || 0).toFixed(2)}</span></div>`;
+      }).join("") + `</div>` : "";
+
+    // SLA by segment — every segment, coverage bar with the target as the threshold
+    const segList = segs.length ? `<div class="pl-section">SLA podle segmentů (pokrytí vs. minimum)</div>` +
+      `<div class="split-list">` + segs.slice().sort((a, b) => (a.coveragePct - a.minCoveragePct) - (b.coveragePct - b.minCoveragePct)).map((s) => {
+        const w = Math.max(0, Math.min(s.coveragePct || 0, 100));
+        const below = s.coveragePct != null && s.minCoveragePct != null && s.coveragePct < s.minCoveragePct;
+        return `<div class="split-row"><span class="split-name">${esc(s.name)}</span>` +
+          `<div class="split-bar cap-bar" title="${_fmtNum(s.posCount)} POS · min ${s.minCoveragePct} %"><span class="cap-fill ${below ? "over" : "ok"}" style="width:${w}%"></span></div>` +
+          `<span class="split-pct ${below ? "low" : ""}">${s.coveragePct} %<span class="ops-sla-min"> / ${s.minCoveragePct}</span></span></div>`;
+      }).join("") + `</div>` : "";
+
+    // travel efficiency — km per visit, worst (heaviest) first, top 8
+    const km = techs.filter((x) => x.visits).map((x) => ({ ...x, kmv: kmPerVisit(x) }))
+      .sort((a, b) => b.kmv - a.kmv).slice(0, 8);
+    const kmMax = km.length ? km[0].kmv || 1 : 1;
+    const kmList = km.length ? `<div class="pl-section">Nejvyšší cestovní zátěž — km / návštěva</div>` +
+      `<div class="split-list">` + km.map((x) => {
+        const w = Math.max(3, Math.min(100 * (x.kmv || 0) / kmMax, 100));
+        const tone = avgKmVisit != null && x.kmv > avgKmVisit * 1.4 ? "over" : "slack";
+        return `<div class="split-row"><span class="split-name pos-link tech-link" data-tech="${esc(x.technician)}">${esc(x.technician)}</span>` +
+          `<div class="split-bar cap-bar" title="${_fmtNum(x.totalKm)} km / ${x.visits} návštěv"><span class="cap-fill ${tone}" style="width:${w}%"></span></div>` +
+          `<span class="split-pct">${(x.kmv || 0).toFixed(1)}</span></div>`;
+      }).join("") + `</div>` : "";
+
+    host.innerHTML = tiles + prodList + segList + kmList;
+    host.querySelectorAll(".tech-link").forEach((el) =>
+      el.addEventListener("click", () => drillToTechnician(el.dataset.tech)));
+  } catch (e) { showState(host, "error", "Nepodařilo se načíst KPI: " + e.message); }
 }
 
 // ============ Coverage by segment ============
