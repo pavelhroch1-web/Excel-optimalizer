@@ -531,6 +531,19 @@
         </div>
       </section>
 
+      <!-- RUN HISTORY -->
+      <section class="card">
+        <h2>Historie běhů plánovače <span class="badge">audit generací</span></h2>
+        <p class="hint">Každé spuštění plánovače (kdy, režim, týden/horizont, kolik POS naplánováno / mimo plán) i s otiskem konfigurace – abys viděl, jak se návrh vyvíjel a co které nastavení udělalo. Jen čtení, plán se tím nemění.</p>
+        <div class="row"><button id="refresh-planner-runs" class="ghost">Obnovit</button></div>
+        <div id="planner-runs-wrap" style="overflow-x:auto">
+          <table id="planner-runs-table">
+            <thead><tr><th>#</th><th>Kdy</th><th>Režim</th><th>Týden</th><th>Horizont</th><th>Naplánováno</th><th>Povinné</th><th>Mimo plán</th><th>Konfig</th></tr></thead>
+            <tbody id="planner-runs-body"></tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- CLOUD GENERATE (legacy option) -->
       <section class="card brain-card">
         <h2>Vygenerovat plán v cloudu <span class="badge">GitHub výpočet</span></h2>
@@ -848,6 +861,6 @@
   </div>
 </div>
 
-<script src="app.js?v=101"></script>
+<script src="app.js?v=102"></script>
 </body>
 </html>

@@ -637,6 +637,43 @@ on("publish-form", "submit", async (e) => {
 // ---- 6) history + 7) download published -----------------------------------
 
 on("refresh-versions", "click", loadVersions);
+on("refresh-planner-runs", "click", () => loadPlannerRuns());
+
+// Read-only audit of every planner generation (when / mode / week / outcome /
+// config fingerprint). Surfaces /api/history/planner-runs — no engine run.
+async function loadPlannerRuns() {
+  const body = document.getElementById("planner-runs-body");
+  if (!body) return;
+  tblState(body, "loading", "Načítám běhy…");
+  try {
+    const data = await apiJson("/api/history/planner-runs?limit=100");
+    const runs = data.runs || [];
+    if (!runs.length) {
+      tblState(body, "empty", "Zatím žádný běh plánovače.");
+      return;
+    }
+    body.innerHTML = "";
+    runs.forEach((r) => {
+      const res = r.result || {};
+      const tr = document.createElement("tr");
+      const when = r.ran_at ? new Date(r.ran_at.replace(" ", "T")).toLocaleString("cs-CZ") : "";
+      const fp = r.config_fingerprint ? String(r.config_fingerprint).slice(0, 8) : "—";
+      const cells = [
+        r.id, when, r.mode || "", r.start_week ?? "", r.length ?? "",
+        res.planned ?? "—", res.mandatory ?? "—", res.unserved ?? "—", fp,
+      ];
+      cells.forEach((val, i) => {
+        const td = document.createElement("td");
+        td.textContent = val;
+        if (i === 8) { td.style.fontFamily = "monospace"; td.title = r.config_fingerprint || ""; }
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+  } catch (err) {
+    tblState(body, "error", "Nepodařilo se načíst běhy: " + err.message);
+  }
+}
 
 async function loadVersions() {
   const body = document.getElementById("versions-body");
@@ -5958,6 +5995,7 @@ const _PS_MAP = [
   ["Publikovat TourPlan", "publish"],
   ["Route Planner", "publish"],
   ["Historie publikovaných verzí", "publish"],
+  ["Historie běhů plánovače", "publish"],
 ];
 let _psStage = "data";
 function _psStageOf(sec) {
@@ -6013,7 +6051,7 @@ function setPlannerStage(id) {
   // convenience: entering a stage pulls its fresh data
   if (id === "data") _psLoadDataHealth();
   if (id === "edits" && typeof loadDraft === "function") loadDraft();
-  if (id === "publish" && typeof loadVersions === "function") loadVersions();
+  if (id === "publish" && typeof loadVersions === "function") { loadVersions(); loadPlannerRuns(); }
   // Review Cockpit: one screen with tabs over the review cards
   if (id === "review") initReviewCockpit();
   const rcTabs = document.getElementById("rc-tabs");
