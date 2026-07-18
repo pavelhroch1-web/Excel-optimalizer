@@ -446,6 +446,17 @@
         </div>
       </section>
 
+      <!-- TIME FEASIBILITY (advisory) -->
+      <section class="card">
+        <h2>Časová proveditelnost návrhu <span class="badge">poradní · doba návštěvy + přejezd vs. hodiny</span></h2>
+        <p class="hint">Engine plánuje na <strong>počet</strong> návštěv. Tato vrstva ukazuje <strong>reálný čas</strong> dne (naučená doba návštěvy z historie + silniční přejezd) proti dostupným hodinám – uvidíš přeplněné i poddimenzované dny. <strong>Nemění plán</strong>, jen ho hodnotí.</p>
+        <div class="row">
+          <button id="feasibility-refresh" class="ghost">Načíst / obnovit</button>
+          <span id="feasibility-summary" class="hint" style="align-self:center"></span>
+        </div>
+        <div id="feasibility-out"></div>
+      </section>
+
       <!-- PUBLISH -->
       <section class="card publish-card">
         <h2>9 · Publikovat TourPlan <span class="badge">immutable</span></h2>

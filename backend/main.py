@@ -1086,6 +1086,14 @@ if LOCAL_MODE:
     def reality_technicians(week_from: int | None = None, week_to: int | None = None):
         return plan_reality.reality(week_from, week_to)
 
+    # Advisory time-feasibility of the generated plan (duration + travel model)
+    # vs available hours. Read-only over draft_plans; never changes the plan.
+    import plan_feasibility  # noqa: E402
+
+    @app.get("/api/plan/feasibility", dependencies=[Depends(require_auth)])
+    def plan_feasibility_ep(week_from: int | None = None, week_to: int | None = None):
+        return plan_feasibility.feasibility(week_from, week_to)
+
     # Actual driven route (order known from SalesApp times) + km + travel time.
     import route_actual  # noqa: E402
 

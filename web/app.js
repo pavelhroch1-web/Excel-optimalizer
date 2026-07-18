@@ -681,6 +681,58 @@ on("ps-goto-model", "click", () => {
   if (card) requestAnimationFrame(() => card.scrollIntoView({ behavior: "smooth", block: "start" }));
 });
 
+// ---- Advisory: time feasibility of the generated plan -----------------------
+// Pure read-out of /api/plan/feasibility (duration + travel model over the
+// draft). Changes no plan; shows realistic time load vs available hours.
+async function loadPlanFeasibility() {
+  const out = document.getElementById("feasibility-out");
+  const sum = document.getElementById("feasibility-summary");
+  if (!out) return;
+  out.innerHTML = skeleton({ rows: 3 });
+  try {
+    const d = await apiJson("/api/plan/feasibility");
+    if (!d.durationModelReady) {
+      out.innerHTML = `<p class="pd-sub">Model doby návštěvy zatím není natrénovaný (přepočítej ho v Nastavení → Správa naučených modelů). Časový odhad bude jen z přejezdů.</p>`;
+    }
+    if (!(d.weeks || []).length) {
+      out.innerHTML = `<p class="pd-sub">Zatím není vygenerovaný návrh. Vygeneruj TourPlan a načti znovu.</p>`;
+      if (sum) sum.textContent = ""; return;
+    }
+    if (sum) sum.textContent = `${d.totalDays} dní · ${d.overloadedDays} přeplněných · ${d.tightDays} napjatých · dostupné ${d.workHoursPerDay} h/den`;
+    const bar = (pct) => {
+      const w = Math.max(0, Math.min(100, pct || 0));
+      const tone = pct > 100 ? "bad" : (pct >= 85 ? "warn" : "ok");
+      return `<span class="feas-bar feas-${tone}"><span style="width:${w}%"></span></span>`;
+    };
+    const weekRows = (d.weeks || []).map((w) =>
+      `<tr><td>${esc(w.technician)}</td><td>t${w.week}</td><td>${w.visits}</td>
+        <td>${w.days}</td><td>${_fmtHM(w.totalMin)}</td><td>${bar(w.loadPct)} ${w.loadPct ?? "—"} %</td>
+        <td>${w.overloadedDays ? `<span class="feas-flag">${w.overloadedDays}</span>` : "—"}</td></tr>`).join("");
+    const overDays = (d.days || []).filter((x) => x.status !== "ok")
+      .sort((a, b) => (b.loadPct || 0) - (a.loadPct || 0)).slice(0, 12);
+    const dayRows = overDays.map((x) =>
+      `<tr class="feas-${x.status === "přeplněný" ? "row-bad" : "row-warn"}"><td>${esc(x.technician)}</td>
+        <td>t${x.week} ${esc(x.day)}</td><td>${x.visits}</td><td>${_fmtHM(x.onPosMin)}</td>
+        <td>${_fmtHM(x.travelMin)}</td><td>${_fmtHM(x.totalMin)}</td><td>${bar(x.loadPct)} ${x.loadPct ?? "—"} %</td>
+        <td>${esc(x.status)}</td></tr>`).join("");
+    out.innerHTML =
+      `<div class="td-sec">Zátěž po týdnech (technik)</div>
+       <div class="feas-wrap"><table class="feas-table"><thead><tr>
+         <th>Technik</th><th>Týden</th><th>Návštěv</th><th>Dní</th><th>Čas</th><th>Vytížení</th><th>Přepl. dní</th>
+       </tr></thead><tbody>${weekRows}</tbody></table></div>` +
+      (overDays.length
+        ? `<div class="td-sec">Nejzatíženější dny</div>
+           <div class="feas-wrap"><table class="feas-table"><thead><tr>
+             <th>Technik</th><th>Den</th><th>Návštěv</th><th>Na POS</th><th>Přejezd</th><th>Celkem</th><th>Vytížení</th><th>Stav</th>
+           </tr></thead><tbody>${dayRows}</tbody></table></div>`
+        : `<p class="pd-sub" style="margin-top:12px">Žádný den nepřekračuje dostupné hodiny — plán je časově v pohodě (často naopak poddimenzovaný v čase vs. počtu návštěv).</p>`) +
+      `<p class="pd-sub" style="margin-top:10px">${esc(d.note)}</p>`;
+  } catch (e) {
+    out.innerHTML = `<p class="result err">${esc(e.message)}</p>`;
+  }
+}
+on("feasibility-refresh", "click", loadPlanFeasibility);
+
 // ---- Field Brain: strategy modes + pre-flight scorecard -------------------
 
 let brainModesLoaded = false;
@@ -5409,6 +5461,7 @@ const _PS_MAP = [
   ["Coverage podle segment", "review"],
   ["Kampaně", "review"],
   ["Návrh a ruční úpravy", "review"],
+  ["Časová proveditelnost", "review"],
   ["Override, priority", "edits"],
   ["Publikovat TourPlan", "publish"],
   ["Route Planner", "publish"],

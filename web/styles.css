@@ -666,6 +666,19 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 .ls-note { font-size: 11px; color: var(--text-3); margin-top: 3px; }
 .lt-charts { display: grid; grid-template-columns: 1fr; gap: 16px; }
 .lt-ref { font-size: 11px; color: var(--text-3); margin-top: 4px; }
+/* Plan time-feasibility advisory */
+.feas-wrap { overflow-x: auto; margin-bottom: 6px; }
+.feas-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.feas-table th, .feas-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.feas-table th { font-weight: 650; color: var(--text-3); font-size: 11px; text-transform: uppercase; letter-spacing: .02em; }
+.feas-table tr.feas-row-bad td { background: color-mix(in srgb, var(--bad) 7%, transparent); }
+.feas-table tr.feas-row-warn td { background: color-mix(in srgb, var(--warn) 7%, transparent); }
+.feas-bar { display: inline-block; width: 84px; height: 8px; border-radius: 6px; background: var(--panel-2); overflow: hidden; vertical-align: middle; margin-right: 6px; }
+.feas-bar > span { display: block; height: 100%; border-radius: 6px; }
+.feas-bar.feas-ok > span { background: var(--good, #157F5A); }
+.feas-bar.feas-warn > span { background: var(--warn); }
+.feas-bar.feas-bad > span { background: var(--bad); }
+.feas-flag { display: inline-block; min-width: 18px; text-align: center; padding: 1px 6px; border-radius: 10px; background: var(--bad); color: #fff; font-weight: 700; font-size: 11px; }
 .tdt-name { font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
 .tdt-role { font-size: 11px; font-weight: 600; color: var(--text-3); background: var(--panel-2); padding: 2px 8px; border-radius: 20px; margin-left: 6px; }
 .tdt-sub { font-size: 12px; color: var(--text-3); margin-top: 2px; }
