@@ -781,7 +781,7 @@ on("unserved-refresh", "click", () => loadPlannerUnserved());
 const _WZ_STEPS = [
   { id: "obdobi", label: "Období", sub: "Týden a délka" },
   { id: "technici", label: "Technici", sub: "Kdo se plánuje" },
-  { id: "partneri", label: "Partneři", sub: "Které sítě" },
+  { id: "partneri", label: "Filtry", sub: "Partneři · terminály · kategorie" },
   { id: "kadence", label: "Kadence", sub: "Četnost návštěv" },
   { id: "kapacita", label: "Kapacita", sub: "Návštěv/týden" },
   { id: "priorita", label: "Priorita", sub: "Strategie" },
@@ -813,7 +813,8 @@ async function openWizard() {
       apiJson("/api/campaigns").catch(() => ({ campaigns: [] })),
       apiJson("/api/strategy-modes").catch(() => ({ modes: [] })),
     ]);
-    const partners = (model.sections || []).find((s) => s.id === "partners") || { rows: [] };
+    const sect = (id) => (model.sections || []).find((s) => s.id === id) || { rows: [] };
+    const partners = sect("partners"), terminals = sect("terminals"), categories = sect("categories");
     _wz.data = {
       week: _wzIsoWeek(new Date()) + 1,
       length: 1,
@@ -822,6 +823,9 @@ async function openWizard() {
       techs: (techs.technicians || []).filter((t) => (t.role || "").toUpperCase() === "TECHNIK")
         .map((t) => ({ name: t.name, planned: !t.excluded, _orig: !t.excluded })),
       partners: (partners.rows || []).map((r) => ({ key: r.key, label: r.label, active: !!r.ACTIVE, _orig: !!r.ACTIVE })),
+      terminals: (terminals.rows || []).map((r) => ({ key: r.key, label: r.label, active: !!r.ACTIVE, _orig: !!r.ACTIVE })),
+      categories: (categories.rows || []).map((r) => ({ key: r.key, label: r.label,
+        include: (r.RULE !== "EXCLUDE"), _origRule: r.RULE })),
       cadence: (cadence.rules || []).map((r) => ({
         ruleId: r.ruleId, scope: r.scope, active: (r.active === "YES" || r.active === true),
         maxIntervalWeeks: r.maxIntervalWeeks, minGapWeeks: r.minGapWeeks,
@@ -890,15 +894,23 @@ function _wzTechnici() {
 }
 
 function _wzPartneri() {
-  const p = _wz.data.partners;
-  const rows = p.map((x, i) =>
-    `<label class="wz-check"><input type="checkbox" data-i="${i}" ${x.active ? "checked" : ""}> ${esc(x.label || x.key)}</label>`).join("");
-  const n = p.filter((x) => x.active).length;
-  return `<div class="wz-sec"><h3>Které partnerské sítě zahrnout <span class="pd-chip" id="wz-part-count">${n}/${p.length}</span></h3>
-    <p class="hint">Vybírá vstupní množinu POS pro engine (MARKET_RULES / plánovací model). Vypnutý partner se neplánuje.</p>
-    <div class="wz-actions"><button type="button" class="ghost" id="wz-part-all">Vybrat vše</button>
-      <button type="button" class="ghost" id="wz-part-none">Zrušit vše</button></div>
-    <div class="wz-checklist">${rows || "<p class='pd-sub'>Žádní partneři.</p>"}</div></div>`;
+  const w = _wz.data;
+  const group = (arr, field, dataAttr, title, hint, allId, noneId, countId) => {
+    const rows = (arr || []).map((x, i) =>
+      `<label class="wz-check"><input type="checkbox" data-${dataAttr}="${i}" ${x[field] ? "checked" : ""}> ${esc(x.label || x.key)}</label>`).join("");
+    const n = (arr || []).filter((x) => x[field]).length;
+    return `<div class="wz-sec"><h3>${title} <span class="pd-chip" id="${countId}">${n}/${(arr || []).length}</span></h3>
+      <p class="hint">${hint}</p>
+      <div class="wz-actions"><button type="button" class="ghost" id="${allId}">Vybrat vše</button>
+        <button type="button" class="ghost" id="${noneId}">Zrušit vše</button></div>
+      <div class="wz-checklist">${rows || "<p class='pd-sub'>—</p>"}</div></div>`;
+  };
+  return group(w.partners, "active", "part", "Partnerské sítě",
+      "Vypnutý partner se neplánuje (MARKET_RULES).", "wz-part-all", "wz-part-none", "wz-part-count") +
+    group(w.terminals, "active", "term", "Druhy terminálů",
+      "Které velikosti/typy terminálů plánovat (TERMINAL_RULES).", "wz-term-all", "wz-term-none", "wz-term-count") +
+    group(w.categories, "include", "cat", "Kategorie POS",
+      "Odškrtnutá kategorie se z plánu vyřadí (CATEGORY_RULES = EXCLUDE).", "wz-cat-all", "wz-cat-none", "wz-cat-count");
 }
 
 function _wzKadence() {
@@ -1010,13 +1022,22 @@ function _wzBindStep(id) {
     on2("wz-tech-none", () => _wzSetAll("techs", "planned", false));
   }
   if (id === "partneri") {
-    document.querySelectorAll("#wz-body .wz-checklist input").forEach((cb) =>
-      cb.addEventListener("change", () => {
-        w.partners[+cb.dataset.i].active = cb.checked;
-        document.getElementById("wz-part-count").textContent = `${w.partners.filter((x) => x.active).length}/${w.partners.length}`;
-      }));
+    const bindGroup = (dataAttr, arr, field, countId) => {
+      document.querySelectorAll(`#wz-body input[data-${dataAttr}]`).forEach((cb) =>
+        cb.addEventListener("change", () => {
+          w[arr][+cb.dataset[dataAttr]][field] = cb.checked;
+          const c = document.getElementById(countId); if (c) c.textContent = `${w[arr].filter((x) => x[field]).length}/${w[arr].length}`;
+        }));
+    };
+    bindGroup("part", "partners", "active", "wz-part-count");
+    bindGroup("term", "terminals", "active", "wz-term-count");
+    bindGroup("cat", "categories", "include", "wz-cat-count");
     on2("wz-part-all", () => _wzSetAll("partners", "active", true));
     on2("wz-part-none", () => _wzSetAll("partners", "active", false));
+    on2("wz-term-all", () => _wzSetAll("terminals", "active", true));
+    on2("wz-term-none", () => _wzSetAll("terminals", "active", false));
+    on2("wz-cat-all", () => _wzSetAll("categories", "include", true));
+    on2("wz-cat-none", () => _wzSetAll("categories", "include", false));
   }
   if (id === "kadence") {
     document.querySelectorAll("#wz-body input[data-act]").forEach((cb) =>
@@ -1129,12 +1150,22 @@ async function _wzGenerate() {
       await postJsonPut(`/api/technicians/${encodeURIComponent(t.name)}`, { excluded: !t.planned });
     for (const p of w.partners) if (p.active !== p._orig)
       await postJsonPut(`/api/model/partners/${encodeURIComponent(p.key)}`, { col: "ACTIVE", value: p.active });
+    for (const t of (w.terminals || [])) if (t.active !== t._orig)
+      await postJsonPut(`/api/model/terminals/${encodeURIComponent(t.key)}`, { col: "ACTIVE", value: t.active });
+    for (const c of (w.categories || [])) {
+      const newRule = c.include ? (c._origRule !== "EXCLUDE" ? c._origRule : "NORMAL") : "EXCLUDE";
+      if (newRule !== c._origRule)
+        await postJsonPut(`/api/model/categories/${encodeURIComponent(c.key)}`, { col: "RULE", value: newRule });
+    }
     for (const c of w.cadence) if (c.active !== c._origActive || c.maxIntervalWeeks !== c._origMax)
       await postJsonPut(`/api/cadence/${encodeURIComponent(c.ruleId)}`, { active: c.active, max_interval_weeks: c.maxIntervalWeeks });
     // 2) call the existing engine
     vout.textContent = "Generuji TourPlan…";
     await postJson("/api/planner/generate-runtime", { mode: w.mode, start_week: w.week, length: w.length, visits_per_tech_week: w.capacity });
     vout.textContent = "";
+    // sync the advanced scenario inputs so cockpit refresh buttons match the wizard
+    const setv = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    setv("sim-mode", w.mode); setv("sim-week", w.week); setv("sim-length", w.length); setv("sim-visits", w.capacity);
     document.getElementById("wizard-overlay").classList.add("hidden");
     showView("tourplan");
     if (typeof setPlannerStage === "function") setPlannerStage("review");
@@ -5874,23 +5905,26 @@ function showView(name) {
 // TourPlan lifecycle at a time, driven by a stepper rail. The existing section
 // cards are untouched — each is tagged with the stage it belongs to and shown
 // only on that stage, so all existing wiring keeps working.
+// Wizard ("Průvodce plánem") is the single main path to create a plan. The
+// linear setup/scenario/manual-generate cards are duplicates of the wizard, so
+// they move to a "Pokročilé" (expert) stage instead of the main flow.
 const _PS_STAGES = [
   { id: "data", label: "Data", sub: "Vstupní exporty" },
-  { id: "params", label: "Parametry", sub: "Filtry a výjimky" },
-  { id: "scenarios", label: "Scénáře", sub: "Simulace · what-if" },
-  { id: "review", label: "Review", sub: "Generování a návrh" },
+  { id: "review", label: "Review", sub: "Kontrola plánu" },
   { id: "edits", label: "Úpravy", sub: "Override · priorita · přeřazení" },
-  { id: "publish", label: "Publish & Export", sub: "Verze · export · cloud" },
+  { id: "publish", label: "Publish & Export", sub: "Verze · export" },
+  { id: "pokrocile", label: "Pokročilé", sub: "Ruční nástroje · scénáře" },
 ];
 // map: substring of a section's <h2> -> stage id
 const _PS_MAP = [
   ["Vstupní data", "data"],
-  ["Plánovací filtry", "params"],
-  ["Strategie a pre-flight", "scenarios"],
-  ["Predikce a scénáře", "scenarios"],
-  ["Plánovací simulace", "scenarios"],
-  ["Co kdyby", "scenarios"],
-  ["Generovat TourPlan", "review"],
+  ["Plánovací filtry", "pokrocile"],
+  ["Strategie a pre-flight", "pokrocile"],
+  ["Predikce a scénáře", "pokrocile"],
+  ["Plánovací simulace", "pokrocile"],
+  ["Co kdyby", "pokrocile"],
+  ["Generovat TourPlan", "pokrocile"],
+  ["plán v cloudu", "pokrocile"],
   ["Kandidáti POS", "review"],
   ["Coverage podle segment", "review"],
   ["Kampaně", "review"],
@@ -5903,7 +5937,6 @@ const _PS_MAP = [
   ["Publikovat TourPlan", "publish"],
   ["Route Planner", "publish"],
   ["Historie publikovaných verzí", "publish"],
-  ["plán v cloudu", "publish"],
 ];
 let _psStage = "data";
 function _psStageOf(sec) {
