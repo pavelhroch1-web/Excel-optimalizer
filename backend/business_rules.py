@@ -66,11 +66,28 @@ def set_params(code: str, params: dict, scope: str = "global", scope_value=None)
 
 def upsert(code: str, params: dict, *, name=None, category=None, enabled=True,
            scope="global", scope_value=None, priority=100) -> None:
-    """Add or replace a rule (incl. a new scoped override) - no schema change."""
-    db.run(
-        "INSERT INTO business_rules (code, name, category, enabled, params, scope, scope_value, priority) "
-        "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(code, scope, scope_value) DO UPDATE SET "
-        "params=excluded.params, enabled=excluded.enabled, name=excluded.name, "
-        "category=excluded.category, priority=excluded.priority, updated_at=datetime('now')",
-        (code, name, category, 1 if enabled else 0,
-         json.dumps(params, ensure_ascii=False), scope, scope_value, priority))
+    """Add or replace a rule (incl. a new scoped override) - no schema change.
+
+    NULL-safe: ON CONFLICT(code, scope, scope_value) never fires when
+    scope_value IS NULL (SQLite treats NULLs as distinct), which is exactly how
+    the global rules got duplicated. So do an explicit NULL-safe UPDATE and only
+    INSERT when nothing matched - one logical row per (code, scope, scope_value).
+    """
+    pj = json.dumps(params, ensure_ascii=False)
+    conn = db.connect()
+    try:
+        cur = conn.execute(
+            "UPDATE business_rules SET params=?, enabled=?, "
+            "name=COALESCE(?, name), category=COALESCE(?, category), "
+            "priority=?, updated_at=datetime('now') "
+            "WHERE code=? AND scope=? AND (scope_value IS ? OR scope_value=?)",
+            (pj, 1 if enabled else 0, name, category, priority,
+             code, scope, scope_value, scope_value))
+        if cur.rowcount == 0:
+            conn.execute(
+                "INSERT INTO business_rules (code, name, category, enabled, params, scope, scope_value, priority) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (code, name, category, 1 if enabled else 0, pj, scope, scope_value, priority))
+        conn.commit()
+    finally:
+        conn.close()

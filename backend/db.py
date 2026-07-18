@@ -143,6 +143,20 @@ def init_db() -> None:
         techcols = {r[1] for r in conn.execute("PRAGMA table_info(technicians)")}
         if techcols and "excluded" not in techcols:
             conn.execute("ALTER TABLE technicians ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0")
+        # business_rules: the table's UNIQUE(code, scope, scope_value) does NOT
+        # dedupe global rules because SQLite treats NULL scope_value as distinct,
+        # so repeated seeding inserted duplicate rows (effective() masked it by
+        # deduping on code). Collapse duplicates to one row per logical key and
+        # add an expression-unique index (NULL == '') so it can't recur.
+        brcols = {r[1] for r in conn.execute("PRAGMA table_info(business_rules)")}
+        if brcols:
+            conn.execute(
+                "DELETE FROM business_rules WHERE id NOT IN "
+                "(SELECT MIN(id) FROM business_rules "
+                " GROUP BY code, scope, IFNULL(scope_value, ''))")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_business_rules_scope "
+                "ON business_rules(code, scope, IFNULL(scope_value, ''))")
         conn.commit()
     finally:
         conn.close()
