@@ -484,6 +484,26 @@ def draft_geo():
     return {"points": [dict(r) for r in rows]}
 
 
+def _resync_draft_plans(path: str) -> int:
+    """Keep SQLite draft_plans consistent with the edited draft workbook so the
+    Review cockpit (feasibility / map / unserved) reflects manual edits. Reads
+    only the MANAGER_PLAN sheet and re-runs the same persistence the generator
+    uses. Pure sync — no planning logic, no engine run."""
+    try:
+        import openpyxl
+        import route_planner
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        try:
+            if "MANAGER_PLAN" not in wb.sheetnames:
+                return 0
+            rows = [list(r) for r in wb["MANAGER_PLAN"].iter_rows(values_only=True)]
+        finally:
+            wb.close()
+        return route_planner.materialize_draft_plans({"MANAGER_PLAN": rows}) if rows else 0
+    except Exception:  # noqa: BLE001 — sync is best-effort; never break the edit
+        return 0
+
+
 @app.post("/api/draft/remove-pos", dependencies=[Depends(require_auth)])
 def draft_remove_pos(body: RemovePosRequest):
     path = _require_draft_path()
@@ -495,6 +515,7 @@ def draft_remove_pos(body: RemovePosRequest):
         if removed == 0:
             raise HTTPException(status_code=404, detail="POS v navrhu nenalezen.")
         store.save_draft(path, f"Odebrat POS {body.pos_id} z navrhu")
+        _resync_draft_plans(path)
         return {"removed": removed}
     finally:
         os.remove(path)
@@ -513,6 +534,7 @@ def draft_change_technician(body: ChangeTechnicianRequest):
         if changed == 0:
             raise HTTPException(status_code=404, detail="POS v navrhu nenalezen.")
         store.save_draft(path, f"Presunout POS {body.pos_id} na {body.new_technician}")
+        _resync_draft_plans(path)
         return {"changed": changed}
     finally:
         os.remove(path)
@@ -527,6 +549,7 @@ def draft_add_pos(body: AddPosRequest):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         store.save_draft(path, f"Pridat POS {body.pos_id} do navrhu")
+        _resync_draft_plans(path)
         return {"row": new_row}
     finally:
         os.remove(path)

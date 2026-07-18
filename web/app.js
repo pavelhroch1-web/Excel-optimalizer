@@ -533,12 +533,25 @@ async function loadDraft() {
   }
 }
 
+// After any manual draft edit the backend re-syncs draft_plans, so recompute
+// the impact (time feasibility + critical-POS + map) right away — the planner
+// sees the consequence of the change immediately.
+function _afterDraftEdit(msg) {
+  loadDraft();
+  if (typeof loadPlanFeasibility === "function") loadPlanFeasibility();
+  if (typeof loadPlannerUnserved === "function") loadPlannerUnserved();
+  const mapCard = document.querySelector('section.card[data-rc-tab="mapa"]');
+  if (typeof loadRcMap === "function" && mapCard && !mapCard.classList.contains("rc-hidden")) loadRcMap();
+  if (typeof toast === "function") toast(msg + " · dopad přepočítán (čas · kritické POS · mapa)", "ok");
+}
+
 async function removePos(week, pos, tech) {
   try {
-    await postJson("/api/draft/remove-pos", { week, pos_id: String(pos), technician: tech });
-    loadDraft();
+    const r = await postJson("/api/draft/remove-pos", { week, pos_id: String(pos), technician: tech });
+    _afterDraftEdit(`POS ${pos} odebrán (${r.removed || 1}×)`);
   } catch (err) {
-    setResult("add-pos-result", "Chyba: " + err.message, "err");
+    setResult("add-pos-result", "Nelze odebrat: " + err.message, "err");
+    toast && toast("Nelze odebrat: " + err.message, "err");
   }
 }
 
@@ -563,12 +576,13 @@ async function changeDraftTechnician(week, pos, oldTech, name) {
   try {
     await postJson("/api/draft/change-technician",
       { week, pos_id: String(pos), old_technician: oldTech, new_technician: nt });
-    toast(`POS ${pos} přeřazen na ${nt}`, "ok");
-    loadDraft();
+    _afterDraftEdit(`POS ${pos} přeřazen ${oldTech} → ${nt}`);
   } catch (err) { toast("Chyba přeřazení: " + err.message, "err"); }
 }
 
-on("add-pos-form", "submit", async (e) => {
+// Delegated on document so it fires even if the card is re-rendered (the earlier
+// direct binding could end up on a detached node after a draft re-render).
+async function _submitAddPos(e) {
   e.preventDefault();
   const body = {
     pos_id: document.getElementById("add-pos-id").value.trim(),
@@ -576,13 +590,20 @@ on("add-pos-form", "submit", async (e) => {
     day: document.getElementById("add-pos-day").value,
     technician: document.getElementById("add-pos-technician").value.trim(),
   };
+  // immediate validation before hitting the engine
+  if (!body.pos_id) return setResult("add-pos-result", "Zadej číslo POS.", "err");
+  if (!(body.week >= 1 && body.week <= 53)) return setResult("add-pos-result", "Týden musí být 1–53.", "err");
+  if (!body.technician) return setResult("add-pos-result", "Zadej přesné jméno technika.", "err");
   try {
     await postJson("/api/draft/add-pos", body);
-    setResult("add-pos-result", "POS přidán.", "ok");
-    loadDraft();
+    setResult("add-pos-result", `POS ${body.pos_id} přidán technikovi ${body.technician} (t${body.week}, ${body.day}).`, "ok");
+    _afterDraftEdit(`POS ${body.pos_id} přidán`);
   } catch (err) {
-    setResult("add-pos-result", "Chyba: " + err.message, "err");
+    setResult("add-pos-result", "Nelze přidat: " + err.message, "err");
   }
+}
+document.addEventListener("submit", (e) => {
+  if (e.target && e.target.id === "add-pos-form") _submitAddPos(e);
 });
 
 on("download-draft-btn", "click", () =>
