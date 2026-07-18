@@ -572,6 +572,21 @@
         <p id="whatif-result" class="result"></p>
         <div id="whatif-body"></div>
       </section>
+
+      <!-- RETROSPEKTIVA: plán vs skutečnost -->
+      <section class="card">
+        <h2>Retrospektiva plánu <span class="badge">plán vs. skutečnost</span></h2>
+        <p class="hint">Uzavření cyklu: jak se publikovaný TourPlan potkal se skutečností ze SalesApp – splněno / neobslouženo / mimořádné, a reálná aktivita techniků (návštěvy, dny, čas na POS). Km, přejezdy a GPS trasa konkrétního dne jsou v detailní <strong>Analýze techniků</strong>.</p>
+        <form id="retro-form" class="row">
+          <label>Od týdne<input type="number" id="retro-wf" min="1" max="53" value="5"></label>
+          <label>Do týdne<input type="number" id="retro-wt" min="1" max="53" value="28"></label>
+          <button type="submit" id="retro-fulfil-btn" class="primary">Plán vs. skutečnost</button>
+          <button type="button" id="retro-reality-btn" class="ghost">Vyhodnocení techniků</button>
+          <button type="button" id="retro-gps-btn" class="ghost">GPS trasy · km · čas →</button>
+        </form>
+        <p id="retro-result" class="result"></p>
+        <div id="retro-out"></div>
+      </section>
     </div>
 
     <!-- ==================== VIEW: ANALYTIKA ==================== -->
@@ -861,6 +876,6 @@
   </div>
 </div>
 
-<script src="app.js?v=102"></script>
+<script src="app.js?v=103"></script>
 </body>
 </html>

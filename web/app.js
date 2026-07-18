@@ -2928,6 +2928,42 @@ on("fulfil-btn", "click", async () => {
   } catch (err) { setResult("reality-result", "Chyba: " + err.message, "err"); }
 });
 
+// ---- Retrospektiva (Planner Studio stage) ---------------------------------
+// Closes the TourPlan loop inside the planner: plan-vs-reality + technician
+// evaluation, reusing the same /api/reality endpoints and renderers as the
+// Analytika deep-dive. GPS route / km / time detail lives in Analytika (heavy
+// map), reachable via the CTA — no duplication of that logic here.
+async function _retroFulfil() {
+  const wf = document.getElementById("retro-wf").value;
+  const wt = document.getElementById("retro-wt").value;
+  if (!wf || !wt) { setResult("retro-result", "Zadej rozsah týdnů.", "err"); return; }
+  setResult("retro-result", "Porovnávám plán se skutečností…", "");
+  try {
+    const f = await apiJson(`/api/reality/fulfillment?week_from=${wf}&week_to=${wt}`);
+    document.getElementById("retro-out").innerHTML = renderFulfillment(f);
+    setResult("retro-result", "", "ok");
+  } catch (err) { setResult("retro-result", "Chyba: " + err.message, "err"); }
+}
+async function _retroReality() {
+  const wf = document.getElementById("retro-wf").value;
+  const wt = document.getElementById("retro-wt").value;
+  setResult("retro-result", "Načítám vyhodnocení techniků…", "");
+  try {
+    const q = new URLSearchParams();
+    if (wf) q.set("week_from", wf); if (wt) q.set("week_to", wt);
+    const r = await apiJson("/api/reality/technicians?" + q.toString());
+    document.getElementById("retro-out").innerHTML = renderReality(r);
+    setResult("retro-result", "", "ok");
+  } catch (err) { setResult("retro-result", "Chyba: " + err.message, "err"); }
+}
+on("retro-form", "submit", (e) => { e.preventDefault(); _retroFulfil(); });
+on("retro-reality-btn", "click", _retroReality);
+on("retro-gps-btn", "click", () => {
+  showView("analytics");
+  const card = document.getElementById("route-actual-form");
+  if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
 // ---- predictions: capacity sweep ------------------------------------------
 
 function renderSweep(s) {
@@ -5971,6 +6007,7 @@ const _PS_STAGES = [
   { id: "review", label: "Review", sub: "Kontrola plánu" },
   { id: "edits", label: "Úpravy", sub: "Override · priorita · přeřazení" },
   { id: "publish", label: "Publish & Export", sub: "Verze · export" },
+  { id: "retro", label: "Retrospektiva", sub: "Plán vs. skutečnost" },
   { id: "pokrocile", label: "Pokročilé", sub: "Ruční nástroje · scénáře" },
 ];
 // map: substring of a section's <h2> -> stage id
@@ -5996,6 +6033,7 @@ const _PS_MAP = [
   ["Route Planner", "publish"],
   ["Historie publikovaných verzí", "publish"],
   ["Historie běhů plánovače", "publish"],
+  ["Retrospektiva plánu", "retro"],
 ];
 let _psStage = "data";
 function _psStageOf(sec) {
@@ -6052,6 +6090,8 @@ function setPlannerStage(id) {
   if (id === "data") _psLoadDataHealth();
   if (id === "edits" && typeof loadDraft === "function") loadDraft();
   if (id === "publish" && typeof loadVersions === "function") { loadVersions(); loadPlannerRuns(); }
+  if (id === "retro" && typeof _retroFulfil === "function"
+      && !document.getElementById("retro-out").innerHTML.trim()) _retroFulfil();
   // Review Cockpit: one screen with tabs over the review cards
   if (id === "review") initReviewCockpit();
   const rcTabs = document.getElementById("rc-tabs");
