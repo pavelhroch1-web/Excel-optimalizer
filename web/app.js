@@ -733,6 +733,346 @@ async function loadPlanFeasibility() {
 }
 on("feasibility-refresh", "click", loadPlanFeasibility);
 
+// ===================== TOURPLAN WIZARD =====================
+// A guided layer over the EXISTING planner config. Each step edits config the
+// engine already reads (technicians.excluded, model_config partners, cadence
+// rules) or a generate parameter (week / length / mode / capacity). On finish
+// it persists the changed config and calls the existing generate endpoint. No
+// new engine logic, no new backend — pure orchestration. GAP controls from the
+// audit (region, partner-combination bans, km/time/depot limits) are omitted
+// on purpose, since the engine does not support them.
+const _WZ_STEPS = [
+  { id: "obdobi", label: "Období", sub: "Týden a délka" },
+  { id: "technici", label: "Technici", sub: "Kdo se plánuje" },
+  { id: "partneri", label: "Partneři", sub: "Které sítě" },
+  { id: "kadence", label: "Kadence", sub: "Četnost návštěv" },
+  { id: "kapacita", label: "Kapacita", sub: "Návštěv/týden" },
+  { id: "priorita", label: "Priorita", sub: "Strategie" },
+  { id: "kontrola", label: "Kontrola", sub: "Souhrn a spuštění" },
+];
+let _wz = null;
+
+function _wzIsoWeek(dt) {
+  const d = new Date(Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate()));
+  const dayNr = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dayNr + 3);
+  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const fDayNr = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - fDayNr + 3);
+  return 1 + Math.round((d - firstThursday) / (7 * 864e5));
+}
+
+async function openWizard() {
+  const ov = document.getElementById("wizard-overlay");
+  _wz = { step: 0, data: null };
+  ov.classList.remove("hidden");
+  document.getElementById("wz-body").innerHTML = `<p class="result" style="padding:24px">Načítám konfiguraci…</p>`;
+  _wzRenderRail();
+  try {
+    const [techs, model, cadence, campaigns, modes] = await Promise.all([
+      apiJson("/api/technicians"),
+      apiJson("/api/model"),
+      apiJson("/api/cadence"),
+      apiJson("/api/campaigns").catch(() => ({ campaigns: [] })),
+      apiJson("/api/strategy-modes").catch(() => ({ modes: [] })),
+    ]);
+    const partners = (model.sections || []).find((s) => s.id === "partners") || { rows: [] };
+    _wz.data = {
+      week: _wzIsoWeek(new Date()) + 1,
+      length: 1,
+      mode: "vyvazeny",
+      capacity: 40,
+      techs: (techs.technicians || []).filter((t) => (t.role || "").toUpperCase() === "TECHNIK")
+        .map((t) => ({ name: t.name, planned: !t.excluded, _orig: !t.excluded })),
+      partners: (partners.rows || []).map((r) => ({ key: r.key, label: r.label, active: !!r.ACTIVE, _orig: !!r.ACTIVE })),
+      cadence: (cadence.rules || []).map((r) => ({
+        ruleId: r.ruleId, scope: r.scope, active: (r.active === "YES" || r.active === true),
+        maxIntervalWeeks: r.maxIntervalWeeks, minGapWeeks: r.minGapWeeks,
+        _origActive: (r.active === "YES" || r.active === true), _origMax: r.maxIntervalWeeks,
+      })),
+      campaigns: (campaigns.campaigns || []),
+      modes: (modes.modes || modes || []),
+    };
+    _wzGoto(0);
+  } catch (e) {
+    document.getElementById("wz-body").innerHTML = `<p class="result err" style="padding:24px">${esc(e.message)}</p>`;
+  }
+}
+
+function _wzRenderRail() {
+  document.getElementById("wz-rail").innerHTML = _WZ_STEPS.map((s, i) =>
+    `<div class="wz-step ${i === (_wz ? _wz.step : 0) ? "on" : ""} ${_wz && i < _wz.step ? "done" : ""}">
+      <span class="wz-step-n">${i + 1}</span><span class="wz-step-t"><b>${esc(s.label)}</b><span>${esc(s.sub)}</span></span></div>`).join("");
+}
+
+function _wzGoto(step) {
+  _wz.step = Math.max(0, Math.min(_WZ_STEPS.length - 1, step));
+  _wzRenderRail();
+  const id = _WZ_STEPS[_wz.step].id;
+  const body = document.getElementById("wz-body");
+  body.innerHTML = ({
+    obdobi: _wzObdobi, technici: _wzTechnici, partneri: _wzPartneri,
+    kadence: _wzKadence, kapacita: _wzKapacita, priorita: _wzPriorita, kontrola: _wzKontrola,
+  })[id]();
+  body.scrollTop = 0;
+  document.getElementById("wz-back").style.visibility = _wz.step === 0 ? "hidden" : "visible";
+  document.getElementById("wz-next").textContent = _wz.step === _WZ_STEPS.length - 1 ? "Zavřít" : "Další →";
+  document.getElementById("wz-validate").textContent = "";
+  if (id === "kontrola") _wzBindKontrola();
+  else _wzBindStep(id);
+}
+
+// ---- step renderers ----
+function _wzObdobi() {
+  const w = _wz.data;
+  const inWin = (w.campaigns || []).filter((c) =>
+    c.start_week != null && c.end_week != null && !(w.week + w.length - 1 < c.start_week || w.week > c.end_week));
+  const chips = inWin.length
+    ? inWin.map((c) => `<span class="wz-chip">${esc(c.kind || "")} ${esc(c.name || "")} · t${c.start_week}–${c.end_week}</span>`).join("")
+    : `<span class="pd-sub">V tomto okně není žádná aktivní kampaň.</span>`;
+  return `<div class="wz-sec"><h3>Kdy plánovat</h3>
+    <div class="wz-fields">
+      <label>Počáteční týden (ISO)<input type="number" id="wz-week" min="1" max="53" value="${w.week}"></label>
+      <label>Délka (počet týdnů)<input type="number" id="wz-length" min="1" max="12" value="${w.length}"></label>
+    </div>
+    <p class="hint">Engine naplánuje týdny <b id="wz-weekrange">${w.week}–${w.week + w.length - 1}</b>. Zamčené (publikované) týdny se přeskočí.</p>
+    <div class="wz-sec"><h3>Kampaně v okně</h3><div class="wz-chips" id="wz-campaigns">${chips}</div></div>
+  </div>`;
+}
+
+function _wzTechnici() {
+  const t = _wz.data.techs;
+  const rows = t.map((x, i) =>
+    `<label class="wz-check"><input type="checkbox" data-i="${i}" ${x.planned ? "checked" : ""}> ${esc(x.name)}</label>`).join("");
+  const n = t.filter((x) => x.planned).length;
+  return `<div class="wz-sec"><h3>Kteří technici se naplánují <span class="pd-chip" id="wz-tech-count">${n}/${t.length}</span></h3>
+    <p class="hint">Odškrtnutí technika ho pro plánování vyřadí (uloží se do <code>technicians.excluded</code>). Metriky i plán ho pak vynechají.</p>
+    <div class="wz-actions"><button type="button" class="ghost" id="wz-tech-all">Vybrat vše</button>
+      <button type="button" class="ghost" id="wz-tech-none">Zrušit vše</button></div>
+    <div class="wz-checklist">${rows || "<p class='pd-sub'>Žádní technici.</p>"}</div></div>`;
+}
+
+function _wzPartneri() {
+  const p = _wz.data.partners;
+  const rows = p.map((x, i) =>
+    `<label class="wz-check"><input type="checkbox" data-i="${i}" ${x.active ? "checked" : ""}> ${esc(x.label || x.key)}</label>`).join("");
+  const n = p.filter((x) => x.active).length;
+  return `<div class="wz-sec"><h3>Které partnerské sítě zahrnout <span class="pd-chip" id="wz-part-count">${n}/${p.length}</span></h3>
+    <p class="hint">Vybírá vstupní množinu POS pro engine (MARKET_RULES / plánovací model). Vypnutý partner se neplánuje.</p>
+    <div class="wz-actions"><button type="button" class="ghost" id="wz-part-all">Vybrat vše</button>
+      <button type="button" class="ghost" id="wz-part-none">Zrušit vše</button></div>
+    <div class="wz-checklist">${rows || "<p class='pd-sub'>Žádní partneři.</p>"}</div></div>`;
+}
+
+function _wzKadence() {
+  const c = _wz.data.cadence;
+  const rows = c.map((x, i) =>
+    `<tr><td>${esc(x.ruleId)}</td><td>${esc(x.scope || "")}</td>
+      <td><label class="wz-check inline"><input type="checkbox" data-act="${i}" ${x.active ? "checked" : ""}> aktivní</label></td>
+      <td><input type="number" class="wz-mini" data-max="${i}" min="1" max="104" value="${x.maxIntervalWeeks ?? ""}"> týdnů</td></tr>`).join("");
+  return `<div class="wz-sec"><h3>Kadence návštěv</h3>
+    <p class="hint">Maximální rozestup mezi návštěvami pro každé pravidlo (např. CORN, GECO, CORE). Změna se uloží do <code>cadence_overrides</code> a projeví se v enginu. „Vlastní" = uprav číslo přímo.</p>
+    <div class="wz-actions"><span class="hint">Rychle:</span>
+      <button type="button" class="ghost" data-cad-preset="2">1× / 2 týdny</button>
+      <button type="button" class="ghost" data-cad-preset="4">1× / 4 týdny</button>
+      <button type="button" class="ghost" data-cad-preset="5">1× / měsíc</button></div>
+    <div class="feas-wrap"><table class="feas-table"><thead><tr><th>Pravidlo</th><th>Rozsah</th><th>Aktivní</th><th>Max. interval</th></tr></thead>
+      <tbody>${rows || "<tr><td colspan=4>Žádná pravidla.</td></tr>"}</tbody></table></div></div>`;
+}
+
+function _wzKapacita() {
+  const w = _wz.data;
+  return `<div class="wz-sec"><h3>Kapacita technika</h3>
+    <p class="hint">Kolik návštěv na technika a týden má engine naplánovat. (Jediné omezení Sekce 5, které engine podporuje — km/čas/depo engine neřeší; reálný čas uvidíš po generování v „Časová proveditelnost".)</p>
+    <div class="wz-fields"><label>Návštěv na technika / týden<input type="number" id="wz-capacity" min="1" max="200" value="${w.capacity}"></label></div>
+  </div>`;
+}
+
+function _wzPriorita() {
+  const w = _wz.data;
+  const cards = [
+    ["dojezd", "Dojezd sítě", "Priorita: dokončit dlouho nenavštívené POS (pravidelnost / pokrytí)."],
+    ["kampan", "Kampaňový režim", "Priorita: připravit a pokrýt kampaně (dokončení kampaně)."],
+    ["vyvazeny", "Vyvážený režim", "Výchozí: kombinuje kadenci, neglect i kampaně podle skóre (produktivita)."],
+  ].map(([id, label, desc]) =>
+    `<label class="wz-mode ${w.mode === id ? "on" : ""}"><input type="radio" name="wz-mode" value="${id}" ${w.mode === id ? "checked" : ""}>
+      <div><b>${esc(label)}</b><span>${esc(desc)}</span></div></label>`).join("");
+  return `<div class="wz-sec"><h3>Strategie plánu</h3>
+    <p class="hint">Tři režimy, které engine podporuje (mění cíle/váhy přes config, ne algoritmus). „Minimalizovat km" jako samostatný cíl engine nemá — proto zde není.</p>
+    <div class="wz-modes">${cards}</div></div>`;
+}
+
+function _wzKontrola() {
+  const w = _wz.data;
+  const nT = w.techs.filter((x) => x.planned).length;
+  const nP = w.partners.filter((x) => x.active).length;
+  const modeLabel = { dojezd: "Dojezd sítě", kampan: "Kampaňový režim", vyvazeny: "Vyvážený režim" }[w.mode] || w.mode;
+  const issues = _wzValidateAll();
+  const issHtml = issues.length
+    ? issues.map((x) => `<div class="wz-issue ${x.level}"><span>${x.level === "error" ? "✗" : "⚠"}</span> ${esc(x.msg)}</div>`).join("")
+    : `<div class="wz-issue ok"><span>✓</span> Nastavení je konzistentní.</div>`;
+  return `<div class="wz-sec"><h3>Souhrn nastavení</h3>
+    <div class="wz-summary">
+      <div><span>Období</span><b>týdny ${w.week}–${w.week + w.length - 1}</b></div>
+      <div><span>Strategie</span><b>${esc(modeLabel)}</b></div>
+      <div><span>Technici</span><b>${nT} z ${w.techs.length}</b></div>
+      <div><span>Partneři</span><b>${nP} z ${w.partners.length}</b></div>
+      <div><span>Kapacita</span><b>${w.capacity} návštěv/týden</b></div>
+      <div><span>Kadence</span><b>${w.cadence.filter((c) => c.active).length} aktivních pravidel</b></div>
+    </div>
+    <div class="wz-sec"><h3>Validace</h3>${issHtml}</div>
+    <div class="wz-actions" style="margin-top:6px">
+      <button type="button" class="ghost" id="wz-assess">Spustit kontrolu (pre-flight)</button>
+      <button type="button" class="primary" id="wz-generate" ${issues.some((x) => x.level === "error") ? "disabled" : ""}>Vygenerovat TourPlan →</button>
+    </div>
+    <div id="wz-assess-out"></div>
+    <p class="hint" style="margin-top:8px">Změny technik/partner/kadence se uloží do konfigurace; období/kapacita/strategie jsou parametry běhu. Poté se zavolá <strong>stávající Planning Engine</strong> beze změny.</p>
+  </div>`;
+}
+
+// ---- validation ----
+function _wzValidateAll() {
+  const w = _wz.data, out = [];
+  if (!(w.week >= 1 && w.week <= 53)) out.push({ level: "error", msg: "Počáteční týden musí být 1–53." });
+  if (!(w.length >= 1)) out.push({ level: "error", msg: "Délka musí být alespoň 1 týden." });
+  if (w.techs.filter((x) => x.planned).length === 0) out.push({ level: "error", msg: "Není vybrán žádný technik." });
+  if (w.partners.filter((x) => x.active).length === 0) out.push({ level: "error", msg: "Není vybrán žádný partner." });
+  if (!(w.capacity >= 1)) out.push({ level: "error", msg: "Kapacita musí být alespoň 1 návštěva/týden." });
+  if (w.cadence.length && w.cadence.filter((c) => c.active).length === 0)
+    out.push({ level: "warn", msg: "Všechna pravidla kadence jsou vypnutá — engine nebude vynucovat žádný rozestup." });
+  if (w.mode === "kampan") {
+    const inWin = (w.campaigns || []).some((c) => c.start_week != null && c.end_week != null
+      && !(w.week + w.length - 1 < c.start_week || w.week > c.end_week));
+    if (!inWin) out.push({ level: "warn", msg: "Kampaňový režim, ale v okně není žádná aktivní kampaň — nebude co upřednostnit." });
+  }
+  return out;
+}
+
+// ---- per-step event binding ----
+function _wzBindStep(id) {
+  const w = _wz.data;
+  if (id === "obdobi") {
+    const upd = () => {
+      w.week = parseInt(document.getElementById("wz-week").value, 10) || w.week;
+      w.length = parseInt(document.getElementById("wz-length").value, 10) || 1;
+      const r = document.getElementById("wz-weekrange"); if (r) r.textContent = `${w.week}–${w.week + w.length - 1}`;
+    };
+    ["wz-week", "wz-length"].forEach((k) => document.getElementById(k).addEventListener("input", upd));
+  }
+  if (id === "technici") {
+    document.querySelectorAll("#wz-body .wz-checklist input").forEach((cb) =>
+      cb.addEventListener("change", () => {
+        w.techs[+cb.dataset.i].planned = cb.checked;
+        document.getElementById("wz-tech-count").textContent = `${w.techs.filter((x) => x.planned).length}/${w.techs.length}`;
+      }));
+    on2("wz-tech-all", () => _wzSetAll("techs", "planned", true));
+    on2("wz-tech-none", () => _wzSetAll("techs", "planned", false));
+  }
+  if (id === "partneri") {
+    document.querySelectorAll("#wz-body .wz-checklist input").forEach((cb) =>
+      cb.addEventListener("change", () => {
+        w.partners[+cb.dataset.i].active = cb.checked;
+        document.getElementById("wz-part-count").textContent = `${w.partners.filter((x) => x.active).length}/${w.partners.length}`;
+      }));
+    on2("wz-part-all", () => _wzSetAll("partners", "active", true));
+    on2("wz-part-none", () => _wzSetAll("partners", "active", false));
+  }
+  if (id === "kadence") {
+    document.querySelectorAll("#wz-body input[data-act]").forEach((cb) =>
+      cb.addEventListener("change", () => { w.cadence[+cb.dataset.act].active = cb.checked; }));
+    document.querySelectorAll("#wz-body input[data-max]").forEach((inp) =>
+      inp.addEventListener("input", () => { w.cadence[+inp.dataset.max].maxIntervalWeeks = inp.value === "" ? null : +inp.value; }));
+    document.querySelectorAll("#wz-body [data-cad-preset]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const v = +b.dataset.cadPreset;
+        w.cadence.forEach((c) => { if (c.active) c.maxIntervalWeeks = v; });
+        _wzGoto(_wz.step); // re-render to reflect
+      }));
+  }
+  if (id === "kapacita") {
+    document.getElementById("wz-capacity").addEventListener("input", (e) => { w.capacity = parseInt(e.target.value, 10) || 0; });
+  }
+  if (id === "priorita") {
+    document.querySelectorAll("#wz-body input[name='wz-mode']").forEach((r) =>
+      r.addEventListener("change", () => {
+        w.mode = r.value;
+        document.querySelectorAll("#wz-body .wz-mode").forEach((m) => m.classList.toggle("on", m.querySelector("input").checked));
+      }));
+  }
+}
+function on2(id, fn) { const el = document.getElementById(id); if (el) el.addEventListener("click", fn); }
+function _wzSetAll(arr, field, val) {
+  _wz.data[arr].forEach((x) => { x[field] = val; });
+  _wzGoto(_wz.step);
+}
+
+function _wzBindKontrola() {
+  on2("wz-assess", async () => {
+    const w = _wz.data, out = document.getElementById("wz-assess-out");
+    out.innerHTML = skeleton({ rows: 2 });
+    try {
+      const s = await postJson("/api/planner/assess", { mode: w.mode, start_week: w.week, length: w.length, visits_per_tech_week: w.capacity });
+      const cap = s.capacity || {}, cov = s.coverage || {}, core = cov.core || {}, cad = cov.cadence || {};
+      const notes = (s.notes && s.notes.length) ? s.notes[0] : (s.scenario && s.scenario.modeDesc) || "";
+      out.innerHTML = `<div class="pl-tiles" style="margin-top:10px">
+        ${_wzTile("Naplánováno", cap.plannedVisits ?? "—")}
+        ${_wzTile("Využití kapacity", cap.utilizationPct != null ? cap.utilizationPct + " %" : "—")}
+        ${_wzTile("CORE pokrytí", core.pct != null ? core.pct + " %" : "—")}
+        ${_wzTile("Kadence pokrytí", cad.pct != null ? cad.pct + " %" : "—")}
+      </div><p class="hint" style="margin-top:6px">${esc(notes)}</p>`;
+    } catch (e) { out.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+  });
+  on2("wz-generate", _wzGenerate);
+}
+function _wzTile(label, val) {
+  return `<div class="pl-tile"><div class="plt-v">${esc(String(val))}</div><div class="plt-l">${esc(label)}</div></div>`;
+}
+
+async function _wzGenerate() {
+  const w = _wz.data, btn = document.getElementById("wz-generate");
+  const vout = document.getElementById("wz-validate");
+  btn.disabled = true; vout.textContent = "Ukládám konfiguraci…";
+  try {
+    // 1) persist only CHANGED config
+    for (const t of w.techs) if (t.planned !== t._orig)
+      await postJsonPut(`/api/technicians/${encodeURIComponent(t.name)}`, { excluded: !t.planned });
+    for (const p of w.partners) if (p.active !== p._orig)
+      await postJsonPut(`/api/model/partners/${encodeURIComponent(p.key)}`, { col: "ACTIVE", value: p.active });
+    for (const c of w.cadence) if (c.active !== c._origActive || c.maxIntervalWeeks !== c._origMax)
+      await postJsonPut(`/api/cadence/${encodeURIComponent(c.ruleId)}`, { active: c.active, max_interval_weeks: c.maxIntervalWeeks });
+    // 2) call the existing engine
+    vout.textContent = "Generuji TourPlan…";
+    await postJson("/api/planner/generate-runtime", { mode: w.mode, start_week: w.week, length: w.length, visits_per_tech_week: w.capacity });
+    vout.textContent = "";
+    document.getElementById("wizard-overlay").classList.add("hidden");
+    showView("tourplan");
+    if (typeof setPlannerStage === "function") setPlannerStage("review");
+    if (typeof loadDraft === "function") loadDraft();
+    if (typeof loadPlanFeasibility === "function") loadPlanFeasibility();
+    toast && toast("TourPlan vygenerován průvodcem — zkontroluj návrh a časovou proveditelnost.");
+  } catch (e) {
+    vout.textContent = "Chyba: " + e.message; btn.disabled = false;
+  }
+}
+
+on("open-wizard", "click", openWizard);
+on("wz-close", "click", () => document.getElementById("wizard-overlay").classList.add("hidden"));
+on("wz-back", "click", () => { if (_wz) _wzGoto(_wz.step - 1); });
+on("wz-next", "click", () => {
+  if (!_wz) return;
+  if (_wz.step === _WZ_STEPS.length - 1) { document.getElementById("wizard-overlay").classList.add("hidden"); return; }
+  // block advancing past a step with a hard error relevant so far
+  const errs = _wzValidateAll().filter((x) => x.level === "error");
+  const stepId = _WZ_STEPS[_wz.step].id;
+  const blocking = errs.find((e) =>
+    (stepId === "obdobi" && /týden|Délka/.test(e.msg)) ||
+    (stepId === "technici" && /technik/.test(e.msg)) ||
+    (stepId === "partneri" && /partner/.test(e.msg)) ||
+    (stepId === "kapacita" && /Kapacita/.test(e.msg)));
+  if (blocking) { document.getElementById("wz-validate").textContent = blocking.msg; return; }
+  _wzGoto(_wz.step + 1);
+});
+
 // ---- Field Brain: strategy modes + pre-flight scorecard -------------------
 
 let brainModesLoaded = false;

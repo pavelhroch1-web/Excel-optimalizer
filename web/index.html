@@ -191,6 +191,10 @@
       <div class="view-head">
         <h1>Planner Studio</h1>
         <p>Celý životní cyklus TourPlanu na jednom místě: vstupní data → parametry → simulace a scénáře → generování a review → ruční úpravy → publikace a export. Postupuj krok po kroku podle lišty níže.</p>
+        <div class="row" style="margin-top:10px">
+          <button id="open-wizard" class="primary">🧭 Průvodce plánem – jednoduché generování</button>
+          <span class="hint" style="align-self:center">provede tě nastavením a spustí engine</span>
+        </div>
       </div>
 
       <!-- COVERAGE BY SEGMENT -->
@@ -791,6 +795,26 @@
   </div>
 </div>
 
-<script src="app.js?v=96"></script>
+<!-- TOURPLAN WIZARD: a guided layer over the existing planner config. Sets the
+     same SQLite config the engine already reads, then calls the existing
+     generate endpoint. No new engine logic. -->
+<div id="wizard-overlay" class="td-overlay hidden">
+  <div id="wizard-panel" class="wz-panel">
+    <div class="wz-head">
+      <div><div class="wz-title">Průvodce plánem</div>
+        <div class="wz-sub" id="wz-subtitle">Nastavení proběhne nad existující konfigurací – engine se nemění.</div></div>
+      <button id="wz-close" class="ghost">✕</button>
+    </div>
+    <div class="wz-rail" id="wz-rail"></div>
+    <div class="wz-body" id="wz-body"></div>
+    <div class="wz-foot">
+      <button id="wz-back" class="ghost">← Zpět</button>
+      <span id="wz-validate" class="wz-validate"></span>
+      <button id="wz-next" class="primary">Další →</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=97"></script>
 </body>
 </html>
