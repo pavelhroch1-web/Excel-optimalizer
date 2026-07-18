@@ -472,6 +472,18 @@ def draft_view():
         os.remove(path)
 
 
+@app.get("/api/draft/geo", dependencies=[Depends(require_auth)])
+def draft_geo():
+    """Read-only map coordinates of the current draft plan (from draft_plans).
+    Plumbing for the Review map view — no logic, just the coordinates the plan
+    already has, so the frontend can plot what the engine produced."""
+    rows = db.get(
+        "SELECT pos_id pos, technician, day, name nazev, gps_x x, gps_y y "
+        "FROM draft_plans WHERE gps_x IS NOT NULL AND gps_y IS NOT NULL "
+        "AND gps_x<>0 AND gps_y<>0")
+    return {"points": [dict(r) for r in rows]}
+
+
 @app.post("/api/draft/remove-pos", dependencies=[Depends(require_auth)])
 def draft_remove_pos(body: RemovePosRequest):
     path = _require_draft_path()

@@ -5897,6 +5897,8 @@ const _PS_MAP = [
   ["Návrh a ruční úpravy", "review"],
   ["Časová proveditelnost", "review"],
   ["Kritické POS mimo plán", "review"],
+  ["Pokrytí a verdikt", "review"],
+  ["Mapa plánu a clustery", "review"],
   ["Override, priority", "edits"],
   ["Publikovat TourPlan", "publish"],
   ["Route Planner", "publish"],
@@ -5958,9 +5960,138 @@ function setPlannerStage(id) {
   if (id === "data") _psLoadDataHealth();
   if (id === "edits" && typeof loadDraft === "function") loadDraft();
   if (id === "publish" && typeof loadVersions === "function") loadVersions();
+  // Review Cockpit: one screen with tabs over the review cards
+  if (id === "review") initReviewCockpit();
+  const rcTabs = document.getElementById("rc-tabs");
+  if (rcTabs) rcTabs.classList.toggle("hidden", id !== "review");
   const rail = view.querySelector("#ps-rail");
   if (rail) rail.scrollIntoView({ block: "nearest" });
 }
+
+// ===================== REVIEW COCKPIT =====================
+// One screen for everything about the generated plan. Reuses the existing
+// review cards (draft, feasibility, unserved, candidates) as tabs, and adds
+// advisor (verdict) + a plan map with clustering — all existing endpoints, no
+// new business logic.
+const _RC_TABS = [
+  { id: "navrh", label: "Návrh", match: ["Návrh a ruční úpravy", "Generovat TourPlan", "Kampaně"] },
+  { id: "pokryti", label: "Pokrytí & verdikt", match: ["Pokrytí a verdikt", "Coverage podle segment"] },
+  { id: "cas", label: "Čas & vytížení", match: ["Časová proveditelnost"] },
+  { id: "kriticke", label: "Kritické POS", match: ["Kritické POS mimo plán"] },
+  { id: "kandidati", label: "Kandidáti (proč)", match: ["Kandidáti POS"] },
+  { id: "mapa", label: "Mapa & clustery", match: ["Mapa plánu a clustery"] },
+];
+let _rcTab = "navrh", _rcInit = false;
+function _rcTabOf(sec) {
+  const h2 = sec.querySelector("h2"); const t = h2 ? h2.textContent : "";
+  for (const tab of _RC_TABS) if (tab.match.some((m) => t.includes(m))) return tab.id;
+  return null;
+}
+function initReviewCockpit() {
+  const view = document.querySelector('.view[data-view="tourplan"]');
+  if (!view) return;
+  // tag review cards with their cockpit tab (idempotent)
+  view.querySelectorAll('section.card[data-ps-stage="review"]').forEach((sec) => {
+    if (!sec.dataset.rcTab) { const t = _rcTabOf(sec); if (t) sec.dataset.rcTab = t; }
+  });
+  if (!_rcInit) {
+    let tabs = document.getElementById("rc-tabs");
+    if (!tabs) {
+      tabs = document.createElement("div");
+      tabs.id = "rc-tabs"; tabs.className = "rc-tabs";
+      const rail = view.querySelector("#ps-rail");
+      if (rail) rail.insertAdjacentElement("afterend", tabs);
+    }
+    tabs.innerHTML = _RC_TABS.map((t) =>
+      `<button class="rc-tab" data-rc="${t.id}">${esc(t.label)}</button>`).join("");
+    tabs.querySelectorAll(".rc-tab").forEach((b) => b.addEventListener("click", () => setReviewTab(b.dataset.rc)));
+    _rcInit = true;
+  }
+  setReviewTab(_rcTab);
+}
+function setReviewTab(id) {
+  _rcTab = id;
+  const view = document.querySelector('.view[data-view="tourplan"]');
+  if (!view) return;
+  view.querySelectorAll('section.card[data-rc-tab]').forEach((sec) =>
+    sec.classList.toggle("rc-hidden", sec.dataset.rcTab !== id));
+  view.querySelectorAll("#rc-tabs .rc-tab").forEach((b) => b.classList.toggle("on", b.dataset.rc === id));
+  // lazy-load the active tab's data
+  if (id === "navrh" && typeof loadDraft === "function") loadDraft();
+  else if (id === "pokryti") loadRcAdvisor();
+  else if (id === "cas" && typeof loadPlanFeasibility === "function") loadPlanFeasibility();
+  else if (id === "kriticke" && typeof loadPlannerUnserved === "function") loadPlannerUnserved();
+  else if (id === "mapa") loadRcMap();
+}
+
+// Advisor verdict for the current draft (existing /api/planner/advise).
+async function loadRcAdvisor() {
+  const out = document.getElementById("rc-advisor-out"); if (!out) return;
+  const g = (id, d) => { const el = document.getElementById(id); const v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? d : v; };
+  const body = { mode: (document.getElementById("sim-mode") || {}).value || "vyvazeny",
+    start_week: g("sim-week", 30), length: g("sim-length", 1), visits_per_tech_week: g("sim-visits", 40) };
+  out.innerHTML = skeleton({ rows: 3 });
+  try {
+    const s = await postJson("/api/planner/advise", body);
+    const cap = s.capacity || {}, cov = s.coverage || {}, core = cov.core || {}, cad = cov.cadence || {}, a = s.advice || {}, v = a.verdict || {};
+    const recs = (a.recommendations || []).map((r) => `<li>${esc(typeof r === "string" ? r : (r.text || r.note || ""))}</li>`).join("");
+    out.innerHTML = `<div class="pl-tiles">
+        ${_wzTile("Naplánováno", cap.plannedVisits ?? "—")}
+        ${_wzTile("Využití kapacity", cap.utilizationPct != null ? cap.utilizationPct + " %" : "—")}
+        ${_wzTile("CORE pokrytí", core.pct != null ? core.pct + " %" : "—")}
+        ${_wzTile("Kadence pokrytí", cad.pct != null ? cad.pct + " %" : "—")}
+      </div>
+      <div class="wz-advice ${v.level || ""}" style="margin-top:10px">
+        <div class="wza-verdict">${esc(v.summary || "")}</div>
+        ${a.weakestLink ? `<div class="wza-row"><span>Nejslabší článek</span> ${esc(a.weakestLink)}</div>` : ""}
+        ${a.bindingConstraint ? `<div class="wza-row"><span>Co limituje</span> ${esc(a.bindingConstraint)}</div>` : ""}
+        ${(a.region && a.region.overloaded) ? `<div class="wza-row"><span>Region</span> ${esc(a.region.topRegion)} přetížený (${a.region.topVisits} návštěv, ${a.region.ratio}× průměr)</div>` : ""}
+        ${recs ? `<div class="wza-row"><span>Doporučení</span><ul>${recs}</ul></div>` : ""}
+      </div>`;
+  } catch (e) { out.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+}
+
+// Plan map (existing /api/draft/geo) colored per technician + clustering
+// overview (existing /api/planner/clusters/overview). Uses Leaflet already loaded.
+const _rcMap = { map: null, layer: null };
+const _RC_COLORS = ["#157F5A", "#2563EB", "#DC2626", "#D97706", "#7C3AED", "#0891B2", "#DB2777", "#65A30D", "#475569", "#EA580C"];
+async function loadRcMap() {
+  const host = document.getElementById("rc-map"); if (!host || typeof L === "undefined") return;
+  const sum = document.getElementById("rc-map-summary");
+  const cout = document.getElementById("rc-clusters-out");
+  try {
+    const [geo, clu] = await Promise.all([
+      apiJson("/api/draft/geo"),
+      apiJson("/api/planner/clusters/overview").catch(() => null),
+    ]);
+    if (!_rcMap.map) {
+      _rcMap.map = L.map(host, { preferCanvas: true, scrollWheelZoom: true }).setView([49.8, 15.5], 7);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(_rcMap.map);
+    }
+    if (_rcMap.layer) _rcMap.layer.remove();
+    _rcMap.layer = L.layerGroup().addTo(_rcMap.map);
+    const pts = geo.points || [];
+    const techs = [...new Set(pts.map((p) => p.technician))];
+    const colorOf = (t) => _RC_COLORS[techs.indexOf(t) % _RC_COLORS.length];
+    const lats = [], lons = [];
+    pts.forEach((p) => {
+      if (p.x == null || p.y == null) return;
+      lats.push(p.x); lons.push(p.y);
+      L.circleMarker([p.x, p.y], { radius: 4, color: colorOf(p.technician), weight: 1, fillOpacity: 0.7 })
+        .bindPopup(`<b>${esc(p.nazev || p.pos)}</b><br>${esc(p.technician)} · ${esc(p.day || "")}`).addTo(_rcMap.layer);
+    });
+    if (lats.length) _rcMap.map.fitBounds([[Math.min(...lats), Math.min(...lons)], [Math.max(...lats), Math.max(...lons)]], { padding: [20, 20] });
+    setTimeout(() => _rcMap.map.invalidateSize(), 100);
+    if (sum) sum.textContent = `${_fmtNum(pts.length)} POS · ${techs.length} techniků`;
+    if (cout && clu) cout.innerHTML =
+      `<div class="td-sec" style="margin-top:12px">Micro-clustery sítě</div>
+       <p class="pd-sub">${_fmtNum(clu.clusteredPos)} POS v ${_fmtNum(clu.clusters)} clusterech (Ø ${clu.avgSize}, max ${clu.maxSize}, do ${clu.radiusM} m). Sdružené POS = jeden výjezd technika, skoro nulový přejezd navíc.</p>` +
+      ((clu.biggest || []).length ? `<div class="feas-wrap"><table class="feas-table"><thead><tr><th>Cluster</th><th>POS</th><th>Město</th><th>Příklad</th></tr></thead><tbody>` +
+        clu.biggest.slice(0, 8).map((c) => `<tr><td>#${c.clusterId}</td><td>${c.size}</td><td>${esc(c.city || "")}</td><td>${esc(c.example || "")}</td></tr>`).join("") + `</tbody></table></div>` : "");
+  } catch (e) { if (sum) sum.textContent = "Mapu se nepodařilo načíst: " + e.message; }
+}
+on("rc-advisor-refresh", "click", loadRcAdvisor);
+on("rc-map-refresh", "click", loadRcMap);
 
 // Compact data-health for the Planner "Vstupní data" stage — same runtime
 // state the engine plans over, so the dispatcher sees what's loaded.

@@ -729,6 +729,12 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 .wza-verdict { font-weight: 650; font-size: 13.5px; margin-bottom: 6px; }
 .wza-row { font-size: 12.5px; margin-top: 4px; } .wza-row > span { color: var(--text-3); font-weight: 600; margin-right: 6px; }
 .wza-row ul { margin: 4px 0 0 18px; }
+/* Review Cockpit tabs */
+.rc-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 10px 0 14px; padding: 4px; background: var(--panel-2); border-radius: 999px; }
+.rc-tabs.hidden { display: none; }
+.rc-tab { padding: 7px 16px; border: 0; background: transparent; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--text-2); cursor: pointer; }
+.rc-tab.on { background: var(--panel); color: var(--text-1); box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+.rc-hidden { display: none !important; }
 .tdt-name { font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
 .tdt-role { font-size: 11px; font-weight: 600; color: var(--text-3); background: var(--panel-2); padding: 2px 8px; border-radius: 20px; margin-left: 6px; }
 .tdt-sub { font-size: 12px; color: var(--text-3); margin-top: 2px; }

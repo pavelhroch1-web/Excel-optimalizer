@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=97">
+<link rel="stylesheet" href="styles.css?v=98">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -472,6 +472,28 @@
         <div id="unserved-out"></div>
       </section>
 
+      <!-- REVIEW: coverage + advisor verdict -->
+      <section class="card">
+        <h2>Pokrytí a verdikt <span class="badge">advisor · scorecard z enginu</span></h2>
+        <p class="hint">Souhrnný verdikt backendu k tomuto plánu: pokrytí CORE/kadence, využití kapacity, nejslabší článek a co ho limituje. Jeden pohled místo rozházených čísel.</p>
+        <div class="row">
+          <button id="rc-advisor-refresh" class="ghost">Načíst / obnovit</button>
+        </div>
+        <div id="rc-advisor-out"></div>
+      </section>
+
+      <!-- REVIEW: plan map + clustering -->
+      <section class="card">
+        <h2>Mapa plánu a clustery <span class="badge">GIS · sdružené POS</span></h2>
+        <p class="hint">Vygenerovaný plán na mapě, barevně podle technika. Micro-clustery = POS pár desítek metrů od sebe (jeden výjezd, skoro nulový přejezd navíc).</p>
+        <div class="row">
+          <button id="rc-map-refresh" class="ghost">Načíst / obnovit</button>
+          <span id="rc-map-summary" class="hint" style="align-self:center"></span>
+        </div>
+        <div id="rc-map" style="height:460px;border-radius:10px;overflow:hidden;margin-top:8px"></div>
+        <div id="rc-clusters-out"></div>
+      </section>
+
       <!-- PUBLISH -->
       <section class="card publish-card">
         <h2>9 · Publikovat TourPlan <span class="badge">immutable</span></h2>
@@ -826,6 +848,6 @@
   </div>
 </div>
 
-<script src="app.js?v=98"></script>
+<script src="app.js?v=99"></script>
 </body>
 </html>
