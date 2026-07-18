@@ -719,6 +719,16 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 .wz-issue.error { background: color-mix(in srgb, var(--bad) 9%, transparent); color: var(--bad); }
 .wz-issue.warn { background: color-mix(in srgb, var(--warn) 10%, transparent); }
 .wz-issue.ok { background: var(--good-soft, #DEF0E7); }
+.wz-learned { margin-top: 8px; }
+.wz-learned-in { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-2); background: var(--panel-2); padding: 8px 12px; border-radius: var(--r-md); }
+.feas-table tr[data-cap] { cursor: pointer; }
+.feas-table tr[data-cap].on td { background: color-mix(in srgb, var(--accent, #157F5A) 12%, transparent); font-weight: 600; }
+.feas-table tr[data-cap]:hover td { background: var(--panel-2); }
+.wz-advice { border: 1px solid var(--border); border-left: 3px solid var(--text-3); border-radius: var(--r-md); padding: 12px 14px; }
+.wz-advice.good { border-left-color: var(--good, #157F5A); } .wz-advice.warn { border-left-color: var(--warn); } .wz-advice.bad, .wz-advice.critical { border-left-color: var(--bad); }
+.wza-verdict { font-weight: 650; font-size: 13.5px; margin-bottom: 6px; }
+.wza-row { font-size: 12.5px; margin-top: 4px; } .wza-row > span { color: var(--text-3); font-weight: 600; margin-right: 6px; }
+.wza-row ul { margin: 4px 0 0 18px; }
 .tdt-name { font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
 .tdt-role { font-size: 11px; font-weight: 600; color: var(--text-3); background: var(--panel-2); padding: 2px 8px; border-radius: 20px; margin-left: 6px; }
 .tdt-sub { font-size: 12px; color: var(--text-3); margin-top: 2px; }

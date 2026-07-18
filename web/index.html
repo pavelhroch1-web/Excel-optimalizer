@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=96">
+<link rel="stylesheet" href="styles.css?v=97">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -461,6 +461,17 @@
         <div id="feasibility-out"></div>
       </section>
 
+      <!-- UNSERVED: what didn't make the plan and why -->
+      <section class="card">
+        <h2>Kritické POS mimo plán <span class="badge">co nevyšlo a proč · z enginu</span></h2>
+        <p class="hint">Které důležité POS se do plánu nevešly a <strong>proč</strong> – přímo z rozhodnutí enginu (nevešlo do kapacity / hold-back / min. rozestup / vyřazeno filtrem). Důležité (CORE / vysoké PPT / kadence) první. <strong>Nemění plán.</strong></p>
+        <div class="row">
+          <button id="unserved-refresh" class="ghost">Načíst / obnovit</button>
+          <span id="unserved-summary" class="hint" style="align-self:center"></span>
+        </div>
+        <div id="unserved-out"></div>
+      </section>
+
       <!-- PUBLISH -->
       <section class="card publish-card">
         <h2>9 · Publikovat TourPlan <span class="badge">immutable</span></h2>
@@ -815,6 +826,6 @@
   </div>
 </div>
 
-<script src="app.js?v=97"></script>
+<script src="app.js?v=98"></script>
 </body>
 </html>

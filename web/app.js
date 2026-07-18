@@ -733,6 +733,43 @@ async function loadPlanFeasibility() {
 }
 on("feasibility-refresh", "click", loadPlanFeasibility);
 
+// ---- Advisory: which important POS did NOT get planned and why -------------
+// Pure read-out of /api/planner/unserved. Uses the scenario workbench inputs if
+// present (else sensible defaults). Changes no plan.
+async function loadPlannerUnserved(params) {
+  const out = document.getElementById("unserved-out");
+  const sum = document.getElementById("unserved-summary");
+  if (!out) return;
+  const g = (id, d) => { const el = document.getElementById(id); const v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? d : v; };
+  const body = params || {
+    mode: (document.getElementById("sim-mode") || {}).value || "vyvazeny",
+    start_week: g("sim-week", 30), length: g("sim-length", 1), visits_per_tech_week: g("sim-visits", 40),
+  };
+  out.innerHTML = skeleton({ rows: 3 });
+  try {
+    const d = await postJson("/api/planner/unserved", body);
+    const ua = d.unservedActionable || {};
+    const cap = ua.capacity || {}, hb = ua.holdback || {}, mg = ua.minGap || {};
+    if (sum) sum.textContent = `obslouženo ${_fmtNum(d.served || 0)} · nevešlo do kapacity ${_fmtNum(cap.count || 0)} (z toho CORE ${_fmtNum(cap.core || 0)})`;
+    const reasonBlock = (title, obj, tone) => {
+      if (!obj || !obj.count) return "";
+      const items = (obj.items || []).slice(0, 10).map((p) =>
+        `<tr><td>${esc(p.pos)}</td><td>${esc(p.nazev || "")}</td><td>${esc(p.market || "")}</td>
+          <td>${p.core ? "CORE" : ""}</td><td>${_fmtNum(p.ppt || 0)}</td><td>${p.weeksSinceLastVisit ?? "—"}</td></tr>`).join("");
+      return `<div class="td-sec">${esc(title)} <span class="pd-chip ${tone}">${_fmtNum(obj.count)}</span>${obj.core ? ` · CORE ${_fmtNum(obj.core)}` : ""}</div>
+        ${items ? `<div class="feas-wrap"><table class="feas-table"><thead><tr><th>POS</th><th>Název</th><th>Síť</th><th></th><th>PPT</th><th>Týdnů</th></tr></thead><tbody>${items}</tbody></table></div>` : ""}`;
+    };
+    const fr = d.filteredByRule;
+    out.innerHTML =
+      reasonBlock("Nevešlo do kapacity", cap, "bad") +
+      reasonBlock("Odloženo hold-backem (blízká kampaň)", hb, "warn") +
+      reasonBlock("Pod minimálním rozestupem (navštíveno nedávno)", mg, "") +
+      (fr != null ? `<p class="pd-sub" style="margin-top:8px">Vyřazeno filtrem/pravidlem (blacklist / vypnutý partner / kategorie EXCLUDE): <b>${_fmtNum(typeof fr === "object" ? (fr.count || 0) : fr)}</b> POS.</p>` : "") ||
+      (!cap.count && !hb.count && !mg.count ? `<p class="pd-sub">Vše důležité se do plánu vešlo.</p>` : "");
+  } catch (e) { out.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+}
+on("unserved-refresh", "click", () => loadPlannerUnserved());
+
 // ===================== TOURPLAN WIZARD =====================
 // A guided layer over the EXISTING planner config. Each step edits config the
 // engine already reads (technicians.excluded, model_config partners, cadence
@@ -884,7 +921,11 @@ function _wzKapacita() {
   const w = _wz.data;
   return `<div class="wz-sec"><h3>Kapacita technika</h3>
     <p class="hint">Kolik návštěv na technika a týden má engine naplánovat. (Jediné omezení Sekce 5, které engine podporuje — km/čas/depo engine neřeší; reálný čas uvidíš po generování v „Časová proveditelnost".)</p>
-    <div class="wz-fields"><label>Návštěv na technika / týden<input type="number" id="wz-capacity" min="1" max="200" value="${w.capacity}"></label></div>
+    <div class="wz-fields"><label>Návštěv na technika / týden<input type="number" id="wz-capacity" min="1" max="200" value="${w.capacity}"></label>
+      <div id="wz-cap-learned" class="wz-learned"></div></div>
+    <div class="wz-sec"><h3>Dopad kapacity na pokrytí sítě <span class="pd-chip">forward sweep</span></h3>
+      <p class="hint">Backend spočítá, kolik POS se při dané kapacitě obslouží a za kolik týdnů se pokryje celá obsloužitelná síť. Klikni na řádek = převezme kapacitu.</p>
+      <div id="wz-sweep"><p class="pd-sub">Načítám…</p></div></div>
   </div>`;
 }
 
@@ -991,6 +1032,8 @@ function _wzBindStep(id) {
   }
   if (id === "kapacita") {
     document.getElementById("wz-capacity").addEventListener("input", (e) => { w.capacity = parseInt(e.target.value, 10) || 0; });
+    _wzLoadLearnedCapacity();
+    _wzLoadSweep();
   }
   if (id === "priorita") {
     document.querySelectorAll("#wz-body input[name='wz-mode']").forEach((r) =>
@@ -1005,21 +1048,69 @@ function _wzSetAll(arr, field, val) {
   _wz.data[arr].forEach((x) => { x[field] = val; });
   _wzGoto(_wz.step);
 }
+function _wzSetCapacity(v) {
+  _wz.data.capacity = v;
+  const inp = document.getElementById("wz-capacity"); if (inp) inp.value = v;
+  document.querySelectorAll("#wz-sweep tr[data-cap]").forEach((r) => r.classList.toggle("on", +r.dataset.cap === v));
+}
+// Learned company capacity standard (capacity.py) — offered as a data-driven
+// default instead of a guess. Existing endpoint, planner didn't use it.
+async function _wzLoadLearnedCapacity() {
+  const host = document.getElementById("wz-cap-learned"); if (!host) return;
+  try {
+    const c = await apiJson("/api/planner/capacity");
+    const t = (c.roles || {}).TECHNIK;
+    if (!t || !t.found) { host.innerHTML = ""; return; }
+    const weekly = Math.round((t.posPerDay || 0) * 5);
+    host.innerHTML = `<div class="wz-learned-in">
+      <span>Doporučeno z historie: <b>${weekly} návštěv/týden</b> (${t.posPerDay} POS/den · ${t.productiveHours} produkt. h/den, ${c.targetPercentile})</span>
+      <button type="button" class="ghost" id="wz-cap-apply">Použít ${weekly}</button></div>`;
+    on2("wz-cap-apply", () => _wzSetCapacity(weekly));
+  } catch (e) { host.innerHTML = ""; }
+}
+// Forward sweep (planner_sweep) — coverage vs capacity + weeks-to-cover the
+// whole servable network. Existing endpoint, surfaced right where capacity is set.
+async function _wzLoadSweep() {
+  const host = document.getElementById("wz-sweep"); if (!host) return;
+  const w = _wz.data;
+  try {
+    const s = await postJson("/api/planner/sweep", { mode: w.mode, start_week: w.week, length: w.length });
+    const rows = (s.capacities || []).map((c) =>
+      `<tr data-cap="${c.capacityPerTechWeek}" class="${c.capacityPerTechWeek === w.capacity ? "on" : ""}" role="button">
+        <td><b>${c.capacityPerTechWeek}</b>/týden</td><td>${_fmtNum(c.plannedVisits)}</td>
+        <td>${c.coveragePctOfNetwork} %</td><td>${c.estWeeksToCoverNetwork} týd.</td></tr>`).join("");
+    host.innerHTML = `<p class="hint">Obsloužitelná síť: <b>${_fmtNum(s.servableNetwork)}</b> POS · ${(s.capacities[0] || {}).technicians || "?"} techniků</p>
+      <div class="feas-wrap"><table class="feas-table"><thead><tr><th>Kapacita</th><th>Naplánováno</th><th>Pokrytí sítě</th><th>Celá síť za</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+    host.querySelectorAll("tr[data-cap]").forEach((r) => r.addEventListener("click", () => _wzSetCapacity(+r.dataset.cap)));
+  } catch (e) { host.innerHTML = `<p class="pd-sub">Sweep se nepodařilo načíst: ${esc(e.message)}</p>`; }
+}
 
 function _wzBindKontrola() {
   on2("wz-assess", async () => {
     const w = _wz.data, out = document.getElementById("wz-assess-out");
-    out.innerHTML = skeleton({ rows: 2 });
+    out.innerHTML = skeleton({ rows: 3 });
     try {
-      const s = await postJson("/api/planner/assess", { mode: w.mode, start_week: w.week, length: w.length, visits_per_tech_week: w.capacity });
+      // advise = assess (coverage/capacity) + advisor answers, in one call
+      const s = await postJson("/api/planner/advise", { mode: w.mode, start_week: w.week, length: w.length, visits_per_tech_week: w.capacity });
       const cap = s.capacity || {}, cov = s.coverage || {}, core = cov.core || {}, cad = cov.cadence || {};
-      const notes = (s.notes && s.notes.length) ? s.notes[0] : (s.scenario && s.scenario.modeDesc) || "";
-      out.innerHTML = `<div class="pl-tiles" style="margin-top:10px">
+      const a = s.advice || {};
+      const tiles = `<div class="pl-tiles" style="margin-top:10px">
         ${_wzTile("Naplánováno", cap.plannedVisits ?? "—")}
         ${_wzTile("Využití kapacity", cap.utilizationPct != null ? cap.utilizationPct + " %" : "—")}
         ${_wzTile("CORE pokrytí", core.pct != null ? core.pct + " %" : "—")}
         ${_wzTile("Kadence pokrytí", cad.pct != null ? cad.pct + " %" : "—")}
-      </div><p class="hint" style="margin-top:6px">${esc(notes)}</p>`;
+      </div>`;
+      const v = a.verdict || {};
+      const recs = (a.recommendations || []).map((r) => `<li>${esc(typeof r === "string" ? r : (r.text || r.note || JSON.stringify(r)))}</li>`).join("");
+      const advHtml = `<div class="wz-advice ${v.level || ""}">
+        <div class="wza-verdict">${esc(v.summary || "")}</div>
+        ${a.weakestLink ? `<div class="wza-row"><span>Nejslabší článek</span> ${esc(a.weakestLink)}</div>` : ""}
+        ${a.bindingConstraint ? `<div class="wza-row"><span>Co limituje</span> ${esc(a.bindingConstraint)}</div>` : ""}
+        ${(a.region && a.region.overloaded) ? `<div class="wza-row"><span>Region</span> ${esc(a.region.topRegion)} je přetížený (${a.region.topVisits} návštěv, ${a.region.ratio}× průměr)</div>` : ""}
+        ${recs ? `<div class="wza-row"><span>Doporučení</span><ul>${recs}</ul></div>` : ""}
+      </div>`;
+      out.innerHTML = tiles + `<div class="td-sec" style="margin-top:10px">Advisor – co říká backend</div>` + advHtml;
     } catch (e) { out.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
   });
   on2("wz-generate", _wzGenerate);
@@ -1049,7 +1140,10 @@ async function _wzGenerate() {
     if (typeof setPlannerStage === "function") setPlannerStage("review");
     if (typeof loadDraft === "function") loadDraft();
     if (typeof loadPlanFeasibility === "function") loadPlanFeasibility();
-    toast && toast("TourPlan vygenerován průvodcem — zkontroluj návrh a časovou proveditelnost.");
+    // unserved with the EXACT params the wizard generated with
+    if (typeof loadPlannerUnserved === "function")
+      loadPlannerUnserved({ mode: w.mode, start_week: w.week, length: w.length, visits_per_tech_week: w.capacity });
+    toast && toast("TourPlan vygenerován průvodcem — zkontroluj návrh, časovou proveditelnost i kritické POS mimo plán.");
   } catch (e) {
     vout.textContent = "Chyba: " + e.message; btn.disabled = false;
   }
@@ -5802,6 +5896,7 @@ const _PS_MAP = [
   ["Kampaně", "review"],
   ["Návrh a ruční úpravy", "review"],
   ["Časová proveditelnost", "review"],
+  ["Kritické POS mimo plán", "review"],
   ["Override, priority", "edits"],
   ["Publikovat TourPlan", "publish"],
   ["Route Planner", "publish"],
