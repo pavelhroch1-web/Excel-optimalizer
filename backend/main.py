@@ -1285,6 +1285,45 @@ if LOCAL_MODE:
         cadence_config.reset(rule_id)
         return {"ok": True}
 
+    class CustomCadenceRequest(BaseModel):
+        scope: str = "category"
+        match_value: str
+        min_gap_weeks: float | None = None
+        max_interval_weeks: float | None = None
+        guarantee_type: str = "SOFT"
+        interval_type: str = "RECURRING"
+        priority: int = 100
+
+    @app.post("/api/cadence/custom", dependencies=[Depends(require_auth)])
+    def cadence_add_custom(body: CustomCadenceRequest):
+        try:
+            r = cadence_config.add_custom_rule(
+                body.scope, body.match_value, body.min_gap_weeks, body.max_interval_weeks,
+                body.guarantee_type, body.interval_type, body.priority)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        _log_config("cadence_custom", r["ruleId"], body.model_dump())
+        return {"ok": True, "rule": r}
+
+    @app.put("/api/cadence/custom/{rule_id}/active", dependencies=[Depends(require_auth)])
+    def cadence_custom_active(rule_id: str, active: bool = True):
+        cadence_config.set_custom_active(rule_id, active)
+        return {"ok": True}
+
+    @app.delete("/api/cadence/custom/{rule_id}", dependencies=[Depends(require_auth)])
+    def cadence_custom_delete(rule_id: str):
+        cadence_config.delete_custom_rule(rule_id)
+        return {"ok": True}
+
+    @app.get("/api/planner/customer-types", dependencies=[Depends(require_auth)])
+    def planner_customer_types():
+        cats = db.get("SELECT category v, COUNT(*) c FROM pos_master WHERE category IS NOT NULL "
+                      "AND category<>'' GROUP BY category ORDER BY c DESC")
+        mkts = db.get("SELECT market v, COUNT(*) c FROM pos_master WHERE market IS NOT NULL "
+                      "AND market<>'' GROUP BY market ORDER BY c DESC")
+        return {"categories": [{"value": r["v"], "count": r["c"]} for r in cats],
+                "markets": [{"value": r["v"], "count": r["c"]} for r in mkts]}
+
     # Planning-model configurator: terminals / partners / categories /
     # activities as editable sections (checkboxes / choices), overlaid onto
     # the engine's config sheets before planning. Same pattern as cadence.

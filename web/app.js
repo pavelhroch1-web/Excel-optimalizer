@@ -2670,10 +2670,14 @@ async function loadCadence() {
       const on = String(r.active).toUpperCase() === "YES";
       const scope = `${r.scope || ""}${r.matchValue ? " = " + r.matchValue : ""}`;
       const guar = r.guaranteeType && String(r.guaranteeType).startsWith("HARD") ? "garantováno" : "doporučeno";
+      const enCls = r.custom ? "cad-en-custom" : "cad-en";
       return `<div class="cfg-rule ${on ? "" : "off"}">` +
-        `<div class="cfg-rule-head"><label class="cfg-switch"><input type="checkbox" class="cad-en" data-id="${esc(r.ruleId)}" ${on ? "checked" : ""}><span></span></label>` +
-        `<div class="cfg-rule-t"><div class="cfg-rule-n">${esc(r.ruleId)}${r.overridden ? ' <span class="pd-chip">upraveno</span>' : ""}</div>` +
-        `<div class="cfg-rule-d"><span class="pd-chip">${esc(scope)}</span> <span class="pd-chip">${guar}</span></div></div></div>` +
+        `<div class="cfg-rule-head"><label class="cfg-switch"><input type="checkbox" class="${enCls}" data-id="${esc(r.ruleId)}" ${on ? "checked" : ""}><span></span></label>` +
+        `<div class="cfg-rule-t"><div class="cfg-rule-n">${esc(r.ruleId)}` +
+        `${r.custom ? ' <span class="pd-chip" style="background:#d8f0e6;color:#0f7a5c">vlastní</span>' : (r.overridden ? ' <span class="pd-chip">upraveno</span>' : "")}</div>` +
+        `<div class="cfg-rule-d"><span class="pd-chip">${esc(scope)}</span> <span class="pd-chip">${guar}</span></div></div>` +
+        (r.custom ? `<button class="ghost small cad-del" data-id="${esc(r.ruleId)}" title="Smazat vlastní pravidlo">✕</button>` : "") +
+        `</div>` +
         `<div class="cfg-params">` +
         `<label class="cfg-param">Min. rozestup (t.)<input type="number" step="1" min="0" class="cad-min" data-id="${esc(r.ruleId)}" value="${r.minGapWeeks ?? ""}"></label>` +
         `<label class="cfg-param">Doporučený interval (t.)<input type="number" step="1" min="0" class="cad-max" data-id="${esc(r.ruleId)}" value="${r.maxIntervalWeeks ?? ""}"></label>` +
@@ -2682,10 +2686,53 @@ async function loadCadence() {
     const put = (id, body) => apiJson(`/api/cadence/${encodeURIComponent(id)}`,
       { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(() => { _cfgToast(); loadCadence(); });
     el.querySelectorAll(".cad-en").forEach((cb) => cb.addEventListener("change", () => put(cb.dataset.id, { active: cb.checked })));
+    el.querySelectorAll(".cad-en-custom").forEach((cb) => cb.addEventListener("change", () =>
+      apiJson(`/api/cadence/custom/${encodeURIComponent(cb.dataset.id)}/active?active=${cb.checked}`, { method: "PUT" }).then(() => { _cfgToast(); loadCadence(); })));
     el.querySelectorAll(".cad-min").forEach((i) => i.addEventListener("change", () => put(i.dataset.id, { min_gap_weeks: i.value === "" ? null : parseFloat(i.value) })));
     el.querySelectorAll(".cad-max").forEach((i) => i.addEventListener("change", () => put(i.dataset.id, { max_interval_weeks: i.value === "" ? null : parseFloat(i.value) })));
+    el.querySelectorAll(".cad-del").forEach((b) => b.addEventListener("click", () =>
+      apiJson(`/api/cadence/custom/${encodeURIComponent(b.dataset.id)}`, { method: "DELETE" }).then(() => { _cfgToast(); loadCadence(); })));
+    _loadCadenceValues();
   } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
 }
+
+// datalist of real customer types (from the data) for the "add rule" form
+async function _loadCadenceValues() {
+  const dl = document.getElementById("cad-values");
+  const scopeSel = document.getElementById("cad-new-scope");
+  if (!dl || !scopeSel) return;
+  try {
+    const ct = await apiJson("/api/planner/customer-types");
+    const fill = () => {
+      const list = scopeSel.value === "market" ? ct.markets : ct.categories;
+      dl.innerHTML = (list || []).map((x) => `<option value="${esc(x.value)}">${esc(x.value)} (${x.count})</option>`).join("");
+    };
+    fill();
+    scopeSel.onchange = fill;
+  } catch (_) { /* free text still works */ }
+}
+
+on("cad-add-btn", "click", async () => {
+  const scope = document.getElementById("cad-new-scope").value;
+  const value = document.getElementById("cad-new-value").value.trim();
+  const min = document.getElementById("cad-new-min").value;
+  const max = document.getElementById("cad-new-max").value;
+  const guar = document.getElementById("cad-new-guar").value;
+  if (!value) return setResult("cad-add-result", "Vyplň typ zákazníka (kategorii / market).", "err");
+  if (!max) return setResult("cad-add-result", "Vyplň interval (za kolik týdnů návštěva).", "err");
+  try {
+    await postJson("/api/cadence/custom", {
+      scope, match_value: value,
+      min_gap_weeks: min === "" ? null : parseFloat(min),
+      max_interval_weeks: parseFloat(max), guarantee_type: guar,
+    });
+    setResult("cad-add-result", `Pravidlo pro ${value} přidáno (interval ${max} t., ${guar === "HARD" ? "garantováno" : "doporučeno"}). Projeví se v enginu.`, "ok");
+    document.getElementById("cad-new-value").value = "";
+    document.getElementById("cad-new-min").value = "";
+    document.getElementById("cad-new-max").value = "";
+    loadCadence();
+  } catch (err) { setResult("cad-add-result", "Nelze přidat: " + err.message, "err"); }
+});
 
 // Planning-model configurator: terminals / partners / categories / activities.
 // Sections are declared by the backend (model_config.SECTIONS); the UI renders

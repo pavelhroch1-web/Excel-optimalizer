@@ -739,6 +739,23 @@ CREATE TABLE IF NOT EXISTS transition_model (
     PRIMARY KEY (level, ckey)
 );
 
+-- Custom cadence rules added from the UI (Pravidla plánování) — a new customer
+-- type / frequency without a code change or re-import. Appended to the engine's
+-- CADENCE_RULES at plan time, exactly like the imported base rules.
+CREATE TABLE IF NOT EXISTS cadence_custom_rules (
+    rule_id            TEXT PRIMARY KEY,
+    scope              TEXT NOT NULL DEFAULT 'category',  -- category | market
+    match_value        TEXT NOT NULL,                      -- e.g. 1GECO, 2COOP
+    min_gap_weeks      REAL,
+    max_interval_weeks REAL,
+    interval_type      TEXT NOT NULL DEFAULT 'RECURRING',  -- RECURRING | ONCE_PER_CAMPAIGN
+    guarantee_type     TEXT NOT NULL DEFAULT 'SOFT',       -- SOFT (preference) | HARD (guaranteed)
+    priority           INTEGER DEFAULT 100,
+    active             INTEGER NOT NULL DEFAULT 1,
+    notes              TEXT,
+    created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- A/B log: every v2 simulate run's quality metrics next to v1, so real numbers
 -- accumulate over time and the architecture can be judged on a trend, not a
 -- one-shot. Append-only; the v2 plan itself is not stored (recomputable).

@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=101">
+<link rel="stylesheet" href="styles.css?v=102">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -815,8 +815,20 @@
       <!-- LEVEL 1: business planning model -->
       <div class="cfg-level-body" data-level="model">
         <section class="card">
-          <h2>Kadence podle typu zákazníka <span class="badge">CORN · CORE · GECO · segmenty</span></h2>
-          <p class="hint">Doporučená a garantovaná četnost návštěv podle pravidla. Uprav interval (např. CORN ze 4 na 5 týdnů) nebo pravidlo vypni – <strong>projeví se přímo v enginu</strong> při dalším generování i v odpočtu „další návštěva".</p>
+          <h2>Pravidla plánování — frekvence návštěv <span class="badge">CORN · CORE · GECO · přidej vlastní</span></h2>
+          <p class="hint">Doporučená a garantovaná četnost návštěv podle typu zákazníka. Uprav interval (např. CORN ze 4 na 5 týdnů), pravidlo vypni, nebo <strong>přidej nové pravidlo pro libovolnou kategorii</strong> — projeví se přímo v enginu při dalším generování, bez zásahu do kódu.</p>
+          <div class="cad-add">
+            <div class="cad-add-title">Přidat pravidlo pro typ zákazníka</div>
+            <div class="cad-add-row">
+              <label>Typ<select id="cad-new-scope"><option value="category">Kategorie</option><option value="market">Market</option></select></label>
+              <label>Hodnota<input list="cad-values" id="cad-new-value" placeholder="např. 1GECO"><datalist id="cad-values"></datalist></label>
+              <label>Min. rozestup (t.)<input type="number" id="cad-new-min" min="0" step="1" placeholder="—" style="width:90px"></label>
+              <label>Interval (t.)<input type="number" id="cad-new-max" min="1" step="1" placeholder="např. 4" style="width:90px"></label>
+              <label>Režim<select id="cad-new-guar"><option value="SOFT">Doporučeno</option><option value="HARD">Garantováno</option></select></label>
+              <button id="cad-add-btn" class="primary">Přidat</button>
+            </div>
+            <p id="cad-add-result" class="result"></p>
+          </div>
           <div id="cadence-out"></div>
         </section>
 
@@ -936,6 +948,6 @@
   </div>
 </div>
 
-<script src="app.js?v=109"></script>
+<script src="app.js?v=110"></script>
 </body>
 </html>

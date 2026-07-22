@@ -53,8 +53,13 @@ def _overrides() -> dict:
     return {r["rule_id"]: dict(r) for r in db.get("SELECT * FROM cadence_overrides")}
 
 
+def _custom_rules() -> list[dict]:
+    return [dict(r) for r in db.get("SELECT * FROM cadence_custom_rules ORDER BY match_value")]
+
+
 def list_rules() -> list[dict]:
-    """Base cadence rules merged with the user's overrides (effective values)."""
+    """Base cadence rules merged with the user's overrides (effective values),
+    plus any UI-added custom rules (marked custom=True)."""
     ov = _overrides()
     out = []
     for base in _base_rules():
@@ -62,6 +67,7 @@ def list_rules() -> list[dict]:
         o = ov.get(rid)
         eff = dict(base)
         eff["overridden"] = bool(o)
+        eff["custom"] = False
         if o:
             if o["min_gap_weeks"] is not None:
                 eff["minGapWeeks"] = o["min_gap_weeks"]
@@ -72,7 +78,46 @@ def list_rules() -> list[dict]:
             if o["priority"] is not None:
                 eff["priority"] = o["priority"]
         out.append(eff)
+    for c in _custom_rules():
+        out.append({
+            "ruleId": c["rule_id"], "scope": c["scope"], "matchValue": c["match_value"],
+            "minGapWeeks": c["min_gap_weeks"], "maxIntervalWeeks": c["max_interval_weeks"],
+            "intervalType": c["interval_type"], "guaranteeType": c["guarantee_type"],
+            "active": "YES" if c["active"] else "NO", "priority": c["priority"],
+            "notes": c["notes"], "overridden": False, "custom": True,
+        })
     return out
+
+
+def add_custom_rule(scope: str, match_value: str, min_gap_weeks=None,
+                    max_interval_weeks=None, guarantee_type: str = "SOFT",
+                    interval_type: str = "RECURRING", priority: int = 100,
+                    notes: str | None = None) -> dict:
+    """Add a new cadence rule for a customer type from the UI — no code, no
+    re-import. It is appended to the engine's CADENCE_RULES at plan time."""
+    scope = (scope or "category").strip().lower()
+    if scope not in ("category", "market"):
+        scope = "category"
+    mv = (match_value or "").strip()
+    if not mv:
+        raise ValueError("Vyplň typ zákazníka (kategorie / market).")
+    rid = f"UI_{scope.upper()}_{mv}".replace(" ", "_")
+    db.run(
+        "INSERT INTO cadence_custom_rules (rule_id, scope, match_value, min_gap_weeks, "
+        "max_interval_weeks, interval_type, guarantee_type, priority, active, notes) "
+        "VALUES (?,?,?,?,?,?,?,?,1,?) "
+        "ON CONFLICT(rule_id) DO UPDATE SET min_gap_weeks=excluded.min_gap_weeks, "
+        "max_interval_weeks=excluded.max_interval_weeks, guarantee_type=excluded.guarantee_type, "
+        "interval_type=excluded.interval_type, priority=excluded.priority, notes=excluded.notes, "
+        "active=1",
+        (rid, scope, mv, min_gap_weeks, max_interval_weeks,
+         (interval_type or "RECURRING").upper(), (guarantee_type or "SOFT").upper(),
+         priority, notes))
+    return {"ruleId": rid, "matchValue": mv, "scope": scope}
+
+
+def delete_custom_rule(rule_id: str) -> None:
+    db.run("DELETE FROM cadence_custom_rules WHERE rule_id=?", (rule_id,))
 
 
 def set_override(rule_id: str, min_gap_weeks=None, max_interval_weeks=None,
@@ -93,21 +138,28 @@ def reset(rule_id: str) -> None:
     db.run("DELETE FROM cadence_overrides WHERE rule_id=?", (rule_id,))
 
 
+def set_custom_active(rule_id: str, active: bool) -> None:
+    db.run("UPDATE cadence_custom_rules SET active=? WHERE rule_id=?",
+           (1 if active else 0, rule_id))
+
+
 def apply_to_state(state: dict) -> int:
-    """Overlay cadence_overrides onto the engine's CADENCE_RULES sheet in `state`.
-    Called by db_state.configure before the engine runs. Returns rows changed."""
+    """Overlay cadence_overrides onto the engine's CADENCE_RULES sheet AND append
+    the UI-added custom rules as new rows. Called by db_state.configure before the
+    engine runs. Returns rows changed/added."""
     ov = _overrides()
-    if not ov:
-        return 0
+    custom = [c for c in _custom_rules() if c["active"]]
     sheet = state.get("CADENCE_RULES")
     if not sheet:
         return 0
     h = {str(n): i for i, n in enumerate(sheet[0])}
     ri, mg, mx, ac = h.get("ruleId"), h.get("minGapWeeks"), h.get("maxIntervalWeeks"), h.get("active")
-    pr = h.get("priority")
+    pr, sc, mvv = h.get("priority"), h.get("scope"), h.get("matchValue")
+    it, gt = h.get("intervalType"), h.get("guaranteeType")
     if ri is None:
         return 0
     n = 0
+    # 1) overrides onto existing rows
     for row in sheet[1:]:
         rid = str(row[ri]) if ri < len(row) else ""
         o = ov.get(rid)
@@ -121,5 +173,21 @@ def apply_to_state(state: dict) -> int:
             row[ac] = "YES" if o["active"] else "NO"
         if pr is not None and o["priority"] is not None:
             row[pr] = o["priority"]
+        n += 1
+    # 2) append custom rules as brand-new CADENCE_RULES rows
+    width = len(sheet[0])
+    existing_ids = {str(row[ri]) for row in sheet[1:] if ri < len(row)}
+    for c in custom:
+        if c["rule_id"] in existing_ids:
+            continue
+        row = [""] * width
+        def _put(idx, val):
+            if idx is not None and idx < width:
+                row[idx] = val
+        _put(ri, c["rule_id"]); _put(sc, c["scope"]); _put(mvv, c["match_value"])
+        _put(mg, c["min_gap_weeks"]); _put(mx, c["max_interval_weeks"])
+        _put(it, c["interval_type"]); _put(gt, c["guarantee_type"])
+        _put(ac, "YES"); _put(pr, c["priority"])
+        sheet.append(row)
         n += 1
     return n
