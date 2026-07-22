@@ -58,46 +58,47 @@ def _build_day(pool, budget, area_of, dur_of):
         return [], 0.0
     day = [dict(seed, _why="seed (nejvyšší priorita, vejde se)")]
     used = dur_of(seed)
-    day_area = area_of.get(str(seed["pos"]))
-    day_region = _region(day_area)
+    km_total = 0.0
+    day_region = _region(area_of.get(str(seed["pos"])))
 
     changed = True
     while changed:
         changed = False
-        best_i = best_cost = None
+        best_i = best_cost = best_km = None
         for i, c in enumerate(pool):
             if _region(area_of.get(str(c["pos"]))) != day_region:
                 continue                          # geography: same region only (hard)
-            move = _nearest_move(c, day, area_of)
+            move, km = _nearest_move(c, day)
             cost = dur_of(c) + move
             if used + cost <= budget:              # time: fits remaining budget (hard)
-                best_i, best_cost = i, cost        # pool is score-sorted → first fit = best priority
+                best_i, best_cost, best_km = i, cost, km  # score-sorted → first fit = best priority
                 break
         if best_i is not None:
             c = pool.pop(best_i)
             c = dict(c, _why=f"priorita + region + vejde se (+{round(best_cost)} min)")
-            day.append(c); used += best_cost; changed = True
-    return day, round(used, 1)
+            day.append(c); used += best_cost; km_total += best_km; changed = True
+    return day, round(used, 1), round(km_total, 1)
 
 
 def _region(area):
     return area or "?"
 
 
-def _nearest_move(c, day, area_of):
-    """Transition minutes from the nearest already-placed stop to candidate c."""
+def _nearest_move(c, day):
+    """(transition minutes, km) from the nearest already-placed stop to candidate c."""
     cx, cy = c.get("x") or 0, c.get("y") or 0
     if cx == 0 and cy == 0:
-        return 0.0
-    best = None
+        return 0.0, 0.0
+    best_m = best_km = None
     for s in day:
         sx, sy = s.get("x") or 0, s.get("y") or 0
         if sx == 0 and sy == 0:
             continue
         km = distance_km(sx, sy, cx, cy)
-        m = transition_model.predict(km).get("minutes") or 0.0
-        best = m if best is None else min(best, m)
-    return best or 0.0
+        if best_km is None or km < best_km:
+            best_km = km
+            best_m = transition_model.predict(km).get("minutes") or 0.0
+    return (best_m or 0.0), (best_km or 0.0)
 
 
 def simulate(start_week: int, length: int = 1, mode: str = "vyvazeny",
@@ -139,12 +140,12 @@ def simulate(start_week: int, length: int = 1, mode: str = "vyvazeny",
         considered = len(pool)
         placed_here = 0
         for day in _WORK_DAYS:
-            stops, used = _build_day(pool, budget, area_of, dur_of)
+            stops, used, km = _build_day(pool, budget, area_of, dur_of)
             if not stops:
                 continue
             placed_here += len(stops)
             v2_days.append({"technician": tech, "week": week, "day": day,
-                            "visits": len(stops), "minutes": used,
+                            "visits": len(stops), "minutes": used, "km": km,
                             "budget": budget, "loadPct": round(100 * used / budget, 1)})
         v2_planned += placed_here
         v2_deferred += max(considered - placed_here, 0)
@@ -153,16 +154,52 @@ def simulate(start_week: int, length: int = 1, mode: str = "vyvazeny",
     v1_planned = sum(1 for c in cands if c.get("status") == "Vybráno")
 
     over = [d for d in v2_days if d["loadPct"] > 105]
-    return {
+    n_days = len(v2_days) or 1
+    avg_load = round(sum(d["loadPct"] for d in v2_days) / n_days, 1)
+    total_km = round(sum(d["km"] for d in v2_days), 1)
+    total_min = sum(d["minutes"] for d in v2_days)
+    metrics = {
+        "planned": v2_planned, "deferred": v2_deferred, "daysBuilt": len(v2_days),
+        "overloadedDays": len(over), "avgLoadPct": avg_load,
+        "avgVisitsPerDay": round(v2_planned / n_days, 1),
+        "totalTravelKm": total_km, "avgTravelKmPerDay": round(total_km / n_days, 1),
+        "avgWorkMinutesPerDay": round(total_min / n_days, 1),
+    }
+    result = {
         "startWeek": start_week, "length": length, "mode": mode,
         "budgetMinutesPerDay": budget,
         "v1": {"planned": v1_planned, "label": "v1 (počet POS, dnešní engine)"},
-        "v2": {"planned": v2_planned, "deferred": v2_deferred,
-               "daysBuilt": len(v2_days), "overloadedDays": len(over),
-               "label": "v2 (rozpočet minut + geografie, feasibility-by-construction)"},
+        "v2": dict(metrics, label="v2 (rozpočet minut + geografie, feasibility-by-construction)"),
         "note": ("v2 staví den tak, že reálný čas (naučená délka + naučený přejezd) "
                  "nikdy nepřekročí rozpočet referenčního dne a nemíchá regiony v jednom "
                  "dni — proto z principu nevznikne neproveditelný den. v1 vybírá na počet. "
                  f"v2 overloaded dní: {len(over)} (mělo by být 0)."),
         "days": sorted(v2_days, key=lambda x: (x["technician"], x["week"], x["day"])),
     }
+    _record_ab(start_week, length, mode, budget, v1_planned, metrics)
+    return result
+
+
+def _record_ab(start_week, length, mode, budget, v1_planned, m) -> None:
+    """Append this A/B run so real numbers accumulate over time (trend, not a
+    one-shot). Best-effort — never breaks a simulate."""
+    try:
+        db.run(
+            "INSERT INTO ab_runs (start_week, length, mode, budget_min, v1_planned, "
+            "v2_planned, v2_deferred, v2_days, v2_overloaded, v2_avg_load, "
+            "v2_avg_visits_day, v2_travel_km, v2_avg_work_min) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (start_week, length, mode, budget, v1_planned, m["planned"], m["deferred"],
+             m["daysBuilt"], m["overloadedDays"], m["avgLoadPct"], m["avgVisitsPerDay"],
+             m["totalTravelKm"], m["avgWorkMinutesPerDay"]))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def ab_history(limit: int = 50) -> list[dict]:
+    """Recorded A/B runs, newest first — the collected real numbers to iterate on."""
+    try:
+        return [dict(r) for r in db.get(
+            "SELECT * FROM ab_runs ORDER BY id DESC LIMIT ?", (limit,))]
+    except Exception:  # noqa: BLE001
+        return []

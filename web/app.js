@@ -5900,9 +5900,12 @@ async function loadReferenceDay() {
     ]);
     const b = cal.budget || {}, s = cal.stopCost || {};
     const chip = (ok) => ok ? `<span class="rd-chip ok">naučeno</span>` : `<span class="rd-chip">chybí</span>`;
+    const pull = b.targetPulledUp
+      ? `<p class="hint" style="margin-top:8px">Cíl <b>${_fmtHM(b.targetMinutes)}</b> je vyšší než dnes učené <b>${_fmtHM(b.learnedMinutes)}</b> — plán záměrně táhne tým nahoru na cílový standard, nekopíruje dnešní kratší dny.</p>`
+      : "";
     rd.innerHTML = `<div class="rd-card">
       <div class="rd-formula">
-        <span class="rd-term"><b>${_fmtHM(b.productiveMinutes)}</b><span>produktivní ${b.productiveLearned ? "(učené)" : "(fallback)"}</span></span>
+        <span class="rd-term"><b>${_fmtHM(b.productiveMinutes)}</b><span>produktivní ${b.targetPulledUp ? "(cíl 7 h)" : (b.productiveLearned ? "(učené)" : "(fallback)")}</span></span>
         <span class="rd-op">−</span>
         <span class="rd-term"><b>${_fmtHM(b.reserveMinutes)}</b><span>rezerva</span></span>
         <span class="rd-op">−</span>
@@ -5912,6 +5915,7 @@ async function loadReferenceDay() {
       </div>
       <div class="rd-stop">Cena zastávky = doba návštěvy ${chip(s.durationLearned)} + reálný přejezd ${chip(s.transitionReady)}
         <span class="hint">(ambiciózní kvantil ${s.transitionTargetQuantile ?? "—"} · ${esc(cal.learnedFrom || "")})</span></div>
+      ${pull}
     </div>`;
     const rows = (tov.byBand || []).map((x) => {
       const mult = x.ambitious && x.constantModel ? (x.ambitious / x.constantModel) : null;
@@ -5949,10 +5953,14 @@ on("v2-form", "submit", async (e) => {
       tile("v1 · naplánováno", v1.planned ?? "—", "dnešní engine (počet POS)") +
       tile("v2 · naplánováno", v2.planned ?? "—", "minuty + geografie") +
       tile("v2 · přeplněných dní", v2.overloadedDays ?? "—", "má být 0", (v2.overloadedDays === 0 ? "good" : "bad")) +
+      tile("v2 · využití rozpočtu", (v2.avgLoadPct ?? "—") + " %", "prům. den", (v2.avgLoadPct >= 80 && v2.avgLoadPct <= 105 ? "good" : "warn")) +
+      tile("v2 · práce/den", _fmtHM(v2.avgWorkMinutesPerDay), `${v2.avgVisitsPerDay ?? "—"} POS/den`) +
+      tile("v2 · přejezdy/den", (v2.avgTravelKmPerDay ?? "—") + " km", `celkem ${v2.totalTravelKm ?? "—"} km`) +
       tile("v2 · odloženo", v2.deferred ?? "—", "nevešlo do rozpočtu/regionu") +
-      tile("rozpočet dne", _fmtHM(d.budgetMinutesPerDay), "referenční den") +
+      tile("rozpočet dne", _fmtHM(d.budgetMinutesPerDay), "referenční den (cíl 7 h)") +
       `</div>` +
       `<p class="hint">${esc(d.note || "")}</p>` +
+      `<div id="v2-history"></div>` +
       (() => {
         const days = (d.days || []).slice().sort((a, b) => (b.loadPct || 0) - (a.loadPct || 0)).slice(0, 12);
         if (!days.length) return "";
@@ -5962,10 +5970,32 @@ on("v2-form", "submit", async (e) => {
           <div class="feas-wrap"><table class="feas-table"><thead><tr>
             <th>Technik</th><th>Den</th><th>POS</th><th>Čas</th><th>Vytížení</th></tr></thead><tbody>${rows}</tbody></table></div>`;
       })();
+    loadV2History();
   } catch (err) {
     setResult("v2-result", "A/B selhalo: " + err.message, "err");
   } finally { btn.disabled = false; }
 });
+
+// Accumulated A/B runs — the real numbers to iterate on (trend, not one-shot).
+async function loadV2History() {
+  const el = document.getElementById("v2-history");
+  if (!el) return;
+  try {
+    const runs = (await apiJson("/api/planner/v2/history?limit=15")).runs || [];
+    if (!runs.length) { el.innerHTML = ""; return; }
+    const rows = runs.map((r) => {
+      const when = r.ran_at ? new Date(r.ran_at.replace(" ", "T")).toLocaleString("cs-CZ") : "";
+      return `<tr><td>${when}</td><td>t${r.start_week}${r.length > 1 ? "–" + (r.start_week + r.length - 1) : ""}</td>
+        <td>${r.v1_planned}</td><td>${r.v2_planned}</td><td>${r.v2_deferred}</td>
+        <td>${r.v2_avg_load} %</td><td>${_fmtHM(r.v2_avg_work_min)}</td><td>${r.v2_travel_km} km</td>
+        <td>${r.v2_overloaded}</td></tr>`;
+    }).join("");
+    el.innerHTML = `<div class="td-sec" style="margin-top:14px">A/B historie <span class="hint">sbíraná reálná čísla — sleduj trend</span></div>
+      <div class="feas-wrap"><table class="feas-table"><thead><tr>
+        <th>Kdy</th><th>Týden</th><th>v1</th><th>v2</th><th>Odloženo</th><th>Využití</th><th>Práce/den</th><th>Přejezdy</th><th>Přepl.</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>`;
+  } catch (_) { el.innerHTML = ""; }
+}
 
 on("refday-rebuild", "click", async () => {
   setResult("refday-out", "", "");

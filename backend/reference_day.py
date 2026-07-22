@@ -46,12 +46,31 @@ def _fallback_work_minutes() -> float:
     return 480.0
 
 
+_DEFAULT_TARGET_HOURS = 7.0     # target productive hours/day the plan pulls up to
+
+
+def target_work_minutes() -> float:
+    """Target productive minutes/day the reference day aims for — a company goal
+    (ambitious standard), not what history currently shows. Config-overridable."""
+    try:
+        v = settings.get("planner", "target_work_hours")
+        if v not in (None, ""):
+            return max(0.0, float(v)) * 60.0
+    except (TypeError, ValueError, Exception):  # noqa: BLE001
+        pass
+    return _DEFAULT_TARGET_HOURS * 60.0
+
+
 def productive_minutes(role: str = "TECHNIK") -> tuple[float, bool]:
-    """Learned ambitious productive minutes for a day; (minutes, learned?)."""
+    """Ambitious productive minutes for a day: the LEARNED collective standard,
+    but never below the company target (default ~7 h). The plan should pull the
+    team UP to the target, not freeze today's shorter days. (minutes, learned?)."""
     rec = capacity.recommended(role)
-    if rec.get("found") and rec.get("productiveMinutes"):
-        return float(rec["productiveMinutes"]), True
-    return _fallback_work_minutes(), False
+    learned = float(rec["productiveMinutes"]) if (rec.get("found") and rec.get("productiveMinutes")) else _fallback_work_minutes()
+    target = target_work_minutes()
+    # take the higher of learned vs target — history says what's possible, the
+    # target says where we want the team to get to.
+    return round(max(learned, target), 1), bool(rec.get("found"))
 
 
 def budget_minutes(role: str = "TECHNIK") -> float:
@@ -100,6 +119,9 @@ def calibration(role: str = "TECHNIK") -> dict:
     numbers come from (learned vs config)."""
     prod, learned = productive_minutes(role)
     res = reserve_minutes()
+    rec = capacity.recommended(role)
+    learned_min = float(rec["productiveMinutes"]) if (rec.get("found") and rec.get("productiveMinutes")) else None
+    target_min = target_work_minutes()
     du = duration.overview()
     tr = transition_model.overview()
     tr_ready = any(b.get("n") for b in tr.get("byBand", []))
@@ -109,9 +131,12 @@ def calibration(role: str = "TECHNIK") -> dict:
         "budget": {
             "productiveMinutes": round(prod, 1),
             "productiveLearned": learned,
+            "learnedMinutes": learned_min,
+            "targetMinutes": target_min,
+            "targetPulledUp": bool(learned_min is not None and target_min > learned_min),
             "reserveMinutes": res,
             "grossBudgetMinutes": round(prod - res, 1),
-            "note": "rozpočet = naučené produktivní minuty − rezerva − on-top (per den)",
+            "note": "rozpočet = cíl(vyšší z učeného/cílového) − rezerva − on-top (per den)",
         },
         "stopCost": {
             "durationModelP50": nat_dur,

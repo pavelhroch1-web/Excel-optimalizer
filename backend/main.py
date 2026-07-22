@@ -1484,6 +1484,10 @@ if LOCAL_MODE:
         return _pv2.simulate(body.start_week, body.length, body.mode,
                              body.visits_per_tech_week)
 
+    @app.get("/api/planner/v2/history", dependencies=[Depends(require_auth)])
+    def planner_v2_history(limit: int = 50):
+        return {"runs": _pv2.ab_history(limit)}
+
     # Planner Phase 2: micro-clustering of nearby POS.
     import clustering as _clustering  # noqa: E402
 

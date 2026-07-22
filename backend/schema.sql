@@ -739,6 +739,27 @@ CREATE TABLE IF NOT EXISTS transition_model (
     PRIMARY KEY (level, ckey)
 );
 
+-- A/B log: every v2 simulate run's quality metrics next to v1, so real numbers
+-- accumulate over time and the architecture can be judged on a trend, not a
+-- one-shot. Append-only; the v2 plan itself is not stored (recomputable).
+CREATE TABLE IF NOT EXISTS ab_runs (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    ran_at            TEXT NOT NULL DEFAULT (datetime('now')),
+    start_week        INTEGER,
+    length            INTEGER,
+    mode              TEXT,
+    budget_min        REAL,
+    v1_planned        INTEGER,
+    v2_planned        INTEGER,
+    v2_deferred       INTEGER,
+    v2_days           INTEGER,
+    v2_overloaded     INTEGER,
+    v2_avg_load       REAL,
+    v2_avg_visits_day REAL,
+    v2_travel_km      REAL,
+    v2_avg_work_min   REAL
+);
+
 -- Segment definitions (planner [S] Coverage & Campaign). A segment is any
 -- combination of predicates over pos_master attributes (terminal type, partner,
 -- region, chain, category, GEO, PPT, custom flags…). Fully configurable from the
