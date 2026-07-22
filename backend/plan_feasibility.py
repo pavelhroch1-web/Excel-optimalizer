@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import db
 import duration
+import transition_model
 import travel_model
 from desktop_client.engines.core_logic import distance_km
 
@@ -58,17 +59,23 @@ def _nn_order(points: list[tuple[float, float]]) -> list[int]:
 
 
 def _day_travel_minutes(points: list[tuple[float, float]]) -> float:
-    """Estimated road driving minutes for a day's stops. Orders them
-    nearest-neighbour (start point unknown, same as the engine's day view),
-    turns each leg's straight-line km into realistic road minutes via
-    travel_model. Points at (0,0) — no GPS — contribute no leg."""
+    """Estimated real transition minutes for a day's stops (drive + parking +
+    walking + overhead). Orders them nearest-neighbour (start point unknown, same
+    as the engine's day view). Each leg's minutes come from the LEARNED transition
+    model (national distance-band curve), which on real data is 1.4–6× higher than
+    the old constant crow-flight model — so the day load reflects reality. Falls
+    back to the constant model inside predict() when a band has no history yet.
+    Points at (0,0) — no GPS — contribute no leg."""
     pts = [p for p in points if not (p[0] == 0 and p[1] == 0)]
     if len(pts) < 2:
         return 0.0
     order = _nn_order(pts)
-    legs = [distance_km(pts[order[i]][0], pts[order[i]][1], pts[order[i + 1]][0], pts[order[i + 1]][1])
-            for i in range(len(order) - 1)]
-    return travel_model.minutes_for_legs(legs)
+    total = 0.0
+    for i in range(len(order) - 1):
+        a, b = pts[order[i]], pts[order[i + 1]]
+        km = distance_km(a[0], a[1], b[0], b[1])
+        total += transition_model.predict(km).get("minutes") or 0.0
+    return round(total, 1)
 
 
 def _duration_cache():

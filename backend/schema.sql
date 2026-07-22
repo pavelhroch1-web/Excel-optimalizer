@@ -721,6 +721,24 @@ CREATE TABLE IF NOT EXISTS duration_model (
     PRIMARY KEY (level, ckey)
 );
 
+-- Learned TRANSITION model: real cost of moving between two consecutive stops
+-- (drive + parking + walking + normal overhead), learned from SalesApp history.
+-- OBJECTIVE predictors only (distance band x environment urban/rural x region) -
+-- deliberately NOT daypart or technician, so the model captures the real physical
+-- cost of a move, not fatigue / individual habits. Target is an ambitious-but-
+-- achievable quantile (pulls technicians up, does not copy current behaviour).
+-- Pluggable: adding a predictor = a new level here, the planner interface is
+-- unchanged. Recomputable cache, rebuilt from history.
+CREATE TABLE IF NOT EXISTS transition_model (
+    level      INTEGER NOT NULL,     -- 0 national km-band .. 2 +region
+    ckey       TEXT NOT NULL,        -- 'kmband|env|region' (trailing dims dropped)
+    n          INTEGER NOT NULL,
+    minutes    REAL,                 -- ambitious-but-achievable transition minutes
+    p50        REAL,                 -- median (reference / audit)
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (level, ckey)
+);
+
 -- Segment definitions (planner [S] Coverage & Campaign). A segment is any
 -- combination of predicates over pos_master attributes (terminal type, partner,
 -- region, chain, category, GEO, PPT, custom flags…). Fully configurable from the

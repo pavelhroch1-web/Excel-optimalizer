@@ -574,6 +574,11 @@ def import_workbook(path: str, filename: str | None = None) -> dict:
         capacity.rebuild()  # refresh the learned daily-capacity standard
     except Exception:  # noqa: BLE001
         pass
+    try:
+        import transition_model
+        transition_model.rebuild()  # refresh the learned transition (move-cost) model
+    except Exception:  # noqa: BLE001
+        pass
     return result
 
 

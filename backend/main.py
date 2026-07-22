@@ -1445,6 +1445,22 @@ if LOCAL_MODE:
     def duration_pos(pos_id: str):
         return _duration.predict(pos_id)
 
+    # Planner: learned TRANSITION model (real cost of moving between two stops,
+    # objective predictors only, ambitious-but-achievable). Replaces the constant
+    # crow-flight travel model in the day-time budget.
+    import transition_model as _transition  # noqa: E402
+
+    @app.get("/api/planner/transition/overview", dependencies=[Depends(require_auth)])
+    def transition_overview():
+        ov = _transition.overview()
+        if not any(b.get("n") for b in ov.get("byBand", [])):
+            _transition.rebuild(); ov = _transition.overview()
+        return ov
+
+    @app.post("/api/planner/transition/rebuild", dependencies=[Depends(require_auth)])
+    def transition_rebuild():
+        return _transition.rebuild()
+
     # Planner Phase 2: micro-clustering of nearby POS.
     import clustering as _clustering  # noqa: E402
 
