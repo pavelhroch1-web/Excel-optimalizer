@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import db
 import duration
+import reference_day
 import transition_model
 import travel_model
 from desktop_client.engines.core_logic import distance_km
@@ -114,8 +115,10 @@ def feasibility(week_from: int | None = None, week_to: int | None = None) -> dic
         "FROM draft_plans dp LEFT JOIN pos_master p ON p.pos_id = dp.pos_id "
         f"WHERE {' AND '.join(where)} ORDER BY dp.technician, dp.week, dp.day", tuple(params))
 
-    work_hours = _work_hours_per_day()
-    avail_min = work_hours * 60.0
+    # Reference-day budget: learned productive minutes − reserve (technician-
+    # agnostic national standard), then per-day minus the day's on-top task time.
+    base_avail = reference_day.budget_minutes("TECHNIK")
+    ontop_tw = reference_day.ontop_by_tech_week(week_from, week_to)
     on_pos_minutes = _duration_cache()
 
     # bucket rows by (tech, week, day)
@@ -129,14 +132,22 @@ def feasibility(week_from: int | None = None, week_to: int | None = None) -> dic
         d["onPosMin"] += on_pos_minutes(r["cat"], r["market"], r["tech"])
         d["_pts"].append((r["gx"] or 0, r["gy"] or 0))
 
+    # days per (tech, week) so on-top time spreads evenly over the worked days
+    days_per_tw: dict[tuple, int] = {}
+    for (tech, wk, _day) in days:
+        days_per_tw[(tech, wk)] = days_per_tw.get((tech, wk), 0) + 1
+
     day_list = []
-    for d in days.values():
+    for (tech, wk, _day), d in days.items():
         travel = _day_travel_minutes(d.pop("_pts"))
         total = round(d["onPosMin"] + travel, 1)
+        ontop = round(ontop_tw.get((tech, wk), 0.0) / max(days_per_tw.get((tech, wk), 1), 1), 1)
+        avail_min = max(base_avail - ontop, 1.0)
         ratio = round(total / avail_min, 3) if avail_min else None
         d["onPosMin"] = round(d["onPosMin"], 1)
         d["travelMin"] = round(travel, 1)
         d["totalMin"] = total
+        d["onTopMin"] = ontop
         d["availMin"] = round(avail_min, 1)
         d["loadPct"] = round(100 * ratio, 1) if ratio is not None else None
         d["status"] = ("přeplněný" if ratio and ratio > _OVER_RATIO
@@ -155,20 +166,23 @@ def feasibility(week_from: int | None = None, week_to: int | None = None) -> dic
         w["onPosMin"] += d["onPosMin"]
         w["travelMin"] += d["travelMin"]
         w["totalMin"] += d["totalMin"]
+        w["onTopMin"] = w.get("onTopMin", 0.0) + d.get("onTopMin", 0.0)
         if d["status"] == "přeplněný":
             w["overloadedDays"] += 1
     week_list = []
     for w in weeks.values():
-        avail = w["days"] * avail_min
-        for k in ("onPosMin", "travelMin", "totalMin"):
-            w[k] = round(w[k], 1)
+        avail = w["days"] * base_avail - w.get("onTopMin", 0.0)
+        for k in ("onPosMin", "travelMin", "totalMin", "onTopMin"):
+            w[k] = round(w.get(k, 0.0), 1)
         w["availMin"] = round(avail, 1)
         w["loadPct"] = round(100 * w["totalMin"] / avail, 1) if avail else None
         week_list.append(w)
 
     dur_ov = duration.overview()
+    cal = reference_day.calibration("TECHNIK")
     return {
-        "workHoursPerDay": work_hours,
+        "referenceDay": cal,
+        "budgetMinutesPerDay": base_avail,
         "durationModelReady": bool(dur_ov.get("national")),
         "days": sorted(day_list, key=lambda x: (x["technician"], x["week"], str(x["day"]))),
         "weeks": sorted(week_list, key=lambda x: (x["technician"], x["week"])),
@@ -176,6 +190,7 @@ def feasibility(week_from: int | None = None, week_to: int | None = None) -> dic
         "tightDays": sum(1 for d in day_list if d["status"] == "napjatý"),
         "totalDays": len(day_list),
         "note": ("Časová proveditelnost je poradní: engine plánuje na počet návštěv, "
-                 "tato vrstva ukazuje reálný čas (doba návštěvy + silniční přejezd) "
-                 "vs. dostupné hodiny. Nemění plán."),
+                 "tato vrstva ukazuje reálný čas (naučená doba návštěvy + naučený reálný "
+                 "přejezd) vs. rozpočet referenčního dne (učené produktivní minuty − "
+                 "rezerva − on-top). Nemění plán."),
     }

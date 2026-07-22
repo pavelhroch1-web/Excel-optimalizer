@@ -832,7 +832,26 @@ async function loadPlanFeasibility() {
       out.innerHTML = `<p class="pd-sub">Zatím není vygenerovaný návrh. Vygeneruj TourPlan a načti znovu.</p>`;
       if (sum) sum.textContent = ""; return;
     }
-    if (sum) sum.textContent = `${d.totalDays} dní · ${d.overloadedDays} přeplněných · ${d.tightDays} napjatých · dostupné ${d.workHoursPerDay} h/den`;
+    if (sum) sum.textContent = `${d.totalDays} dní · ${d.overloadedDays} přeplněných · ${d.tightDays} napjatých · rozpočet ${_fmtHM(d.budgetMinutesPerDay)}/den`;
+    const cal = d.referenceDay || null;
+    const refHtml = cal ? (() => {
+      const b = cal.budget || {}, s = cal.stopCost || {};
+      const chip = (ok) => ok ? `<span class="rd-chip ok">naučeno</span>` : `<span class="rd-chip">chybí</span>`;
+      return `<div class="rd-card">
+        <div class="rd-title">Referenční den ČR <span class="hint">kolektivní standard, ne jednotlivec</span></div>
+        <div class="rd-formula">
+          <span class="rd-term"><b>${_fmtHM(b.productiveMinutes)}</b><span>produktivní ${b.productiveLearned ? "(učené)" : "(fallback)"}</span></span>
+          <span class="rd-op">−</span>
+          <span class="rd-term"><b>${_fmtHM(b.reserveMinutes)}</b><span>rezerva</span></span>
+          <span class="rd-op">−</span>
+          <span class="rd-term"><b>on-top</b><span>úkoly (config, per den)</span></span>
+          <span class="rd-op">=</span>
+          <span class="rd-term rd-eq"><b>${_fmtHM(b.grossBudgetMinutes)}</b><span>rozpočet dne</span></span>
+        </div>
+        <div class="rd-stop">Cena zastávky = doba návštěvy ${chip(s.durationLearned)} + reálný přejezd ${chip(s.transitionReady)}
+          <span class="hint">(ambiciózní kvantil ${s.transitionTargetQuantile ?? "—"})</span></div>
+      </div>`;
+    })() : "";
     const bar = (pct) => {
       const w = Math.max(0, Math.min(100, pct || 0));
       const tone = pct > 100 ? "bad" : (pct >= 85 ? "warn" : "ok");
@@ -849,7 +868,7 @@ async function loadPlanFeasibility() {
         <td>t${x.week} ${esc(x.day)}</td><td>${x.visits}</td><td>${_fmtHM(x.onPosMin)}</td>
         <td>${_fmtHM(x.travelMin)}</td><td>${_fmtHM(x.totalMin)}</td><td>${bar(x.loadPct)} ${x.loadPct ?? "—"} %</td>
         <td>${esc(x.status)}</td></tr>`).join("");
-    out.innerHTML =
+    out.innerHTML = refHtml +
       `<div class="td-sec">Zátěž po týdnech (technik)</div>
        <div class="feas-wrap"><table class="feas-table"><thead><tr>
          <th>Technik</th><th>Týden</th><th>Návštěv</th><th>Dní</th><th>Čas</th><th>Vytížení</th><th>Přepl. dní</th>
@@ -5867,6 +5886,61 @@ async function loadCampaigns() {
 }
 
 // ============ Capacity standard (learned) ============
+// Reference day = budget composition (learned productive − reserve − on-top) +
+// the learned transition curve vs the old constant model. All read-only.
+async function loadReferenceDay() {
+  const rd = document.getElementById("refday-out");
+  const tr = document.getElementById("transition-out");
+  if (!rd) return;
+  rd.innerHTML = skeleton({ rows: 2 });
+  try {
+    const [cal, tov] = await Promise.all([
+      apiJson("/api/planner/reference-day"),
+      apiJson("/api/planner/transition/overview"),
+    ]);
+    const b = cal.budget || {}, s = cal.stopCost || {};
+    const chip = (ok) => ok ? `<span class="rd-chip ok">naučeno</span>` : `<span class="rd-chip">chybí</span>`;
+    rd.innerHTML = `<div class="rd-card">
+      <div class="rd-formula">
+        <span class="rd-term"><b>${_fmtHM(b.productiveMinutes)}</b><span>produktivní ${b.productiveLearned ? "(učené)" : "(fallback)"}</span></span>
+        <span class="rd-op">−</span>
+        <span class="rd-term"><b>${_fmtHM(b.reserveMinutes)}</b><span>rezerva</span></span>
+        <span class="rd-op">−</span>
+        <span class="rd-term"><b>on-top</b><span>úkoly (config)</span></span>
+        <span class="rd-op">=</span>
+        <span class="rd-term rd-eq"><b>${_fmtHM(b.grossBudgetMinutes)}</b><span>rozpočet dne</span></span>
+      </div>
+      <div class="rd-stop">Cena zastávky = doba návštěvy ${chip(s.durationLearned)} + reálný přejezd ${chip(s.transitionReady)}
+        <span class="hint">(ambiciózní kvantil ${s.transitionTargetQuantile ?? "—"} · ${esc(cal.learnedFrom || "")})</span></div>
+    </div>`;
+    const rows = (tov.byBand || []).map((x) => {
+      const mult = x.ambitious && x.constantModel ? (x.ambitious / x.constantModel) : null;
+      return `<tr><td>${esc(x.band)}</td><td>${x.n}</td>
+        <td><b>${x.ambitious ?? "—"}</b></td><td>${x.median ?? "—"}</td><td>${x.constantModel}</td>
+        <td>${mult ? "×" + mult.toFixed(1) : "—"}</td></tr>`;
+    }).join("");
+    if (tr) tr.innerHTML = `<div class="td-sec" style="margin-top:14px">Naučený přejezd vs. starý konstantní model (min)</div>
+      <div class="feas-wrap"><table class="feas-table"><thead><tr>
+        <th>Vzdálenost</th><th>Legů</th><th>Ambiciózní</th><th>Medián</th><th>Konstanta</th><th>Podhodnocení</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="hint" style="margin-top:8px">„Ambiciózní" plánuje planner (kvantil ${tov.targetQuantile}); „medián" je současná realita; sloupec vpravo ukazuje, kolikrát starý konstantní model realitu podhodnocoval.</p>`;
+  } catch (e) {
+    rd.innerHTML = `<p class="result err">${esc(e.message)}</p>`;
+  }
+}
+on("refday-rebuild", "click", async () => {
+  setResult("refday-out", "", "");
+  const btn = document.getElementById("refday-rebuild");
+  if (btn) btn.disabled = true;
+  try {
+    await apiJson("/api/planner/transition/rebuild", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    await apiJson("/api/planner/capacity/rebuild", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    await loadReferenceDay();
+    if (typeof toast === "function") toast("Modely přepočítány z historie", "ok");
+  } catch (e) { if (typeof toast === "function") toast("Přepočet selhal: " + e.message, "err"); }
+  finally { if (btn) btn.disabled = false; }
+});
+
 async function loadCapacity() {
   const host = document.getElementById("capacity-out");
   if (!host) return;
@@ -6084,6 +6158,7 @@ function showView(name) {
     if (name === "analytics" && typeof loadRactTechnicians === "function") loadRactTechnicians();
     if (name === "analytics" && typeof initTechGraphs === "function") initTechGraphs();
     if (name === "analytics" && typeof loadCapacity === "function") loadCapacity();
+    if (name === "analytics" && typeof loadReferenceDay === "function") loadReferenceDay();
     if (name === "analytics" && typeof loadTeamDashboard === "function"
         && !document.getElementById("team-tiles").innerHTML) loadTeamDashboard();
     if (name === "analytics" && typeof initTechScore === "function"

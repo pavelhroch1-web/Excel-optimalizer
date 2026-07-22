@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=100">
+<link rel="stylesheet" href="styles.css?v=101">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -700,6 +700,15 @@
         <div id="capacity-out"></div>
       </section>
 
+      <!-- REFERENCE DAY + TRANSITION MODEL -->
+      <section class="card">
+        <h2>Referenční den ČR <span class="badge">rozpočet dne · reálné přejezdy</span></h2>
+        <p class="hint">Z čeho se skládá reálně zvládnutelný den — vše učené z celé historie ČR (kolektivní standard, ne jednotlivec). Rozpočet dne = produktivní minuty − rezerva − on-top; cena zastávky = délka návštěvy + skutečný přejezd. Naučený přejezd zahrnuje i parkování, docházku a režii — proto je výrazně vyšší než starý konstantní odhad jízdy.</p>
+        <div class="row" style="margin-bottom:8px"><button id="refday-rebuild" class="ghost">Přepočítat modely</button></div>
+        <div id="refday-out"></div>
+        <div id="transition-out"></div>
+      </section>
+
       <!-- TECHNICIAN SCORE (full roster) -->
       <section class="card">
         <h2>Technician Score <span class="badge">celý tým · důvody nízkého skóre</span></h2>
@@ -913,6 +922,6 @@
   </div>
 </div>
 
-<script src="app.js?v=105"></script>
+<script src="app.js?v=106"></script>
 </body>
 </html>

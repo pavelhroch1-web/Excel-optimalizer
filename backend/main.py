@@ -1461,6 +1461,14 @@ if LOCAL_MODE:
     def transition_rebuild():
         return _transition.rebuild()
 
+    # The assembled REFERENCE DAY (budget = learned productive − reserve − on-top;
+    # stop cost = learned duration + learned transition). One payload for the UI.
+    import reference_day as _refday  # noqa: E402
+
+    @app.get("/api/planner/reference-day", dependencies=[Depends(require_auth)])
+    def reference_day_overview(role: str = "TECHNIK"):
+        return _refday.calibration(role)
+
     # Planner Phase 2: micro-clustering of nearby POS.
     import clustering as _clustering  # noqa: E402
 

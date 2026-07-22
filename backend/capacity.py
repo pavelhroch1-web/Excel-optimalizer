@@ -53,7 +53,11 @@ def _day_productive(rows):
             legs.append(distance_km(prev[0], prev[1], lat, lon))
         if lat is not None and lon is not None:
             prev = (lat, lon)
-    drive = travel_model.minutes_for_legs(legs)
+    # Drive time via the LEARNED transition model, so the learned day envelope and
+    # the feasibility day load are measured with the same move-cost model (falls
+    # back to the constant model inside predict() when a band has no history).
+    import transition_model
+    drive = sum(transition_model.predict(km).get("minutes") or 0.0 for km in legs)
     return onpos + drive, len(stops)
 
 

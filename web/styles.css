@@ -1551,3 +1551,21 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .an-modes { display: flex; gap: 8px; margin: 0 0 16px; }
 .an-mode { padding: 9px 18px; border: 1px solid var(--line, #d9dee6); background: var(--card, #fff); border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; color: var(--muted, #6b7480); }
 .an-mode.on { background: var(--accent, #128a6f); border-color: var(--accent, #128a6f); color: #fff; }
+
+/* Reference day — budget composition */
+.rd-card { border: 1px solid var(--line, #e2e6ec); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; background: var(--card-2, #f8fafb); }
+.rd-title { font-weight: 700; margin-bottom: 10px; }
+.rd-formula { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.rd-term { display: flex; flex-direction: column; align-items: center; padding: 8px 12px; border-radius: 10px; background: var(--card, #fff); border: 1px solid var(--line, #e2e6ec); min-width: 92px; }
+.rd-term b { font-size: 18px; }
+.rd-term span { font-size: 11px; color: var(--muted, #6b7480); margin-top: 2px; }
+.rd-term.rd-eq { background: var(--accent, #128a6f); border-color: var(--accent, #128a6f); }
+.rd-term.rd-eq b, .rd-term.rd-eq span { color: #fff; }
+.rd-op { font-size: 20px; font-weight: 700; color: var(--muted, #9aa4b2); }
+.rd-stop { margin-top: 12px; font-size: 13px; }
+.rd-chip { display: inline-block; padding: 1px 7px; border-radius: 20px; font-size: 11px; background: #eceff3; color: #6b7480; }
+.rd-chip.ok { background: #d8f0e6; color: #0f7a5c; }
+@media (prefers-color-scheme: dark) {
+  .rd-card { background: rgba(255,255,255,0.03); }
+  .rd-chip { background: rgba(255,255,255,0.08); color: #9aa4b2; }
+}
