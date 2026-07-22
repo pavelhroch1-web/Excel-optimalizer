@@ -576,6 +576,20 @@
         </div>
       </section>
 
+      <!-- v2 ENGINE A/B -->
+      <section class="card">
+        <h2>v2 engine — A/B porovnání <span class="badge">beta · feasibility-by-construction</span></h2>
+        <p class="hint">Nový plánovač staví den v minutách: reálný čas (naučená délka návštěvy + naučený přejezd) nikdy nepřekročí rozpočet referenčního dne a nemíchá regiony v jednom dni — proto z principu nevznikne neproveditelný den. Používá stejnou prioritu POS jako současný engine, mění jen stavbu dne. Běží <strong>vedle</strong> současného řešení, nic nepřepisuje. (Výpočet ~40 s.)</p>
+        <form id="v2-form" class="row">
+          <label>Týden<input type="number" id="v2-week" min="1" max="53" value="30"></label>
+          <label>Horizont<input type="number" id="v2-length" min="1" max="8" value="1"></label>
+          <label>Návštěv/technik/týden<input type="number" id="v2-visits" min="1" value="40"></label>
+          <button type="submit" id="v2-run" class="primary">Spustit A/B</button>
+        </form>
+        <p id="v2-result" class="result"></p>
+        <div id="v2-out"></div>
+      </section>
+
       <!-- CLOUD GENERATE (legacy option) -->
       <section class="card brain-card">
         <h2>Vygenerovat plán v cloudu <span class="badge">GitHub výpočet</span></h2>
@@ -922,6 +936,6 @@
   </div>
 </div>
 
-<script src="app.js?v=106"></script>
+<script src="app.js?v=107"></script>
 </body>
 </html>

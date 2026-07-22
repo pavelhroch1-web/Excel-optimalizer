@@ -1469,6 +1469,21 @@ if LOCAL_MODE:
     def reference_day_overview(role: str = "TECHNIK"):
         return _refday.calibration(role)
 
+    # Planner v2 (parallel, feasibility-by-construction) — runs beside v1 for A/B.
+    # Read-only: builds a v2 plan in memory and compares, never touches the draft.
+    import planner_v2 as _pv2  # noqa: E402
+
+    class V2Request(BaseModel):
+        start_week: int
+        length: int = 1
+        mode: str = "vyvazeny"
+        visits_per_tech_week: float | None = None
+
+    @app.post("/api/planner/v2/simulate", dependencies=[Depends(require_auth)])
+    def planner_v2_simulate(body: V2Request):
+        return _pv2.simulate(body.start_week, body.length, body.mode,
+                             body.visits_per_tech_week)
+
     # Planner Phase 2: micro-clustering of nearby POS.
     import clustering as _clustering  # noqa: E402
 

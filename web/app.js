@@ -5928,6 +5928,45 @@ async function loadReferenceDay() {
     rd.innerHTML = `<p class="result err">${esc(e.message)}</p>`;
   }
 }
+on("v2-form", "submit", async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById("v2-run");
+  btn.disabled = true;
+  setResult("v2-result", "Běží A/B — engine skóruje síť a v2 staví dny v minutách… (~40 s)", "");
+  document.getElementById("v2-out").innerHTML = "";
+  try {
+    const body = {
+      start_week: parseInt(document.getElementById("v2-week").value, 10),
+      length: parseInt(document.getElementById("v2-length").value, 10) || 1,
+      mode: "vyvazeny",
+      visits_per_tech_week: parseFloat(document.getElementById("v2-visits").value) || null,
+    };
+    const d = await postJson("/api/planner/v2/simulate", body);
+    setResult("v2-result", "", "ok");
+    const v1 = d.v1 || {}, v2 = d.v2 || {};
+    document.getElementById("v2-out").innerHTML =
+      `<div class="pl-tiles">` +
+      tile("v1 · naplánováno", v1.planned ?? "—", "dnešní engine (počet POS)") +
+      tile("v2 · naplánováno", v2.planned ?? "—", "minuty + geografie") +
+      tile("v2 · přeplněných dní", v2.overloadedDays ?? "—", "má být 0", (v2.overloadedDays === 0 ? "good" : "bad")) +
+      tile("v2 · odloženo", v2.deferred ?? "—", "nevešlo do rozpočtu/regionu") +
+      tile("rozpočet dne", _fmtHM(d.budgetMinutesPerDay), "referenční den") +
+      `</div>` +
+      `<p class="hint">${esc(d.note || "")}</p>` +
+      (() => {
+        const days = (d.days || []).slice().sort((a, b) => (b.loadPct || 0) - (a.loadPct || 0)).slice(0, 12);
+        if (!days.length) return "";
+        const rows = days.map((x) => `<tr><td>${esc(x.technician)}</td><td>t${x.week} ${esc(x.day)}</td>
+          <td>${x.visits}</td><td>${_fmtHM(x.minutes)}</td><td>${x.loadPct} %</td></tr>`).join("");
+        return `<div class="td-sec" style="margin-top:12px">v2 — nejzatíženější dny (žádný nepřekročí rozpočet)</div>
+          <div class="feas-wrap"><table class="feas-table"><thead><tr>
+            <th>Technik</th><th>Den</th><th>POS</th><th>Čas</th><th>Vytížení</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      })();
+  } catch (err) {
+    setResult("v2-result", "A/B selhalo: " + err.message, "err");
+  } finally { btn.disabled = false; }
+});
+
 on("refday-rebuild", "click", async () => {
   setResult("refday-out", "", "");
   const btn = document.getElementById("refday-rebuild");
@@ -6200,6 +6239,7 @@ const _PS_MAP = [
   ["Plánovací simulace", "pokrocile"],
   ["Co kdyby", "pokrocile"],
   ["Generovat TourPlan", "pokrocile"],
+  ["v2 engine", "pokrocile"],
   ["plán v cloudu", "pokrocile"],
   ["Kandidáti POS", "review"],
   ["Coverage podle segment", "review"],
