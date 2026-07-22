@@ -117,6 +117,30 @@ def fields_meta() -> dict:
     return {"fields": out, "operators": ["eq", "ne", "in", "not_in", "gte", "lte", "between", "contains"]}
 
 
+def segment_weight_map() -> dict:
+    """POS → its business-priority factor from the highest-priority matching
+    segment (priority 1 = highest; tie → higher business_weight). Default factor
+    is 1.0 (no segment). Used by planner v2 to make segment strategy actually
+    drive the plan ranking — a segment such as {category=1GECO, weight=1.5} lifts
+    those POS 50% in v2's priority order. v1 is untouched."""
+    segs = definitions(active_only=True)
+    segs.sort(key=lambda s: ((s.get("priority") if s.get("priority") is not None else 3),
+                             -(s.get("business_weight") or 1.0)))
+    out: dict = {}
+    if not segs:
+        return out
+    for r in db.get("SELECT * FROM pos_master"):
+        pos = dict(r)
+        for s in segs:
+            if _match(pos, s["rule"]):
+                out[str(pos["pos_id"])] = {
+                    "weight": float(s.get("business_weight") or 1.0),
+                    "segment": s.get("name"), "priority": s.get("priority"),
+                }
+                break
+    return out
+
+
 # ------------------------------------------------------------------ defaults
 def seed_defaults() -> dict:
     """If no segments exist, create sensible data-derived ones. Starting points

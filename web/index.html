@@ -832,6 +832,13 @@
           <div id="cadence-out"></div>
         </section>
 
+        <section class="card">
+          <h2>Priority segmentů <span class="badge">řídí pořadí ve v2 · vč. per-kategorie</span></h2>
+          <p class="hint">Segment = libovolná skupina POS (typ terminálu, partner, kategorie…) s vlastní <strong>prioritou</strong> a <strong>business váhou</strong>. Váha násobí prioritu POS při řazení v <strong>plánovači v2</strong> (např. váha 1,5 = o 50 % výš). Segment může být i jedna kategorie — tak nastavíš prioritu konkrétní kategorie. Vypnutý segment neovlivňuje.</p>
+          <div class="row" style="margin-bottom:8px"><button id="seg-seed" class="ghost">Vytvořit výchozí segmenty</button></div>
+          <div id="segments-out"></div>
+        </section>
+
         <section class="card" id="model-config-card">
           <h2>Terminály, partneři, kategorie, kampaně <span class="badge">zaškrtávátka · projeví se v enginu</span></h2>
           <p class="hint">Celý plánovací model z UI, bez zásahu do kódu: které druhy terminálů, partnery a kategorie zahrnout do plánu, a Activity plán (kampaně) s prioritou a oknem. Velikost terminálu a partner jsou atributy z importu (SalesApp) – zde se jen zapínají/vypínají. Nový typ = nový řádek v importu, ne vývoj.</p>
@@ -948,6 +955,6 @@
   </div>
 </div>
 
-<script src="app.js?v=110"></script>
+<script src="app.js?v=111"></script>
 </body>
 </html>

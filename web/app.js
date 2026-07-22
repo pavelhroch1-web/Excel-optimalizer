@@ -2696,6 +2696,44 @@ async function loadCadence() {
   } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
 }
 
+// Segment priorities — now a real v2 planning driver. Compact editor: priority,
+// business weight, on/off. Editing re-POSTs the full segment (rule kept intact).
+async function loadSegments() {
+  const el = document.getElementById("segments-out");
+  if (!el) return;
+  try {
+    const segs = (await apiJson("/api/planner/segments")).segments || [];
+    if (!segs.length) { el.innerHTML = stateHTML("empty", "Zatím žádné segmenty — vytvoř výchozí."); return; }
+    el.innerHTML = `<div class="feas-wrap"><table class="feas-table"><thead><tr>
+      <th>Segment</th><th>Priorita (1=nej)</th><th>Business váha</th><th>Cíl. kadence (t.)</th><th>Aktivní</th>
+      </tr></thead><tbody>` + segs.map((s) =>
+      `<tr data-id="${s.id}">
+        <td>${esc(s.name)}</td>
+        <td><input type="number" class="seg-prio" min="1" max="5" step="1" value="${s.priority ?? 3}" style="width:64px"></td>
+        <td><input type="number" class="seg-w" min="0.1" max="5" step="0.1" value="${s.business_weight ?? 1.0}" style="width:76px"></td>
+        <td><input type="number" class="seg-cad" min="1" step="1" value="${s.target_cadence_weeks ?? ""}" style="width:76px"></td>
+        <td><label class="cfg-switch"><input type="checkbox" class="seg-act" ${s.active ? "checked" : ""}><span></span></label></td>
+      </tr>`).join("") + `</tbody></table></div>
+      <p class="hint" style="margin-top:6px">Změny se projeví při dalším běhu v2 A/B / generování.</p>`;
+    const byId = Object.fromEntries(segs.map((s) => [String(s.id), s]));
+    const save = (tr) => {
+      const s = byId[tr.dataset.id];
+      const body = { ...s, rule: s.rule,
+        priority: parseInt(tr.querySelector(".seg-prio").value, 10) || 3,
+        business_weight: parseFloat(tr.querySelector(".seg-w").value) || 1.0,
+        target_cadence_weeks: tr.querySelector(".seg-cad").value === "" ? null : parseFloat(tr.querySelector(".seg-cad").value),
+        active: tr.querySelector(".seg-act").checked };
+      return apiJson("/api/planner/segments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(() => _cfgToast());
+    };
+    el.querySelectorAll("tr[data-id]").forEach((tr) =>
+      tr.querySelectorAll("input").forEach((i) => i.addEventListener("change", () => save(tr))));
+  } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
+}
+on("seg-seed", "click", async () => {
+  try { await apiJson("/api/planner/segments/seed", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); toast("Segmenty vytvořeny", "ok"); loadSegments(); }
+  catch (e) { toast("Chyba: " + e.message, "err"); }
+});
+
 // datalist of real customer types (from the data) for the "add rule" form
 async function _loadCadenceValues() {
   const dl = document.getElementById("cad-values");
@@ -6031,6 +6069,7 @@ on("v2-form", "submit", async (e) => {
       tile("rozpočet dne", _fmtHM(d.budgetMinutesPerDay), "referenční den (cíl 7 h)") +
       `</div>` +
       `<p class="hint">${esc(d.note || "")}</p>` +
+      ((d.segments && d.segments.active) ? `<p class="hint">Prioritu řídí <strong>${d.segments.active} segmentů</strong> (${esc((d.segments.names || []).join(", "))}) — zvýhodněno ${d.segments.candidatesBoosted} kandidátů. Uprav v Nastavení → Priority segmentů.</p>` : "") +
       `<div id="v2-history"></div>` +
       (() => {
         const days = (d.days || []).slice().sort((a, b) => (b.loadPct || 0) - (a.loadPct || 0)).slice(0, 12);
@@ -6285,6 +6324,7 @@ function showView(name) {
     if (name === "settings") {
       _initCfgLevels && _initCfgLevels();
       loadCadence && loadCadence();
+      loadSegments && loadSegments();
       loadModel && loadModel();
       loadTechnicians && loadTechnicians();
       loadEngineInventory && loadEngineInventory();

@@ -113,6 +113,15 @@ def simulate(start_week: int, length: int = 1, mode: str = "vyvazeny",
     area_of = _pos_geo()
     budget = reference_day.budget_minutes("TECHNIK")
 
+    # Segment business priority — makes segment strategy (incl. per-category
+    # priority, since a segment can be one category) actually drive v2 ranking.
+    # v2-only; v1 untouched. factor 1.0 = no segment.
+    import segments
+    seg_w = segments.segment_weight_map()
+
+    def seg_factor(c):
+        return seg_w.get(str(c["pos"]), {}).get("weight", 1.0)
+
     # duration per candidate (national learned, capped at region — technician-agnostic)
     dur_cache: dict = {}
 
@@ -129,8 +138,10 @@ def simulate(start_week: int, length: int = 1, mode: str = "vyvazeny",
         if c.get("status") == _HOLDBACK:
             continue
         pools.setdefault((c["tech"], c["week"]), []).append(c)
+    # rank mandatory first, then by v1 score LIFTED by the segment business factor
     for key in pools:
-        pools[key].sort(key=lambda c: (0 if c.get("mandatoryRuleId") else 1, -(c.get("score") or 0)))
+        pools[key].sort(key=lambda c: (0 if c.get("mandatoryRuleId") else 1,
+                                       -((c.get("score") or 0) * seg_factor(c))))
         del pools[key][_POOL_CAP:]
 
     v2_planned = 0
@@ -165,9 +176,14 @@ def simulate(start_week: int, length: int = 1, mode: str = "vyvazeny",
         "totalTravelKm": total_km, "avgTravelKmPerDay": round(total_km / n_days, 1),
         "avgWorkMinutesPerDay": round(total_min / n_days, 1),
     }
+    boosted = sum(1 for c in cands if seg_factor(c) != 1.0)
+    seg_names = sorted({v.get("segment") for v in seg_w.values() if v.get("segment")})
     result = {
         "startWeek": start_week, "length": length, "mode": mode,
         "budgetMinutesPerDay": budget,
+        "segments": {"active": len(seg_names), "names": seg_names[:12],
+                     "posBoosted": len(seg_w), "candidatesBoosted": boosted,
+                     "note": "priorita segmentů (vč. per-kategorie) řídí řazení v2 — v1 nedotčen"},
         "v1": {"planned": v1_planned, "label": "v1 (počet POS, dnešní engine)"},
         "v2": dict(metrics, label="v2 (rozpočet minut + geografie, feasibility-by-construction)"),
         "note": ("v2 staví den tak, že reálný čas (naučená délka + naučený přejezd) "
