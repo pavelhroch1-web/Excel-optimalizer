@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=99">
+<link rel="stylesheet" href="styles.css?v=100">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -32,7 +32,6 @@
       <button class="side-item" data-nav="import" title="Import dat"><span class="si-ico" data-ico="upload"></span><span class="si-label">Import dat</span></button>
       <button class="side-item" data-nav="tourplan" title="TourPlan"><span class="si-ico" data-ico="route"></span><span class="si-label">TourPlan</span></button>
       <button class="side-item" data-nav="pos" title="POS"><span class="si-ico" data-ico="grid"></span><span class="si-label">POS</span></button>
-      <button class="side-item" data-nav="dashboards" title="Dashboardy"><span class="si-ico" data-ico="target"></span><span class="si-label">Dashboardy</span></button>
       <button class="side-item" data-nav="analytics" title="Analytika"><span class="si-ico" data-ico="chart"></span><span class="si-label">Analytika</span></button>
       <button class="side-item" data-nav="summary" title="Měsíční souhrn"><span class="si-ico" data-ico="chart"></span><span class="si-label">Měsíční souhrn</span></button>
       <button class="side-item" data-nav="settings" title="Nastavení"><span class="si-ico" data-ico="gear"></span><span class="si-label">Nastavení</span></button>
@@ -649,9 +648,23 @@
 
     <div class="view hidden" data-view="analytics">
       <div class="view-head">
-        <h1>Analytika práce techniků</h1>
-        <p>Kdo potřebuje pozornost, kde utíkají km a čas. Klikni na technika pro detail jeho tras, na den pro mapu s vrstvami, na POS pro historii. Vše propojené.</p>
+        <h1>Analytika</h1>
+        <p>Manažerské dashboardy sítě i detailní analýza práce techniků na jednom místě. Přepni pohled níže.</p>
       </div>
+
+      <div class="an-modes" id="an-modes">
+        <button class="an-mode on" data-mode="dash">Manažerské dashboardy</button>
+        <button class="an-mode" data-mode="tech">Práce techniků</button>
+      </div>
+
+      <!-- MODE: MANAŽERSKÉ DASHBOARDY (přesunuto ze sekce Dashboardy) -->
+      <div id="an-panel-dash" class="an-panel">
+        <div class="fbar" id="dash-tabs"></div>
+        <div id="dash-body"></div>
+      </div>
+
+      <!-- MODE: PRÁCE TECHNIKŮ -->
+      <div id="an-panel-tech" class="an-panel" style="display:none">
 
       <!-- TECHNICIAN GRAPHS OVER TIME -->
       <section class="card">
@@ -751,6 +764,7 @@
         <p id="reality-result" class="result"></p>
         <div id="reality-out"></div>
       </section>
+      </div><!-- /an-panel-tech -->
     </div>
 
     <!-- ==================== VIEW: MĚSÍČNÍ SOUHRN ==================== -->
@@ -761,16 +775,6 @@
       </div>
       <div id="sum-filters" class="sum-filters"></div>
       <div id="sum-body"><p class="pd-sub" style="padding:24px">Vyber období a filtry…</p></div>
-    </div>
-
-    <!-- ==================== VIEW: DASHBOARDY ==================== -->
-    <div class="view hidden" data-view="dashboards">
-      <div class="view-head">
-        <h1>Dashboardy</h1>
-        <p>Manažerské přehledy sítě nad živými daty z importu. Vyber dashboard; každý čte existující metriky, nic se nepočítá dvakrát.</p>
-      </div>
-      <div class="fbar" id="dash-tabs"></div>
-      <div id="dash-body"></div>
     </div>
 
     <!-- ==================== VIEW: NASTAVENÍ ==================== -->
@@ -909,6 +913,6 @@
   </div>
 </div>
 
-<script src="app.js?v=104"></script>
+<script src="app.js?v=105"></script>
 </body>
 </html>

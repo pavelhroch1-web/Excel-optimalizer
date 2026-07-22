@@ -3035,7 +3035,9 @@ async function _retroReality() {
 on("retro-form", "submit", (e) => { e.preventDefault(); _retroFulfil(); });
 on("retro-reality-btn", "click", _retroReality);
 on("retro-gps-btn", "click", () => {
+  _anMode = "tech";                 // GPS route analysis lives in the technician mode
   showView("analytics");
+  if (typeof setAnalyticsMode === "function") setAnalyticsMode("tech");
   const card = document.getElementById("route-actual-form");
   if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
 });
@@ -3925,7 +3927,7 @@ document.getElementById("op-brief") && document.getElementById("op-brief").addEv
   const refresh = e.target.closest("#brief-refresh");
   if (refresh) { loadCockpitBrief(); return; }
   const lead = e.target.closest(".brief-lead[data-nav]");
-  if (lead) { showView(lead.dataset.nav); return; }
+  if (lead) { if (lead.dataset.nav === "analytics") _anMode = "tech"; showView(lead.dataset.nav); return; }
   const roleBtn = e.target.closest(".ht-btn[data-role]");
   if (roleBtn) { loadHealth(roleBtn.dataset.role); return; }
   const diagEl = e.target.closest("[data-diagnose]");
@@ -5382,6 +5384,28 @@ const _DASH = [
   { id: "maps", label: "Mapa", load: dashMaps },
 ];
 let _dashTab = "ops";
+// Analytika = one section, two modes: manager dashboards + technician analytics.
+// (The former standalone "Dashboardy" nav item was folded in here.)
+let _anMode = "dash", _anWired = false;
+function setAnalyticsMode(mode) {
+  _anMode = mode;
+  const dash = document.getElementById("an-panel-dash");
+  const tech = document.getElementById("an-panel-tech");
+  if (dash) dash.style.display = mode === "dash" ? "" : "none";
+  if (tech) tech.style.display = mode === "tech" ? "" : "none";
+  document.querySelectorAll("#an-modes .an-mode").forEach((b) =>
+    b.classList.toggle("on", b.dataset.mode === mode));
+  if (mode === "dash" && typeof initDashboards === "function") initDashboards();
+}
+function initAnalytics() {
+  if (!_anWired) {
+    _anWired = true;
+    document.querySelectorAll("#an-modes .an-mode").forEach((b) =>
+      b.addEventListener("click", () => setAnalyticsMode(b.dataset.mode)));
+  }
+  setAnalyticsMode(_anMode);
+}
+
 function initDashboards() {
   const tabs = document.getElementById("dash-tabs");
   if (!tabs) return;
@@ -6036,6 +6060,8 @@ function _tgRender() {
 }
 
 function showView(name) {
+  // "Dashboardy" was merged into Analytika (manager-dashboards mode).
+  if (name === "dashboards") { _anMode = "dash"; name = "analytics"; }
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("hidden", v.dataset.view !== name));
   document.querySelectorAll(".side-item").forEach((b) => b.classList.toggle("active", b.dataset.nav === name));
   const tb = document.getElementById("tb-title"); if (tb) tb.textContent = _NAV_TITLES[name] || name;
@@ -6054,7 +6080,7 @@ function showView(name) {
       initViews && initViews();
       initModelMgmt && initModelMgmt();
     }
-    if (name === "dashboards" && typeof initDashboards === "function") initDashboards();
+    if (name === "analytics" && typeof initAnalytics === "function") initAnalytics();
     if (name === "analytics" && typeof loadRactTechnicians === "function") loadRactTechnicians();
     if (name === "analytics" && typeof initTechGraphs === "function") initTechGraphs();
     if (name === "analytics" && typeof loadCapacity === "function") loadCapacity();
@@ -6067,6 +6093,9 @@ function showView(name) {
     if (name === "import" && typeof initBulkTasks === "function") { initImportCenter(); initBulkTasks(); }
     if (name === "tourplan" && typeof loadStrategyModes === "function") { initPlannerStudio(); loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); loadCampaigns && loadCampaigns(); loadCoverage && loadCoverage(); }
   }
+  // apply the current Analytika mode on every entry (not just first load), so the
+  // "Dashboardy" back-compat redirect lands on the right mode.
+  if (name === "analytics" && typeof setAnalyticsMode === "function") setAnalyticsMode(_anMode);
   window.scrollTo(0, 0);
 }
 

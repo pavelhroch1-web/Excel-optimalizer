@@ -1546,3 +1546,8 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .sf-switch input[type="checkbox"] { width: 18px; height: 18px; }
 .sf-switch > span:first-child { flex: 1 1 auto; }
 .sf-switch .sf-note { flex: 1 1 100%; }
+
+/* Analytika — mode switch (manager dashboards vs technician analytics) */
+.an-modes { display: flex; gap: 8px; margin: 0 0 16px; }
+.an-mode { padding: 9px 18px; border: 1px solid var(--line, #d9dee6); background: var(--card, #fff); border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; color: var(--muted, #6b7480); }
+.an-mode.on { background: var(--accent, #128a6f); border-color: var(--accent, #128a6f); color: #fff; }
