@@ -344,6 +344,18 @@ def _generate_from_runtime(mode: str, start_week: int, length: int,
     import db_state
     import route_planner
     import runtime_state
+    # Smart Fill: if the caller didn't pass an explicit per-tech/week target,
+    # fall back to the persisted planner default so "set it once in Nastavení
+    # Planneru, generate uses it" holds for every run. GPS extra (nearby-POS
+    # top-up) + its radius are already read from config inside db_state.
+    if visits_per_tech_week is None:
+        import settings
+        pv = settings.get("planner", "visits_per_tech_week")
+        if pv:
+            try:
+                visits_per_tech_week = float(pv)
+            except (TypeError, ValueError):
+                pass
     state = runtime_state.build()
     db_state.configure(state, mode, start_week, length, visits_per_tech_week)
     cands_out: list = []

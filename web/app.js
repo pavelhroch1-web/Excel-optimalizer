@@ -609,6 +609,82 @@ document.addEventListener("submit", (e) => {
 on("download-draft-btn", "click", () =>
   downloadFile("/api/draft/download", "MANAGER_PLAN_draft.xlsx"));
 
+// ---- Smart Fill: one simple panel -> config -> auto-generate ---------------
+// Maps a few plain fields to the existing backend knobs (planner default
+// capacity, GPS-extra business rule, GPS radius setting) and runs the standard
+// generate path for all technicians at once. No new engine logic.
+let _sfLoaded = false;
+async function loadSmartFill() {
+  if (_sfLoaded) return;                       // load current config once
+  _sfLoaded = true;
+  try {
+    const [rules, eng, pl] = await Promise.all([
+      apiJson("/api/rules/business").catch(() => ({ effective: {} })),
+      apiJson("/api/settings/engine").catch(() => ({ values: {} })),
+      apiJson("/api/settings/planner").catch(() => ({ values: {} })),
+    ]);
+    const gps = (rules.effective && rules.effective.GPS_EXTRA) || {};
+    const setVal = (id, v) => { const el = document.getElementById(id); if (el != null && v != null && v !== "") el.value = v; };
+    document.getElementById("sf-gps-enabled").checked = !!gps.enabled;
+    if (gps.params && gps.params.max_extra_visits != null) setVal("sf-gps-max", gps.params.max_extra_visits);
+    setVal("sf-gps-radius", (eng.values || {}).gps_extra_radius_meters);
+    setVal("sf-visits", (pl.values || {}).visits_per_tech_week);
+  } catch (_) { /* first-run defaults from the HTML stand */ }
+}
+
+async function _sfPersist() {
+  const enabled = document.getElementById("sf-gps-enabled").checked;
+  const maxExtra = parseInt(document.getElementById("sf-gps-max").value, 10) || 0;
+  const radius = parseInt(document.getElementById("sf-gps-radius").value, 10) || 300;
+  const visits = parseFloat(document.getElementById("sf-visits").value) || null;
+  // GPS-extra top-up (enable + how many) — the business rule the engine reads
+  await apiJson("/api/rules/business/GPS_EXTRA", {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled, params: { max_extra_visits: maxExtra } }),
+  });
+  // search radius (engine constant) + default per-tech/week (planner default)
+  await postJsonPut("/api/settings/engine/gps_extra_radius_meters", { value: radius });
+  if (visits) await postJsonPut("/api/settings/planner/visits_per_tech_week", { value: visits });
+  return { enabled, maxExtra, radius, visits };
+}
+
+on("sf-save", "click", async () => {
+  setResult("sf-result", "Ukládám…", "");
+  try { const c = await _sfPersist();
+    setResult("sf-result", `Uloženo · základ ${c.visits || "—"}/týd, doplnění ${c.enabled ? "ON" : "OFF"} (max ${c.maxExtra}, ${c.radius} m).`, "ok");
+  } catch (err) { setResult("sf-result", "Nelze uložit: " + err.message, "err"); }
+});
+
+on("sf-generate", "click", async () => {
+  const btn = document.getElementById("sf-generate");
+  btn.disabled = true;
+  setResult("sf-result", "Ukládám nastavení a generuji plán pro všechny techniky…", "");
+  document.getElementById("sf-out").innerHTML = "";
+  try {
+    await _sfPersist();
+    const week = parseInt(document.getElementById("sf-week").value, 10);
+    const length = parseInt(document.getElementById("sf-length").value, 10) || 1;
+    const visits = parseFloat(document.getElementById("sf-visits").value) || null;
+    const r = await postJson("/api/planner/generate-runtime",
+      { mode: "vyvazeny", start_week: week, length, visits_per_tech_week: visits });
+    const s = (r && r.summary) || {};
+    const a = s.assessment || s;               // planned/mandatory/unserved live under assessment
+    setResult("sf-result", "", "ok");
+    document.getElementById("sf-out").innerHTML =
+      `<div class="pl-tiles">` +
+      tile("Naplánováno", a.planned ?? s.managerPlanRows ?? "—", `týden ${week}${length > 1 ? "–" + (week + length - 1) : ""}`, "good") +
+      tile("Povinné pokryto", a.mandatory ?? "—", "kadence / kampaně") +
+      tile("Mimo plán", a.unserved ?? "—", "nevešlo se") +
+      `</div><p class="hint">Plán vytvořen pro všechny techniky v jednom běhu. Kontrola limitů (čas na den vs. pracovní doba) je níže v <strong>Review → Čas &amp; vytížení</strong>.</p>`;
+    // pull the impact layers so limits are visible immediately
+    if (typeof loadPlanFeasibility === "function") loadPlanFeasibility();
+    if (typeof loadDraft === "function") loadDraft();
+    if (typeof toast === "function") toast("Plán vygenerován podle Smart Fill", "ok");
+  } catch (err) {
+    setResult("sf-result", "Generování selhalo: " + err.message, "err");
+  } finally { btn.disabled = false; }
+});
+
 // ---- 5) publish -----------------------------------------------------------
 
 on("publish-form", "submit", async (e) => {
@@ -6013,6 +6089,7 @@ const _PS_STAGES = [
 // map: substring of a section's <h2> -> stage id
 const _PS_MAP = [
   ["Vstupní data", "data"],
+  ["Smart Fill", "data"],
   ["Plánovací filtry", "pokrocile"],
   ["Strategie a pre-flight", "pokrocile"],
   ["Predikce a scénáře", "pokrocile"],
@@ -6087,7 +6164,7 @@ function setPlannerStage(id) {
     b.classList.toggle("on", on); b.setAttribute("aria-pressed", on ? "true" : "false");
   });
   // convenience: entering a stage pulls its fresh data
-  if (id === "data") _psLoadDataHealth();
+  if (id === "data") { _psLoadDataHealth(); if (typeof loadSmartFill === "function") loadSmartFill(); }
   if (id === "edits" && typeof loadDraft === "function") loadDraft();
   if (id === "publish" && typeof loadVersions === "function") { loadVersions(); loadPlannerRuns(); }
   if (id === "retro" && typeof _retroFulfil === "function"

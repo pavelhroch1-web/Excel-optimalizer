@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=98">
+<link rel="stylesheet" href="styles.css?v=99">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -220,6 +220,39 @@
           <button id="ps-goto-import" class="primary" data-nav="import">Otevřít Import Center →</button>
           <span class="hint" style="align-self:center">nahrát / aktualizovat exporty</span>
         </div>
+      </section>
+
+      <!-- SMART FILL — jednoduché nastavení chytrého plánovače -->
+      <section class="card">
+        <h2>Smart Fill — chytré naplánování <span class="badge">nastav a vygeneruj</span></h2>
+        <p class="hint">Nastav pár hodnot a Planner sám vytvoří plán pro <strong>všechny techniky v jednom běhu</strong>: naplánuje základní návštěvy a pak automaticky doplní blízké POS po cestě (jeden výjezd, minimum přejezdů navíc). Přidávání je vždy omezené stropem, takže plán nepřeteče nastavenou kapacitu.</p>
+        <div class="sf-grid">
+          <label class="sf-field">Návštěv na technika / týden
+            <input type="number" id="sf-visits" min="1" max="60" step="1" value="40">
+            <span class="sf-note">základní velikost plánu (Activity Plan)</span></label>
+          <label class="sf-field sf-switch">
+            <span>Automaticky doplnit blízké POS</span>
+            <input type="checkbox" id="sf-gps-enabled">
+            <span class="sf-note">Smart Fill po cestě zapnuto/vypnuto</span></label>
+          <label class="sf-field">Max přidaných POS / technik
+            <input type="number" id="sf-gps-max" min="0" max="30" step="1" value="5">
+            <span class="sf-note">o kolik smí Planner navýšit plán</span></label>
+          <label class="sf-field">Vzdálenost hledání (m)
+            <input type="number" id="sf-gps-radius" min="50" max="5000" step="50" value="300">
+            <span class="sf-note">jak daleko od trasy hledat blízké POS</span></label>
+          <label class="sf-field">Týden
+            <input type="number" id="sf-week" min="1" max="53" step="1" value="30">
+            <span class="sf-note">počáteční týden plánu</span></label>
+          <label class="sf-field">Horizont (týdnů)
+            <input type="number" id="sf-length" min="1" max="8" step="1" value="1">
+            <span class="sf-note">na kolik týdnů plánovat</span></label>
+        </div>
+        <div class="row" style="margin-top:14px">
+          <button id="sf-generate" class="primary">Uložit a vygenerovat plán</button>
+          <button id="sf-save" class="ghost">Jen uložit nastavení</button>
+          <span id="sf-result" class="result" style="align-self:center"></span>
+        </div>
+        <div id="sf-out"></div>
       </section>
 
       <!-- 2) PLANNING FILTERS -> now a pointer to the SQLite model configurator -->
@@ -876,6 +909,6 @@
   </div>
 </div>
 
-<script src="app.js?v=103"></script>
+<script src="app.js?v=104"></script>
 </body>
 </html>
