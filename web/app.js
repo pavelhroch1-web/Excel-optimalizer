@@ -613,6 +613,30 @@ on("download-draft-btn", "click", () =>
 // Maps a few plain fields to the existing backend knobs (planner default
 // capacity, GPS-extra business rule, GPS radius setting) and runs the standard
 // generate path for all technicians at once. No new engine logic.
+// Zero-thinking default: pre-fill every "start week" field with the first week
+// not yet covered by a plan, so normal operation is Open → Run → Done. The field
+// stays editable for the rare override.
+let _weekSuggested = false;
+async function applySuggestedWeek(force) {
+  if (_weekSuggested && !force) return;
+  _weekSuggested = true;
+  try {
+    const s = await apiJson("/api/planner/next-week");
+    const wk = s.suggestedWeek;
+    if (!wk) return;
+    ["sf-week", "v2-week", "start-week"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el && (!el.value || !el.dataset.userSet)) {
+        el.value = wk;
+        el.title = `Auto: ${s.source}` + (s.lastPlannedWeek ? ` (poslední naplánovaný t${s.lastPlannedWeek})` : "");
+        el.addEventListener("input", () => { el.dataset.userSet = "1"; }, { once: true });
+      }
+    });
+    const hint = document.getElementById("sf-week-hint");
+    if (hint) hint.textContent = `automaticky t${wk} — ${s.source}`;
+  } catch (_) { /* keep the HTML defaults */ }
+}
+
 let _sfLoaded = false;
 async function loadSmartFill() {
   if (_sfLoaded) return;                       // load current config once
@@ -6235,7 +6259,7 @@ function showView(name) {
     if (name === "pos" && typeof initPosView === "function") initPosView();
     if (name === "summary" && typeof initSummary === "function") initSummary();
     if (name === "import" && typeof initBulkTasks === "function") { initImportCenter(); initBulkTasks(); }
-    if (name === "tourplan" && typeof loadStrategyModes === "function") { initPlannerStudio(); loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); loadCampaigns && loadCampaigns(); loadCoverage && loadCoverage(); }
+    if (name === "tourplan" && typeof loadStrategyModes === "function") { initPlannerStudio(); loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); loadCampaigns && loadCampaigns(); loadCoverage && loadCoverage(); applySuggestedWeek && applySuggestedWeek(); }
   }
   // apply the current Analytika mode on every entry (not just first load), so the
   // "Dashboardy" back-compat redirect lands on the right mode.

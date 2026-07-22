@@ -270,6 +270,37 @@ def status():
     }
 
 
+@app.get("/api/planner/next-week", dependencies=[Depends(require_auth)])
+def planner_next_week():
+    """The first week not yet covered by a plan = the sensible default so the
+    operator does not have to think about where to start. Covered = published
+    weeks (immutable) or the current draft. Falls back to the current ISO week
+    when nothing is planned yet."""
+    import datetime
+    weeks: list[int] = []
+    try:
+        for rec in store.read_index():
+            weeks += [int(w) for w in rec.get("publishedWeeks", []) if w is not None]
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        r = db.get("SELECT MAX(week) m FROM draft_plans")
+        if r and r[0]["m"] is not None:
+            weeks.append(int(r[0]["m"]))
+    except Exception:  # noqa: BLE001
+        pass
+    cur = datetime.date.today().isocalendar()[1]
+    if weeks:
+        last = max(weeks)
+        nxt = last + 1
+        if nxt > 53:
+            nxt = 1
+        return {"suggestedWeek": nxt, "lastPlannedWeek": last,
+                "source": "následující nepokrytý týden", "currentWeek": cur}
+    return {"suggestedWeek": cur, "lastPlannedWeek": None,
+            "source": "aktuální týden (zatím nic naplánováno)", "currentWeek": cur}
+
+
 # --------------------------------------------------------------------------
 # 1) upload -> build Draft (resume from latest snapshot + fresh exports)
 # --------------------------------------------------------------------------
