@@ -4195,7 +4195,7 @@ function _dgKv(label, val) {
 let _td = { name: null, p: null, tab: "prehled", map: null };
 
 async function openTechDetail(name) {
-  _td = { name, p: null, tab: "prehled", map: null };
+  _td = { name, p: null, interp: null, tab: "prehled", map: null };
   const ov = document.getElementById("tech-detail-overlay");
   document.getElementById("td-title").innerHTML = `<div class="tdt-name">${esc(name)}</div><div class="tdt-sub">Načítám kompletní profil…</div>`;
   document.getElementById("td-body").innerHTML = `<p class="result" style="padding:24px">Analyzuji trasy, plán a výkon…</p>`;
@@ -4206,6 +4206,34 @@ async function openTechDetail(name) {
     renderTdHeader();
     renderTdTab(_td.tab);
   } catch (e) { document.getElementById("td-body").innerHTML = `<p class="result err" style="padding:24px">${esc(e.message)}</p>`; }
+  // Auto-interpretation (strengths / weaknesses / biggest impact) — a touch
+  // slower (peer comparison), so load it after the profile and inject on top.
+  apiJson(`/api/technician/${encodeURIComponent(name)}/interpret`).then((iv) => {
+    _td.interp = iv;
+    if (_td.tab === "prehled") {
+      const host = document.getElementById("td-interpret");
+      if (host) host.outerHTML = _tdInterpretBlock(iv);
+    }
+  }).catch(() => { /* interpretation is a bonus, never blocks the profile */ });
+}
+
+function _tdInterpretBlock(iv) {
+  if (!iv || !iv.found) return `<div id="td-interpret"></div>`;
+  const li = (arr) => arr.length
+    ? `<ul class="ti-list">${arr.map((x) => `<li>${esc(x.sentence)}</li>`).join("")}</ul>`
+    : `<p class="ti-empty">Bez výrazné odchylky.</p>`;
+  const impact = iv.biggestImpact
+    ? `<div class="ti-impact"><span class="ti-imp-ico">🎯</span> ${esc(iv.biggestImpact.sentence)}</div>` : "";
+  const improve = (iv.improvements || []).length
+    ? `<div class="ti-improve"><div class="ti-h">Co zlepšit</div><ul class="ti-list">${iv.improvements.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>` : "";
+  return `<div id="td-interpret" class="ti-wrap">
+    ${impact}
+    <div class="ti-cols">
+      <div class="ti-col good"><div class="ti-h">✅ V čem vyniká</div>${li(iv.strengths || [])}</div>
+      <div class="ti-col bad"><div class="ti-h">⚠️ Kde zaostává</div>${li(iv.weaknesses || [])}</div>
+    </div>
+    ${improve}
+  </div>`;
 }
 
 function _tdSelectTab(tab) {
@@ -5094,6 +5122,7 @@ function _tdPrehled(p) {
       <div class="tf-big">${f.fulfilmentPct}%</div><div class="tf-sub">plnění TourPlanu · naplánováno ${f.planned}, splněno ${f.done + f.doneShifted}, <b>minuto ${f.missed}</b></div></div>` : "";
   const why = whyChipsHtml(h.why, "td-why");
   return `<div class="td-scroll">
+    ${_tdInterpretBlock(_td.interp)}
     <div class="td-kpis">
       ${_tdKpi("Návštěvy", k.visits)}
       ${_tdKpi("Návštěv/den", k.daysWorked ? Math.round(k.visits / k.daysWorked * 10) / 10 : null)}

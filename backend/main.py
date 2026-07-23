@@ -1485,6 +1485,11 @@ if LOCAL_MODE:
         import tech_hotspots  # noqa: E402
         return tech_hotspots.hotspots(name, days_back)
 
+    @app.get("/api/technician/{name}/interpret", dependencies=[Depends(require_auth)])
+    def technician_interpret(name: str, days_back: int = 120):
+        import tech_interpret  # noqa: E402
+        return tech_interpret.interpret(name, days_back)
+
     # Time-series trends for a technician or a region (středisko), with flexible
     # time filtering (week/month grain, any date range).
     import trends as _trends  # noqa: E402
