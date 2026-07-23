@@ -77,16 +77,54 @@ def bootstrap_db() -> bool:
     reads exclusively from the runtime DB, and the import pipeline still fully
     rebuilds it from new exports."""
     target = os.environ.get("FFO_DB_PATH") or os.path.join(data_dir(), "fieldforce.db")
-    if os.path.exists(target):
-        return False  # never overwrite an existing runtime DB
     seed = _seed_db_path()
+    import shutil
+    if os.path.exists(target):
+        # Normally never overwrite an existing runtime DB (a user import wins).
+        # EXCEPTION: a *broken/stale* DB left by an older build — e.g. missing a
+        # core table (the "no such table: technicians" crash) or empty of POS —
+        # is non-functional, so replace it from the bundled seed and keep the old
+        # file as a timestamped backup (nothing is ever lost).
+        if seed and _db_incomplete(target):
+            import time
+            bak = f"{target}.stale-{time.strftime('%Y%m%d-%H%M%S')}.bak"
+            try:
+                shutil.copyfile(target, bak)
+            except OSError:
+                pass
+            tmp = target + ".seedtmp"
+            shutil.copyfile(seed, tmp)
+            os.replace(tmp, target)
+            for ext in ("-wal", "-shm"):          # stale WAL/SHM would corrupt the new file
+                try:
+                    os.remove(target + ext)
+                except OSError:
+                    pass
+            return True
+        return False
     if not seed:
         return False
-    import shutil
     tmp = target + ".seedtmp"
     shutil.copyfile(seed, tmp)
     os.replace(tmp, target)  # atomic: no half-copied DB on a crash mid-copy
     return True
+
+
+def _db_incomplete(path: str) -> bool:
+    """True if an existing runtime DB is broken/stale enough to replace from the
+    seed: unreadable, missing a core table, or holding no POS at all."""
+    try:
+        c = sqlite3.connect(path)
+        try:
+            for tbl in ("technicians", "pos_master", "salesapp_visits"):
+                if not c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                                 (tbl,)).fetchone():
+                    return True
+            return c.execute("SELECT COUNT(*) FROM pos_master").fetchone()[0] == 0
+        finally:
+            c.close()
+    except Exception:  # noqa: BLE001 - unreadable/corrupt -> replace
+        return True
 
 
 def _schema_sql() -> str:
