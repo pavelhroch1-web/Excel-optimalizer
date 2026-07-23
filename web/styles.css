@@ -1616,3 +1616,15 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .pd-map{height:230px;border-radius:12px;margin:10px 0 6px;overflow:hidden;
   border:1px solid var(--line,#2a2f3a);background:#1b1f27;z-index:0}
 .pd-map .leaflet-container{background:#1b1f27}
+
+/* Dashboard recommendations: interpretation -> recommendation -> action button */
+.ins-rec,.ops-act-rec{display:flex;align-items:flex-start;gap:6px;margin-top:7px;
+  font-size:.9rem;color:var(--text,#dfe6ee);line-height:1.35}
+.ops-rec-ico{flex:0 0 auto}
+.ins-btns,.ops-act-btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}
+.ops-btn{border:1px solid var(--line,#333a47);background:transparent;color:var(--text,#dfe6ee);
+  padding:5px 12px;border-radius:8px;font-size:.84rem;cursor:pointer;font-weight:600;
+  transition:background .12s,border-color .12s,transform .1s}
+.ops-btn:hover{border-color:var(--accent,#3ad0c4);transform:translateY(-1px)}
+.ops-btn.primary{background:var(--accent,#3ad0c4);border-color:var(--accent,#3ad0c4);color:#08201e}
+.ops-btn.primary:hover{filter:brightness(1.08)}

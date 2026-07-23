@@ -3913,11 +3913,14 @@ function renderInsightsBlock(data) {
     const why = (f.why || []).slice(0, 3).map((w) =>
       `<span class="ins-why"><b>${esc(w.label || w.metric)}</b> ${_fmtNum(w.value)}` +
       `${w.peerMedian != null ? ` <span class="ins-vs">vs. medián ${_fmtNum(w.peerMedian)}</span>` : ""}</span>`).join("");
-    return `<div class="ins-row sev-${esc(f.severity)}" ${f.entityId ? `data-diagnose="${esc(f.entityId)}" role="button" tabindex="0"` : ""}>
+    const btns = (f.actions || []).map((a) =>
+      `<button class="ops-btn${a.type === "technician" ? " primary" : ""}" data-act="${esc(a.type)}" data-target="${esc(a.target || "")}">${esc(a.label)} →</button>`).join("");
+    return `<div class="ins-row sev-${esc(f.severity)}">
       <div class="ins-sev">${esc(_SEV_LABEL[f.severity] || f.severity)}</div>
       <div class="ins-body"><div class="ins-head">${esc(f.headline)}</div>
-        <div class="ins-whys">${why}</div></div>
-      ${f.entityId ? `<div class="ins-go">Příčina →</div>` : ""}</div>`;
+        <div class="ins-whys">${why}</div>
+        ${f.recommendation ? `<div class="ins-rec"><span class="ops-rec-ico">💡</span> ${esc(f.recommendation)}</div>` : ""}
+        ${btns ? `<div class="ins-btns">${btns}</div>` : ""}</div></div>`;
   }).join("");
   return `<section class="ins-block">
     <div class="ins-h">${ico("flame")} Co bys přehlédl <span class="pd-chip">${fs.length} nálezů</span>
@@ -4102,6 +4105,13 @@ on("live-refresh", "click", loadLive);
 document.getElementById("op-brief") && document.getElementById("op-brief").addEventListener("click", (e) => {
   const refresh = e.target.closest("#brief-refresh");
   if (refresh) { loadCockpitBrief(); return; }
+  const opsBtn = e.target.closest(".ops-btn");
+  if (opsBtn) {
+    e.stopPropagation();
+    if (opsBtn.dataset.act === "technician") openTechDetail(opsBtn.dataset.target);
+    else if (opsBtn.dataset.act === "nav") showView(opsBtn.dataset.target);
+    return;
+  }
   const lead = e.target.closest(".brief-lead[data-nav]");
   if (lead) { if (lead.dataset.nav === "analytics") _anMode = "tech"; showView(lead.dataset.nav); return; }
   const roleBtn = e.target.closest(".ht-btn[data-role]");
@@ -5764,12 +5774,15 @@ async function dashOps(host) {
     const actions = findings.length ? `<div class="ops-actions">` + findings.map((f) => {
       const [tone, sevL] = _OPS_SEV[f.severity] || ["", f.severity];
       const whys = (f.why || []).slice(0, 3).map((w) => `<span class="ops-why">${esc(why1(w))}</span>`).join("");
-      const drill = f.entityId && f.entityType === "technician";
-      return `<div class="ops-act sev-${tone}"${drill ? ` data-diagnose="${esc(f.entityId)}" role="button" tabindex="0"` : ""}>` +
+      const btns = (f.actions || []).map((a) =>
+        `<button class="ops-btn${a.type === "technician" ? " primary" : ""}" data-act="${esc(a.type)}" data-target="${esc(a.target || "")}">${esc(a.label)} →</button>`).join("");
+      return `<div class="ops-act sev-${tone}">` +
         `<span class="ops-act-sev ${tone}">${esc(sevL)}</span>` +
         `<div class="ops-act-body"><div class="ops-act-head">${esc(f.headline)}</div>` +
-        `<div class="ops-act-whys">${whys}</div></div>` +
-        (drill ? `<span class="ops-act-go">Rozbor →</span>` : "") + `</div>`;
+        `<div class="ops-act-whys">${whys}</div>` +
+        (f.recommendation ? `<div class="ops-act-rec"><span class="ops-rec-ico">💡</span> ${esc(f.recommendation)}</div>` : "") +
+        (btns ? `<div class="ops-act-btns">${btns}</div>` : "") +
+        `</div></div>`;
     }).join("") + `</div>` : stateHTML("empty", "Žádná doporučení — síť běží v normálu.");
 
     // ALERT FEED (persisted engine alerts)
@@ -5807,13 +5820,17 @@ async function dashOps(host) {
 
     host.querySelectorAll(".ops-chip[data-nav]").forEach((b) =>
       b.addEventListener("click", () => showView(b.dataset.nav)));
-    // Drill to the technician detail. The global [data-diagnose] handler is
-    // scoped to the home cockpit (#op-brief), so bind these rows explicitly.
-    host.querySelectorAll(".ops-act[data-diagnose]").forEach((el) => {
-      const go = () => openTechDetail(el.dataset.diagnose);
-      el.addEventListener("click", go);
-      el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
-    });
+    // Recommendation action buttons: drill to the technician, or jump to the
+    // place that fixes it (planning / cadence config). The row itself no longer
+    // drills — every action is now an explicit, labelled button.
+    host.querySelectorAll(".ops-btn").forEach((b) =>
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const t = b.dataset.act, tgt = b.dataset.target;
+        if (t === "technician") openTechDetail(tgt);
+        else if (t === "nav") showView(tgt);
+      }));
+    // Alert-feed rows still drill via the global [data-diagnose] document handler.
   } catch (e) { showState(host, "error", "Nepodařilo se načíst Operations Center: " + e.message); }
 }
 

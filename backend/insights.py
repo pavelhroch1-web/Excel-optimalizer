@@ -200,6 +200,49 @@ DETECTORS = [_d_benchmark_outliers, _d_missed_visibility_combination,
 _SEV_RANK = {"risk": 0, "warn": 1, "info": 2}
 
 
+# A finding says WHAT is wrong; a manager wants WHAT TO DO. Map each detector /
+# deviating metric to a plain recommendation + a concrete action the dashboard
+# turns into a button (drill to the technician's "Kde ztrácí", jump to cadence
+# config, or open planning). Business language, not metrics.
+_REC_BY_METRIC = {
+    "visits_per_work_hour": ("Zvyšte počet návštěv za den — slučte blízké POS a plánujte hustěji.", "cadence"),
+    "travel_per_visit": ("Zkraťte přejezdy — přeskupte oblast a opravte pořadí zastávek.", "plan"),
+    "km_per_day": ("Vysoké km/den — zvažte přeskupení oblasti nebo přesun části POS jinému technikovi.", "plan"),
+    "on_pos_ratio": ("Nízký podíl času na POS — moc času v autě; přeskupte trasu, ať jsou zastávky blíž.", "plan"),
+    "avg_on_pos_min": ("Dlouhé časy na POS — prověřte proč v záložce „Kde ztrácí“.", "tech"),
+    "long_transfers": ("Mnoho dlouhých přejezdů — přeskupte oblast, ať jsou POS blíž u sebe.", "plan"),
+}
+_REC_BY_DETECTOR = {
+    "single_purpose": ("Slučte jednoúčelové cesty — plánujte víc účelů na jednu návštěvu.", "plan"),
+    "repeated_area_returns": ("Opakované návraty do stejné oblasti — slučte je do jednoho výjezdu.", "plan"),
+    "missed_visibility_combination": ("Spojte visibility návštěvy s běžnými — ušetříte samostatné cesty.", "plan"),
+    "benchmark_outlier": ("Otevřete rozbor a podívejte se, kde technik ztrácí čas a km.", "tech"),
+}
+_LEVER_ACTION = {
+    "cadence": {"type": "nav", "target": "settings", "label": "Upravit frekvenci"},
+    "plan": {"type": "nav", "target": "tourplan", "label": "Naplánovat / přeskupit"},
+    "tech": None,  # the drill-to-technician action already covers it
+}
+
+
+def _recommend(f: dict) -> None:
+    """Attach `recommendation` + `actions` to a finding in place."""
+    rec, lever = None, "tech"
+    metric = (f.get("why") or [{}])[0].get("metric") if f.get("why") else None
+    if f.get("detector") == "benchmark_outlier" and metric in _REC_BY_METRIC:
+        rec, lever = _REC_BY_METRIC[metric]
+    elif f.get("detector") in _REC_BY_DETECTOR:
+        rec, lever = _REC_BY_DETECTOR[f["detector"]]
+    actions = []
+    if f.get("entityType") == "technician" and f.get("entityId"):
+        actions.append({"type": "technician", "target": f["entityId"], "label": "Otevřít rozbor"})
+    lever_act = _LEVER_ACTION.get(lever)
+    if lever_act:
+        actions.append(lever_act)
+    f["recommendation"] = rec or "Otevřete detail a rozhodněte o dalším kroku."
+    f["actions"] = actions
+
+
 def insights(days_back: int = 90) -> dict:
     """Run every detector and return a ranked, explainable list of findings —
     the anomalies / inefficiencies / opportunities to look at, worst first."""
@@ -220,5 +263,7 @@ def insights(days_back: int = 90) -> dict:
                     if not (f.get("entityType") == "technician" and f.get("entityId") in excluded)]
     findings.sort(key=lambda f: (_SEV_RANK.get(f["severity"], 3),
                                  -max((abs(w.get("z", 0)) for w in f["why"]), default=0)))
+    for f in findings:
+        _recommend(f)
     return {"daysBack": days_back, "count": len(findings),
             "detectors": [d.__name__ for d in DETECTORS], "findings": findings}
