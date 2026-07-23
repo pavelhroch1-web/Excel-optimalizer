@@ -1606,3 +1606,8 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .hs-go{opacity:.5;font-size:.8rem;white-space:nowrap}
 .hs-row:hover .hs-go{opacity:1;color:var(--accent,#3ad0c4)}
 @media(max-width:640px){.hs-row{grid-template-columns:1fr auto;gap:8px}.hs-go,.hs-total{display:none}}
+
+/* slow-travel "scream" (recurring absurd drive time) */
+.hs-scream{border-color:#e0463a;background:rgba(224,70,58,.09)}
+.hs-scream .hs-name{color:#ff6a5a}
+.hs-scream:hover{border-color:#ff6a5a}

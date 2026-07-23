@@ -1465,8 +1465,8 @@ if LOCAL_MODE:
     # Health Score: composite per-technician efficiency (100 = healthy, low =
     # critical). Powers the "Kritické případy" section.
     @app.get("/api/insights/health", dependencies=[Depends(require_auth)])
-    def insights_health(days_back: int = 90, role: str = "TECHNIK"):
-        return diagnostics.health_scores(days_back, role)
+    def insights_health(days_back: int = 90, role: str = "TECHNIK", region: str | None = None):
+        return diagnostics.health_scores(days_back, role, region)
 
     # Deep technician profile: KPIs + Health breakdown + cause diagnosis +
     # TourPlan fulfilment + missed planned POS driven past + the day list.

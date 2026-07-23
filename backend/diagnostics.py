@@ -427,7 +427,7 @@ def _area_returns_per_week() -> dict:
     return {r["technician"]: (r["rate"] or 0) for r in rows}
 
 
-def health_scores(days_back: int = 90, role: str = "TECHNIK") -> dict:
+def health_scores(days_back: int = 90, role: str = "TECHNIK", region: str | None = None) -> dict:
     """A composite 0-100 Health Score per person (100 = healthy, low = critical).
     Role-aware: TECHNIK is judged mostly on work done (TourPlan fulfilment,
     visits, work hours); OZ on route efficiency / use of the day. Days with 0
@@ -493,7 +493,14 @@ def health_scores(days_back: int = 90, role: str = "TECHNIK") -> dict:
             "why": why[:3],
         })
     out.sort(key=lambda x: x["healthScore"])
-    return {"technicians": out, "worst": out[:5], "role": role}
+    # Regions available for the filter (whole set, before filtering the list) —
+    # scores stay relative to ALL company peers (a stable standard); the filter
+    # only narrows WHO you look at, not what "normal" means.
+    regions = sorted({t["region"] for t in out if t.get("region")})
+    if region:
+        out = [t for t in out if t.get("region") == region]
+    return {"technicians": out, "worst": out[:5], "role": role,
+            "regions": regions, "region": region}
 
 
 def company_overview(days_back: int = 90) -> dict:

@@ -2333,13 +2333,24 @@ function whyChipsHtml(list, cls) {
   }).join("");
 }
 
-const _tsState = { role: "TECHNIK", sort: "score", days: 90 };
+const _tsState = { role: "TECHNIK", sort: "score", days: 90, region: "" };
+
+function _tsFillRegions(regions) {
+  const sel = document.getElementById("ts-region");
+  if (!sel || sel.dataset.filled === "1" || !regions.length) return;
+  sel.innerHTML = `<option value="">všechny regiony</option>` +
+    regions.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+  if (_tsState.region) sel.value = _tsState.region;
+  sel.dataset.filled = "1";
+}
 async function loadTechScore() {
   const out = document.getElementById("techscore-out");
   if (!out) return;
   out.innerHTML = skeleton({ rows: 5 });
   try {
-    const h = await apiJson(`/api/insights/health?role=${_tsState.role}&days_back=${_tsState.days}`);
+    const h = await apiJson(`/api/insights/health?role=${_tsState.role}&days_back=${_tsState.days}` +
+      (_tsState.region ? `&region=${encodeURIComponent(_tsState.region)}` : ""));
+    _tsFillRegions(h.regions || []);
     let techs = (h.technicians || []).slice();
     if (!techs.length) {
       showState(out, "empty", h.insufficient ? "Málo dat pro tuto roli." : "Žádní pracovníci pro tuto roli.");
@@ -2388,6 +2399,8 @@ function initTechScore() {
         loadTechScore();
       });
     });
+    const rsel = document.getElementById("ts-region");
+    if (rsel) rsel.addEventListener("change", () => { _tsState.region = rsel.value; loadTechScore(); });
     _tsInit = true;
   }
   loadTechScore();
@@ -4073,12 +4086,25 @@ document.getElementById("op-brief") && document.getElementById("op-brief").addEv
   if (lead) { if (lead.dataset.nav === "analytics") _anMode = "tech"; showView(lead.dataset.nav); return; }
   const roleBtn = e.target.closest(".ht-btn[data-role]");
   if (roleBtn) { loadHealth(roleBtn.dataset.role); return; }
-  const diagEl = e.target.closest("[data-diagnose]");
-  if (diagEl) { openTechDetail(diagEl.dataset.diagnose); return; }
   const techEl = e.target.closest("[data-tech]");
   if (techEl) { openTechnicianAnalytics(techEl.dataset.tech); return; }
   const runEl = e.target.closest("[data-run]");
   if (runEl) { openPlannerRun(runEl.dataset.run); return; }
+});
+
+// GLOBAL drill to a technician's full detail. Any [data-diagnose] element —
+// Technician Score cards, the dashboard worst-list, insights rows, the brief —
+// works in EVERY container, not only inside the morning brief (that was the bug:
+// the Analytika score cards were dead because the only handler was scoped to
+// #op-brief). Delegated on document; Enter/Space open too (cards are buttons).
+document.addEventListener("click", (e) => {
+  const diag = e.target.closest("[data-diagnose]");
+  if (diag && diag.dataset.diagnose) openTechDetail(diag.dataset.diagnose);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const diag = e.target.closest && e.target.closest("[data-diagnose]");
+  if (diag && diag.dataset.diagnose) { e.preventDefault(); openTechDetail(diag.dataset.diagnose); }
 });
 
 // cause panel: WHY a technician is inefficient + biggest opportunity
@@ -4226,11 +4252,11 @@ async function _tdLoadHotspots(days) {
 }
 
 function _tdHotspotsHtml(d) {
-  const long = d.longStops || [], det = d.detourDays || [];
+  const long = d.longStops || [], det = d.detourDays || [], slow = d.slowTravel || [];
   const summary = `<div class="hs-summary">` +
     tile("Kde je moc dlouho", d.longStopsCount || 0, `POS nad normou · ztráta ${_fmtHM(d.totalLostMinutes)}`, (d.longStopsCount ? "warn" : "good")) +
-    tile("Kde jezdí zbytečně", d.detourDaysCount || 0, `dní s objížďkou · +${_fmtNum(d.totalExtraKm)} km navíc`, (d.detourDaysCount ? "warn" : "good")) +
-    tile("Odpracováno", d.daysWorked || 0, `dní za ${d.daysBack} dní`, "") + `</div>`;
+    tile("Absurdní cesty", d.slowTravelCount || 0, `${d.slowTravelRecurring || 0}× opakovaně · +${_fmtHM(d.totalSlowMinutes)} navíc`, (d.slowTravelRecurring ? "bad" : (d.slowTravelCount ? "warn" : "good"))) +
+    tile("Objížďky", d.detourDaysCount || 0, `dní · +${_fmtNum(d.totalExtraKm)} km navíc`, (d.detourDaysCount ? "warn" : "good")) + `</div>`;
 
   const longRows = long.length ? long.map((s) => {
     const over = `+${_fmtNum(s.overMinPerVisit)} min/návšt.`;
@@ -4238,10 +4264,20 @@ function _tdHotspotsHtml(d) {
       <div class="hs-main"><div class="hs-name">${esc(s.name || s.pos)}</div>
         <div class="hs-sub">${esc(s.city || "")} · ${s.visits}× návštěva${s.lastDate ? " · naposledy " + _shortDate(s.lastDate) : ""}</div></div>
       <div class="hs-nums"><div class="hs-big">${_fmtNum(s.avgActualMin)} min</div>
-        <div class="hs-vs">norma ${_fmtNum(s.expectedMin)} · <b class="hs-over">${over}</b></div></div>
+        <div class="hs-vs">norma ${_fmtNum(s.expectedMin)}${s.normLevel ? " (" + esc(s.normLevel) + ")" : ""} · <b class="hs-over">${over}</b></div></div>
       <div class="hs-total">−${_fmtHM(s.totalOverMin)}</div>
       <div class="hs-go">mapa →</div></div>`;
   }).join("") : `<p class="hint" style="padding:12px 4px">Žádné POS výrazně nad normou — čas na prodejnách sedí. 👍</p>`;
+
+  const slowRows = slow.length ? slow.map((s) => {
+    return `<div class="hs-row${s.recurring ? " hs-scream" : ""}" data-hs-pos="${esc(s.pos)}" role="button" tabindex="0" title="Zobrazit POS na mapě">
+      <div class="hs-main"><div class="hs-name">${s.recurring ? "🔴 " : ""}${esc(s.name || s.pos)}</div>
+        <div class="hs-sub">${esc(s.city || "")} · ${s.km} km · ${s.count}× (nejhůř ${s.worstDate ? _shortDate(s.worstDate) : ""})</div></div>
+      <div class="hs-nums"><div class="hs-big">${_fmtHM(s.worstActualMin)}</div>
+        <div class="hs-vs">norma cesty ${_fmtHM(s.normMin)}</div></div>
+      <div class="hs-total hs-detour">+${_fmtHM(s.totalExtraMin)}</div>
+      <div class="hs-go">mapa →</div></div>`;
+  }).join("") : `<p class="hint" style="padding:12px 4px">Žádné absurdně dlouhé přejezdy — časy cest sedí na normu. 👍</p>`;
 
   const detRows = det.length ? det.map((x) => {
     return `<div class="hs-row" data-hs-day="${esc(x.date)}" role="button" tabindex="0" title="Zobrazit trasu dne na mapě">
@@ -4255,8 +4291,10 @@ function _tdHotspotsHtml(d) {
 
   return `<div class="td-scroll hs-wrap">
     ${summary}
-    <div class="hs-block"><h3 class="hs-h">🕑 Kde je moc dlouho na POS <span class="hs-hint">reálný čas vs. naučená norma pro daný typ prodejny — klik = mapa</span></h3>
+    <div class="hs-block"><h3 class="hs-h">🕑 Kde je moc dlouho na POS <span class="hs-hint">reálný čas vs. kolektivní norma partnera (bez něj samotného) — klik = mapa</span></h3>
       <div class="hs-list">${longRows}</div></div>
+    <div class="hs-block"><h3 class="hs-h">🚗 Kde jel neúměrně dlouho <span class="hs-hint">reálný čas cesty vs. naučená norma přejezdu; 🔴 = opakovaně — klik = mapa</span></h3>
+      <div class="hs-list">${slowRows}</div></div>
     <div class="hs-block"><h3 class="hs-h">🗺️ Kde měl neefektivní trasu <span class="hs-hint">reálné km vs. efektivní pořadí stejných zastávek — klik = trasa dne na mapě</span></h3>
       <div class="hs-list">${detRows}</div></div>
   </div>`;
