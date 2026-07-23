@@ -1582,3 +1582,27 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 /* why-chips: show the actual number behind a low-score reason */
 .why-vs{opacity:.62;font-weight:400;font-size:.86em;margin-left:2px}
 .hc-why b,.td-why b{font-weight:700}
+
+/* Kde ztrácí (technician hotspots) */
+.hs-wrap{padding:4px 2px 20px}
+.hs-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:8px 0 18px}
+.hs-block{margin-top:18px}
+.hs-h{font-size:.98rem;margin:0 0 8px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.hs-hint{font-weight:400;opacity:.6;font-size:.8rem}
+.hs-list{display:flex;flex-direction:column;gap:6px}
+.hs-row{display:grid;grid-template-columns:1fr auto auto auto;gap:14px;align-items:center;
+  padding:10px 12px;border:1px solid var(--line,#2a2f3a);border-radius:10px;cursor:pointer;
+  background:var(--card2,rgba(255,255,255,.02));transition:border-color .12s,transform .12s}
+.hs-row:hover{border-color:var(--accent,#3ad0c4);transform:translateX(2px)}
+.hs-main{min-width:0}
+.hs-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hs-sub{font-size:.82rem;opacity:.62;margin-top:2px}
+.hs-nums{text-align:right;white-space:nowrap}
+.hs-big{font-weight:700}
+.hs-vs{font-size:.8rem;opacity:.7}
+.hs-over{color:#e8a13a}
+.hs-total{font-weight:700;color:#e8734a;white-space:nowrap;min-width:74px;text-align:right}
+.hs-detour{color:#e8734a}
+.hs-go{opacity:.5;font-size:.8rem;white-space:nowrap}
+.hs-row:hover .hs-go{opacity:1;color:var(--accent,#3ad0c4)}
+@media(max-width:640px){.hs-row{grid-template-columns:1fr auto;gap:8px}.hs-go,.hs-total{display:none}}

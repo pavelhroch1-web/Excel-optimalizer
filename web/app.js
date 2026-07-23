@@ -4180,10 +4180,91 @@ function renderTdTab(tab) {
   _tdSelectTab(tab);
   const p = _td.p, el = document.getElementById("td-body");
   if (tab === "prehled") el.innerHTML = _tdPrehled(p);
+  else if (tab === "kde") { el.innerHTML = _tdKdeShell(); _tdLoadHotspots(_hsDays); }
   else if (tab === "anomalie") el.innerHTML = _tdAnomalie(p);
   else if (tab === "dny") { el.innerHTML = _tdDny(p); _tdBindDays(); }
   else if (tab === "trendy") { el.innerHTML = trendPanelHtml("technician", _td.name); bindTrendPanel(el); }
   else if (tab === "vyhodnoceni") { el.innerHTML = _tdLongtermShell(); _tdLoadLongterm(_ltPeriod); }
+}
+
+// ===================== KDE ZTRÁCÍ (hotspots: where too long / detours) =======
+// The plain-language answer to "the report flagged this technician — WHERE
+// exactly?": the specific POS where he is far over the learned time norm, and
+// the specific days he drove much more than an efficient ordering. Every row
+// drills to the map (POS detail / the day's route).
+let _hsDays = 90;
+const _HS_PRESETS = [[30, "30 dní"], [90, "90 dní"], [180, "180 dní"], [365, "1 rok"]];
+
+function _tdKdeShell() {
+  const btns = _HS_PRESETS.map(([d, l]) =>
+    `<button class="lt-pbtn${d === _hsDays ? " on" : ""}" data-hsdays="${d}">${l}</button>`).join("");
+  return `<div class="td-scroll">
+    <div class="lt-head"><div class="lt-presets">${btns}</div></div>
+    <div id="hs-body"><p class="pd-sub" style="padding:20px">Hledám konkrétní místa…</p></div>
+  </div>`;
+}
+
+async function _tdLoadHotspots(days) {
+  _hsDays = days;
+  document.querySelectorAll("#td-body .lt-pbtn[data-hsdays]").forEach((b) =>
+    b.classList.toggle("on", +b.dataset.hsdays === days));
+  document.querySelectorAll("#td-body .lt-pbtn[data-hsdays]").forEach((b) =>
+    b.onclick = () => _tdLoadHotspots(+b.dataset.hsdays));
+  const host = document.getElementById("hs-body");
+  if (host) host.innerHTML = skeleton({ rows: 5 });
+  try {
+    const d = await apiJson(`/api/technician/${encodeURIComponent(_td.name)}/hotspots?days_back=${days}`);
+    host.innerHTML = _tdHotspotsHtml(d);
+    // drill: a long-stop POS -> POS detail (map); a detour day -> the day's route (map)
+    host.querySelectorAll("[data-hs-pos]").forEach((el) =>
+      el.onclick = () => openPosDetail(el.dataset.hsPos));
+    host.querySelectorAll("[data-hs-day]").forEach((el) =>
+      el.onclick = () => openTechDay(_td.name, el.dataset.hsDay));
+  } catch (e) {
+    if (host) showState(host, "error", "Nepodařilo se načíst: " + e.message);
+  }
+}
+
+function _tdHotspotsHtml(d) {
+  const long = d.longStops || [], det = d.detourDays || [];
+  const summary = `<div class="hs-summary">` +
+    tile("Kde je moc dlouho", d.longStopsCount || 0, `POS nad normou · ztráta ${_fmtHM(d.totalLostMinutes)}`, (d.longStopsCount ? "warn" : "good")) +
+    tile("Kde jezdí zbytečně", d.detourDaysCount || 0, `dní s objížďkou · +${_fmtNum(d.totalExtraKm)} km navíc`, (d.detourDaysCount ? "warn" : "good")) +
+    tile("Odpracováno", d.daysWorked || 0, `dní za ${d.daysBack} dní`, "") + `</div>`;
+
+  const longRows = long.length ? long.map((s) => {
+    const over = `+${_fmtNum(s.overMinPerVisit)} min/návšt.`;
+    return `<div class="hs-row" data-hs-pos="${esc(s.pos)}" role="button" tabindex="0" title="Zobrazit POS na mapě">
+      <div class="hs-main"><div class="hs-name">${esc(s.name || s.pos)}</div>
+        <div class="hs-sub">${esc(s.city || "")} · ${s.visits}× návštěva${s.lastDate ? " · naposledy " + _shortDate(s.lastDate) : ""}</div></div>
+      <div class="hs-nums"><div class="hs-big">${_fmtNum(s.avgActualMin)} min</div>
+        <div class="hs-vs">norma ${_fmtNum(s.expectedMin)} · <b class="hs-over">${over}</b></div></div>
+      <div class="hs-total">−${_fmtHM(s.totalOverMin)}</div>
+      <div class="hs-go">mapa →</div></div>`;
+  }).join("") : `<p class="hint" style="padding:12px 4px">Žádné POS výrazně nad normou — čas na prodejnách sedí. 👍</p>`;
+
+  const detRows = det.length ? det.map((x) => {
+    return `<div class="hs-row" data-hs-day="${esc(x.date)}" role="button" tabindex="0" title="Zobrazit trasu dne na mapě">
+      <div class="hs-main"><div class="hs-name">${_shortDate(x.date)}${x.workHours ? " · " + _fmtNum(x.workHours) + " h" : ""}</div>
+        <div class="hs-sub">${x.stops} zastávek</div></div>
+      <div class="hs-nums"><div class="hs-big">${_fmtNum(x.actualKm)} km</div>
+        <div class="hs-vs">optimum ${_fmtNum(x.optimalKm)} km</div></div>
+      <div class="hs-total hs-detour">+${_fmtNum(x.extraKm)} km${x.extraPct != null ? " · +" + x.extraPct + " %" : ""}</div>
+      <div class="hs-go">mapa →</div></div>`;
+  }).join("") : `<p class="hint" style="padding:12px 4px">Žádné výrazné objížďky — trasy jsou blízko optimu. 👍</p>`;
+
+  return `<div class="td-scroll hs-wrap">
+    ${summary}
+    <div class="hs-block"><h3 class="hs-h">🕑 Kde je moc dlouho na POS <span class="hs-hint">reálný čas vs. naučená norma pro daný typ prodejny — klik = mapa</span></h3>
+      <div class="hs-list">${longRows}</div></div>
+    <div class="hs-block"><h3 class="hs-h">🗺️ Kde měl neefektivní trasu <span class="hs-hint">reálné km vs. efektivní pořadí stejných zastávek — klik = trasa dne na mapě</span></h3>
+      <div class="hs-list">${detRows}</div></div>
+  </div>`;
+}
+
+function _shortDate(s) {
+  const p = String(s).slice(0, 10).split("-");
+  return p.length === 3 ? `${+p[2]}.${+p[1]}.` : s;
 }
 
 // ===================== LONG-TERM EVALUATION (Dlouhodobě) =====================

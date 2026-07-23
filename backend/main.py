@@ -1480,6 +1480,11 @@ if LOCAL_MODE:
     def technician_day(name: str, date: str):
         return tech_detail.day(name, date)
 
+    @app.get("/api/technician/{name}/hotspots", dependencies=[Depends(require_auth)])
+    def technician_hotspots(name: str, days_back: int = 90):
+        import tech_hotspots  # noqa: E402
+        return tech_hotspots.hotspots(name, days_back)
+
     # Time-series trends for a technician or a region (středisko), with flexible
     # time filtering (week/month grain, any date range).
     import trends as _trends  # noqa: E402
