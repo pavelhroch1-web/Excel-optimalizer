@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=108">
+<link rel="stylesheet" href="styles.css?v=109">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -707,22 +707,6 @@
         <div id="tg-legend" class="tg-legend"></div>
       </section>
 
-      <!-- CAPACITY STANDARD -->
-      <section class="card">
-        <h2>Kapacita a produktivita <span class="badge">učený firemní standard</span></h2>
-        <p class="hint">Kolik produktivní práce zvládne technik za den — učeno z historie (percentily, extrémy oříznuty), ne pevných 8 h ani průměr. Doporučená kapacita = základ + ambice, zastropováno reálným stropem (p90).</p>
-        <div id="capacity-out"></div>
-      </section>
-
-      <!-- REFERENCE DAY + TRANSITION MODEL -->
-      <section class="card">
-        <h2>Referenční den ČR <span class="badge">rozpočet dne · reálné přejezdy</span></h2>
-        <p class="hint">Z čeho se skládá reálně zvládnutelný den — vše učené z celé historie ČR (kolektivní standard, ne jednotlivec). Rozpočet dne = produktivní minuty − rezerva − on-top; cena zastávky = délka návštěvy + skutečný přejezd. Naučený přejezd zahrnuje i parkování, docházku a režii — proto je výrazně vyšší než starý konstantní odhad jízdy.</p>
-        <div class="row" style="margin-bottom:8px"><button id="refday-rebuild" class="ghost">Přepočítat modely</button></div>
-        <div id="refday-out"></div>
-        <div id="transition-out"></div>
-      </section>
-
       <!-- TECHNICIAN SCORE (full roster) -->
       <section class="card">
         <h2>Technician Score <span class="badge">celý tým · důvody nízkého skóre</span></h2>
@@ -899,6 +883,22 @@
           <div id="settings-out"></div>
         </section>
 
+        <!-- CAPACITY STANDARD (kalibrace modelu — přesunuto z Analytiky) -->
+        <section class="card">
+          <h2>Kapacita a produktivita <span class="badge">učený firemní standard</span></h2>
+          <p class="hint">Kolik produktivní práce zvládne technik za den — učeno z historie (percentily, extrémy oříznuty), ne pevných 8 h ani průměr. Doporučená kapacita = základ + ambice, zastropováno reálným stropem (p90).</p>
+          <div id="capacity-out"></div>
+        </section>
+
+        <!-- REFERENCE DAY + TRANSITION MODEL (kalibrace — přesunuto z Analytiky) -->
+        <section class="card">
+          <h2>Referenční den ČR <span class="badge">rozpočet dne · reálné přejezdy</span></h2>
+          <p class="hint">Z čeho se skládá reálně zvládnutelný den — vše učené z celé historie ČR (kolektivní standard, ne jednotlivec). Rozpočet dne = produktivní minuty − rezerva − on-top; cena zastávky = délka návštěvy + skutečný přejezd. Naučený přejezd zahrnuje i parkování, docházku a režii — proto je výrazně vyšší než starý konstantní odhad jízdy.</p>
+          <div class="row" style="margin-bottom:8px"><button id="refday-rebuild" class="ghost">Přepočítat modely</button></div>
+          <div id="refday-out"></div>
+          <div id="transition-out"></div>
+        </section>
+
         <section class="card">
           <h2>Správa naučených modelů <span class="badge">trvání · clustery · kapacita</span></h2>
           <p class="hint">Modely, které se učí z importovaných dat a engine je používá při rozhodování: predikce trvání návštěvy, mikro-clustery blízkých POS a naučený kapacitní standard. Po novém importu je můžeš <strong>přepočítat</strong>.</p>
@@ -960,6 +960,6 @@
   </div>
 </div>
 
-<script src="app.js?v=117"></script>
+<script src="app.js?v=118"></script>
 </body>
 </html>

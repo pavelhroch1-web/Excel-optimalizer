@@ -6533,12 +6533,13 @@ function showView(name) {
       loadTaskTypes && loadTaskTypes();
       initViews && initViews();
       initModelMgmt && initModelMgmt();
+      // model calibration moved here from Analytika (it configures the engine)
+      loadCapacity && loadCapacity();
+      loadReferenceDay && loadReferenceDay();
     }
     if (name === "analytics" && typeof initAnalytics === "function") initAnalytics();
     if (name === "analytics" && typeof loadRactTechnicians === "function") loadRactTechnicians();
     if (name === "analytics" && typeof initTechGraphs === "function") initTechGraphs();
-    if (name === "analytics" && typeof loadCapacity === "function") loadCapacity();
-    if (name === "analytics" && typeof loadReferenceDay === "function") loadReferenceDay();
     if (name === "analytics" && typeof loadTeamDashboard === "function"
         && !document.getElementById("team-tiles").innerHTML) loadTeamDashboard();
     if (name === "analytics" && typeof initTechScore === "function"
