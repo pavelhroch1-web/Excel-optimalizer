@@ -34,10 +34,15 @@ def _minutes(a, b):
     return None
 
 
-def _classify(store_name, has_gps):
+def classify(store_name, pos_id=None):
     """What kind of entry is this SalesApp record? Only real stores ("pos")
     count as productive on-POS visits; lunches / offices / prospects are their
-    own activities and must not be counted as store time or driving distance.
+    own activities and must not be counted as a visit or store time.
+
+    A store visit is a store visit whether or not pos_master happens to carry
+    GPS for it (~half of POS have no coordinates). GPS only decides whether the
+    stop can be drawn on the map / used for leg distance — never whether it
+    counts. This is the single shared definition used across the reports.
 
     Returns (kind, label)."""
     s = (store_name or "").strip()
@@ -48,9 +53,14 @@ def _classify(store_name, has_gps):
         return "office", "Regionální středisko"
     if low.startswith("zájemce") or low.startswith("zajemce"):
         return "prospect", "Zájemce (akvizice)"
-    if has_gps:
-        return "pos", s or "POS"
-    return "other", s or "—"
+    if not s and not pos_id:
+        return "other", "—"
+    return "pos", s or "POS"
+
+
+# Back-compat alias (older callers); GPS is no longer part of the definition.
+def _classify(store_name, _has_gps=None):
+    return classify(store_name)
 
 
 def technician_route(technician: str, date_from: str | None = None,
@@ -82,7 +92,7 @@ def technician_route(technician: str, date_from: str | None = None,
         for i, r in enumerate(stops_raw):
             pid = str(r["pos_id"]) if r["pos_id"] else None
             gx, gy, nm, city = gps.get(pid, (None, None, r.get("store_name"), None))
-            kind, label = _classify(r.get("store_name"), gx is not None)
+            kind, label = classify(r.get("store_name"), pid)
             st, fin = _dt(r["started_at"]), _dt(r["finished_at"])
             on = _minutes(st, fin)
             if on is None and r.get("real_duration") not in (None, ""):

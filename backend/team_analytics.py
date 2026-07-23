@@ -16,6 +16,7 @@ import datetime
 
 import db
 from desktop_client.engines.core_logic import distance_km
+from route_actual import classify
 
 DEFAULT_CAPACITY = 40          # weekly POS capacity fallback if not configured
 LONG_LEG_KM = 30.0
@@ -69,7 +70,7 @@ def overview(days_back: int = 21, role: str = "TECHNIK") -> dict:
 
     # one sweep of recent visits, grouped by (technician, day)
     rows = db.get(
-        "SELECT technician, pos_id, visit_date, started_at, finished_at, real_duration "
+        "SELECT technician, pos_id, store_name, visit_date, started_at, finished_at, real_duration "
         "FROM salesapp_visits WHERE technician IS NOT NULL AND visit_date IS NOT NULL "
         "AND date(visit_date) >= date(?) ORDER BY technician, visit_date, started_at", (cutoff,))
     per_day: dict = {}
@@ -90,9 +91,16 @@ def overview(days_back: int = 21, role: str = "TECHNIK") -> dict:
         prev = None
         starts, ends = [], []
         for r in stops:
-            a["visits"] += 1
-            if r["pos_id"]:
-                a["posSet"].add(str(r["pos_id"]))
+            # A "visit" is a real store visit (single shared definition, see
+            # route_actual.classify) — offices / lunches / prospects are not
+            # visits and their time is not on-POS time. GPS is irrelevant here;
+            # ~half of POS have no coordinates yet still get visited.
+            kind, _ = classify(r["store_name"], r["pos_id"])
+            is_pos = kind == "pos"
+            if is_pos:
+                a["visits"] += 1
+                if r["pos_id"]:
+                    a["posSet"].add(str(r["pos_id"]))
             st, fin = _dt(r["started_at"]), _dt(r["finished_at"])
             if st:
                 starts.append(st)
@@ -106,9 +114,9 @@ def overview(days_back: int = 21, role: str = "TECHNIK") -> dict:
                     on = float(r["real_duration"]) * 60
                 except (ValueError, TypeError):
                     on = None
-            if on:
+            if on and is_pos:
                 a["onPosMin"] += on
-            g = gps.get(str(r["pos_id"])) if r["pos_id"] else None
+            g = gps.get(str(r["pos_id"])) if (is_pos and r["pos_id"]) else None
             if prev and prev[0] and g and None not in (prev[0][0], prev[0][1], g[0], g[1]):
                 leg = distance_km(prev[0][0], prev[0][1], g[0], g[1])
                 a["km"] += leg

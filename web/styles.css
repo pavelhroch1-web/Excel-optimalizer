@@ -1578,3 +1578,7 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .cad-add-row input, .cad-add-row select { padding: 7px 9px; border: 1px solid var(--line, #d9dee6); border-radius: 8px; font-size: 13px; }
 .cad-del { margin-left: auto; align-self: center; }
 @media (prefers-color-scheme: dark) { .cad-add { background: rgba(255,255,255,0.03); } }
+
+/* why-chips: show the actual number behind a low-score reason */
+.why-vs{opacity:.62;font-weight:400;font-size:.86em;margin-left:2px}
+.hc-why b,.td-why b{font-weight:700}

@@ -2319,13 +2319,27 @@ function renderTeam(r) {
 // low-score reasons, not just the 5 worst on the dashboard. Reuses the same
 // /api/insights/health data + the hc-card visual (gauge + reason chips); the
 // global [data-diagnose] handler opens the full technician detail on click.
-const _tsState = { role: "TECHNIK", sort: "score" };
+// Why-chips with the actual numbers, not just a label: a manager must see
+// *why* a score is low — "málo návštěv/den 4.9 vs medián 8.6" — not a bare tag.
+function whyChipsHtml(list, cls) {
+  cls = cls || "hc-why";
+  if (!list || !list.length) return `<span class="${cls} ok">bez varování</span>`;
+  return list.map((w) => {
+    if (typeof w === "string") return `<span class="${cls}">${esc(w)}</span>`;
+    const lbl = esc(w.label || w.metric || "");
+    const val = (w.value != null && w.value !== "") ? ` <b>${_fmtNum(w.value)}</b>` : "";
+    const med = (w.peerMedian != null) ? ` <span class="why-vs">vs medián ${_fmtNum(w.peerMedian)}</span>` : "";
+    return `<span class="${cls}" title="${lbl}">${lbl}${val}${med}</span>`;
+  }).join("");
+}
+
+const _tsState = { role: "TECHNIK", sort: "score", days: 90 };
 async function loadTechScore() {
   const out = document.getElementById("techscore-out");
   if (!out) return;
   out.innerHTML = skeleton({ rows: 5 });
   try {
-    const h = await apiJson("/api/insights/health?role=" + _tsState.role);
+    const h = await apiJson(`/api/insights/health?role=${_tsState.role}&days_back=${_tsState.days}`);
     let techs = (h.technicians || []).slice();
     if (!techs.length) {
       showState(out, "empty", h.insufficient ? "Málo dat pro tuto roli." : "Žádní pracovníci pro tuto roli.");
@@ -2345,8 +2359,7 @@ async function loadTechScore() {
       tile("V pořádku", good, "skóre ≥ 80", "good") + `</div>`;
     const cards = techs.map((t) => {
       const tone = t.healthScore < 70 ? "crit" : (t.healthScore < 80 ? "warn" : "ok");
-      const why = (t.why || []).map((w) => `<span class="hc-why">${esc(w.label)}</span>`).join("")
-        || `<span class="hc-why ok">bez varování</span>`;
+      const why = whyChipsHtml(t.why, "hc-why");
       return `<div class="hc-card ${tone}" data-diagnose="${esc(t.technician)}" role="button" tabindex="0">
         <div class="hc-gauge"><svg viewBox="0 0 40 40"><circle class="hc-bg" cx="20" cy="20" r="16"></circle>
           <circle class="hc-arc" cx="20" cy="20" r="16" style="stroke-dasharray:${Math.round(t.healthScore)} 100"></circle></svg>
@@ -2365,11 +2378,13 @@ async function loadTechScore() {
 let _tsInit = false;
 function initTechScore() {
   if (!_tsInit) {
-    document.querySelectorAll("#ts-role span, #ts-sort span").forEach((sp) => {
+    document.querySelectorAll("#ts-role span, #ts-sort span, #ts-period span").forEach((sp) => {
       sp.addEventListener("click", () => {
         const bar = sp.parentElement;
         bar.querySelectorAll("span").forEach((x) => x.classList.toggle("on", x === sp));
-        if (bar.id === "ts-role") _tsState.role = sp.dataset.v; else _tsState.sort = sp.dataset.v;
+        if (bar.id === "ts-role") _tsState.role = sp.dataset.v;
+        else if (bar.id === "ts-sort") _tsState.sort = sp.dataset.v;
+        else if (bar.id === "ts-period") _tsState.days = +sp.dataset.v;
         loadTechScore();
       });
     });
@@ -3811,7 +3826,7 @@ function renderHealthBlock(h) {
   }
   const cards = worst.map((t) => {
     const tone = t.healthScore < 70 ? "crit" : (t.healthScore < 80 ? "warn" : "ok");
-    const why = (t.why || []).map((w) => `<span class="hc-why">${esc(w.label)}</span>`).join("");
+    const why = whyChipsHtml(t.why, "hc-why");
     return `<div class="hc-card ${tone}" data-diagnose="${esc(t.technician)}" role="button" tabindex="0">
       <div class="hc-gauge"><svg viewBox="0 0 40 40"><circle class="hc-bg" cx="20" cy="20" r="16"></circle>
         <circle class="hc-arc" cx="20" cy="20" r="16"
@@ -4928,7 +4943,7 @@ function _tdPrehled(p) {
   const opp = d.opportunity ? `<div class="td-opp">${ico("target")} <span>${esc(d.opportunity.note)}</span></div>` : "";
   const fulfil = f ? `<div class="td-fulfil ${f.fulfilmentPct < 60 ? "bad" : (f.fulfilmentPct < 80 ? "warn" : "ok")}">
       <div class="tf-big">${f.fulfilmentPct}%</div><div class="tf-sub">plnění TourPlanu · naplánováno ${f.planned}, splněno ${f.done + f.doneShifted}, <b>minuto ${f.missed}</b></div></div>` : "";
-  const why = (h.why || []).map((w) => `<span class="td-why">${esc(w.label)}</span>`).join("");
+  const why = whyChipsHtml(h.why, "td-why");
   return `<div class="td-scroll">
     <div class="td-kpis">
       ${_tdKpi("Návštěvy", k.visits)}

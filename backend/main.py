@@ -82,6 +82,32 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(Exception)
+async def _unhandled_exc(request, exc):  # noqa: ANN001
+    """Any uncaught endpoint error → a real, visible message instead of a bare
+    "Chyba 500". In the local desktop app the traceback is written next to the
+    app (FieldForceData/api_errors.log) AND returned in the response so the UI
+    can show *what* broke — a windowed .exe has no console to read otherwise.
+    Re-raise HTTPException so intended 4xx/detail responses are untouched."""
+    import traceback
+    from fastapi import HTTPException as _HTTPExc
+    from fastapi.responses import JSONResponse
+    if isinstance(exc, _HTTPExc):
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    tb = traceback.format_exc()
+    try:
+        import db as _db
+        with open(os.path.join(_db.data_dir(), "api_errors.log"), "a", encoding="utf-8") as f:
+            f.write(f"\n===== {request.method} {request.url.path} =====\n{tb}\n")
+    except Exception:  # noqa: BLE001
+        pass
+    detail = f"{type(exc).__name__}: {exc}"
+    body = {"detail": detail}
+    if LOCAL_MODE:
+        body["trace"] = tb.splitlines()[-12:]  # last frames, enough to locate it
+    return JSONResponse(status_code=500, content=body)
+
+
 class LoginRequest(BaseModel):
     password: str
 
