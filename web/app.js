@@ -5533,7 +5533,7 @@ async function boot() {
 }
 
 // ---- navigation shell -----------------------------------------------------
-const _NAV_TITLES = { dashboard: "Přehled", import: "Import dat", tourplan: "TourPlan", pos: "POS", analytics: "Analytika", summary: "Měsíční souhrn", settings: "Nastavení" };
+const _NAV_TITLES = { dashboard: "Přehled", import: "Import dat", tourplan: "TourPlan", pos: "POS", technici: "Technici", analytics: "Analytika", summary: "Měsíční souhrn", settings: "Nastavení" };
 let _navReady = {};
 
 // ============ Task types / materials config (Nastavení) ============
@@ -5716,6 +5716,11 @@ function setAnalyticsMode(mode) {
   if (tech) tech.style.display = mode === "tech" ? "" : "none";
   document.querySelectorAll("#an-modes .an-mode").forEach((b) =>
     b.classList.toggle("on", b.dataset.mode === mode));
+  const anT = document.getElementById("an-title"), anS = document.getElementById("an-sub");
+  if (anT) anT.textContent = mode === "tech" ? "Technici" : "Analytika";
+  if (anS) anS.textContent = mode === "tech"
+    ? "Práce techniků: skóre, produktivita, trasy a efektivita — klikni na technika pro rozbor."
+    : "Manažerské dashboardy sítě — přehled výkonu, kapacit a ztrát.";
   if (mode === "dash" && typeof initDashboards === "function") initDashboards();
 }
 function initAnalytics() {
@@ -6512,12 +6517,17 @@ function _tgRender() {
   });
 }
 
-function showView(name) {
-  // "Dashboardy" was merged into Analytika (manager-dashboards mode).
-  if (name === "dashboards") { _anMode = "dash"; name = "analytics"; }
+function showView(name, mode) {
+  // "Technici" and "Analytika" are the two modes of the single analytics view;
+  // "Dashboardy" is the old alias for the manager-dashboards mode.
+  if (name === "technici") { name = "analytics"; mode = mode || "tech"; }
+  if (name === "dashboards") { name = "analytics"; mode = "dash"; }
+  if (name === "analytics" && mode) _anMode = mode;
+  // which sidebar item lights up: analytics splits into technici / analytics by mode
+  const navId = name === "analytics" ? (_anMode === "tech" ? "technici" : "analytics") : name;
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("hidden", v.dataset.view !== name));
-  document.querySelectorAll(".side-item").forEach((b) => b.classList.toggle("active", b.dataset.nav === name));
-  const tb = document.getElementById("tb-title"); if (tb) tb.textContent = _NAV_TITLES[name] || name;
+  document.querySelectorAll(".side-item").forEach((b) => b.classList.toggle("active", b.dataset.nav === navId));
+  const tb = document.getElementById("tb-title"); if (tb) tb.textContent = _NAV_TITLES[navId] || navId;
   // lazy first-load per view (data already cached afterwards)
   if (!_navReady[name]) {
     _navReady[name] = true;
@@ -6950,7 +6960,9 @@ function renderWhatif(d) {
 
 function _initNav() {
   document.querySelectorAll(".side-item").forEach((b) =>
-    b.addEventListener("click", () => showView(b.dataset.nav)));
+    b.addEventListener("click", () => showView(b.dataset.nav, b.dataset.mode)));
+  const goImp = document.getElementById("set-goto-import");
+  if (goImp) goImp.addEventListener("click", () => showView("import"));
   document.querySelectorAll(".si-ico[data-ico]").forEach((el) => el.innerHTML = ico(el.dataset.ico));
   const dz = document.getElementById("dz-ico"); if (dz) dz.innerHTML = ico("upload");
   _initDropZone();

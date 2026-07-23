@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=109">
+<link rel="stylesheet" href="styles.css?v=110">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -29,11 +29,11 @@
     <div class="side-logo"><span class="side-mark">◆</span> Field&nbsp;Force <span class="ver">v96</span></div>
     <nav class="side-nav">
       <button class="side-item active" data-nav="dashboard" title="Přehled"><span class="si-ico" data-ico="grid"></span><span class="si-label">Přehled</span></button>
-      <button class="side-item" data-nav="import" title="Import dat"><span class="si-ico" data-ico="upload"></span><span class="si-label">Import dat</span></button>
       <button class="side-item" data-nav="tourplan" title="TourPlan"><span class="si-ico" data-ico="route"></span><span class="si-label">TourPlan</span></button>
-      <button class="side-item" data-nav="pos" title="POS"><span class="si-ico" data-ico="grid"></span><span class="si-label">POS</span></button>
-      <button class="side-item" data-nav="analytics" title="Analytika"><span class="si-ico" data-ico="chart"></span><span class="si-label">Analytika</span></button>
+      <button class="side-item" data-nav="technici" data-mode="tech" title="Technici"><span class="si-ico" data-ico="chart"></span><span class="si-label">Technici</span></button>
+      <button class="side-item" data-nav="analytics" data-mode="dash" title="Analytika"><span class="si-ico" data-ico="chart"></span><span class="si-label">Analytika</span></button>
       <button class="side-item" data-nav="summary" title="Měsíční souhrn"><span class="si-ico" data-ico="chart"></span><span class="si-label">Měsíční souhrn</span></button>
+      <button class="side-item" data-nav="pos" title="POS"><span class="si-ico" data-ico="grid"></span><span class="si-label">POS</span></button>
       <button class="side-item" data-nav="settings" title="Nastavení"><span class="si-ico" data-ico="gear"></span><span class="si-label">Nastavení</span></button>
     </nav>
     <div class="side-foot"><button id="logout" class="btn-ghost">Odhlásit</button></div>
@@ -662,8 +662,8 @@
 
     <div class="view hidden" data-view="analytics">
       <div class="view-head">
-        <h1>Analytika</h1>
-        <p>Manažerské dashboardy sítě i detailní analýza práce techniků na jednom místě. Přepni pohled níže.</p>
+        <h1 id="an-title">Analytika</h1>
+        <p id="an-sub">Manažerské dashboardy sítě i detailní analýza práce techniků na jednom místě. Přepni pohled níže.</p>
       </div>
 
       <div class="an-modes" id="an-modes">
@@ -794,6 +794,16 @@
         <h1>Nastavení</h1>
         <p>Plánovací model (kadence, kategorie, terminály, partneři, kampaně) i pokročilé parametry enginu – vše z UI, bez zásahu do kódu. Engine pravidla jen čte; změny se projeví při dalším generování TourPlanu.</p>
       </div>
+
+      <section class="card set-import-card">
+        <div class="set-import">
+          <div>
+            <h2 style="margin:0 0 4px">Import dat <span class="badge">POS · SalesApp · TourPlan</span></h2>
+            <p class="hint" style="margin:0">Nahrání a stav dat (POS síť, SalesApp, plány). POS, které v novém POS souboru nejsou, se označí jako neaktivní.</p>
+          </div>
+          <button id="set-goto-import" class="primary">Otevřít Import →</button>
+        </div>
+      </section>
 
       <div class="fbar cfg-level" id="cfg-level-tabs">
         <button class="pill on" data-level="model">Plánovací model</button>
@@ -960,6 +970,6 @@
   </div>
 </div>
 
-<script src="app.js?v=118"></script>
+<script src="app.js?v=119"></script>
 </body>
 </html>

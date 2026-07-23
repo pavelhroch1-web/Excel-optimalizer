@@ -1645,3 +1645,7 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .ti-empty{opacity:.55;font-size:.88rem;margin:2px 0}
 .ti-improve{margin-top:12px;padding:11px 13px;border:1px dashed var(--line,#333a47);border-radius:11px}
 @media(max-width:640px){.ti-cols{grid-template-columns:1fr}}
+
+/* Settings: Import entry card */
+.set-import-card{background:var(--card2,rgba(255,255,255,.02))}
+.set-import{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
