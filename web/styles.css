@@ -1611,3 +1611,8 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 .hs-scream{border-color:#e0463a;background:rgba(224,70,58,.09)}
 .hs-scream .hs-name{color:#ff6a5a}
 .hs-scream:hover{border-color:#ff6a5a}
+
+/* POS detail map (render down to the individual POS) */
+.pd-map{height:230px;border-radius:12px;margin:10px 0 6px;overflow:hidden;
+  border:1px solid var(--line,#2a2f3a);background:#1b1f27;z-index:0}
+.pd-map .leaflet-container{background:#1b1f27}

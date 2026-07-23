@@ -1548,6 +1548,10 @@ function renderPosCard(c) {
     c.area, c.overrideType].filter(Boolean);
   let html = `<div class="pd-chips">` + chips.map((s) => `<span class="pd-chip">${esc(s)}</span>`).join("") + `</div>`;
   html += `<p class="pd-sub">${esc(c.address || "")}${c.technician ? " · technik " + esc(c.technician) : ""}</p>`;
+  // render this POS on the map (pin renders even offline; street tiles need net)
+  if (c.gps && c.gps.x && c.gps.y) {
+    html += `<div id="pd-pos-map" class="pd-map" data-lat="${c.gps.x}" data-lon="${c.gps.y}"></div>`;
+  }
 
   // system recommendation
   const rec = c.recommendation || {};
@@ -1641,9 +1645,25 @@ async function openPosDetail(posId, week) {
     bodyEl.innerHTML = renderPosCard(c)
       + (head ? `<div class="pd-section" style="margin-top:22px">Plánování</div>` + head : "")
       + _renderPosHistory(hist);
+    _initPosDetailMap(c);
   } catch (err) {
     bodyEl.innerHTML = head || `<p class="result err">Chyba: ${esc(err.message)}</p>`;
   }
+}
+
+let _pdMap = null;
+function _initPosDetailMap(c) {
+  const el = document.getElementById("pd-pos-map");
+  if (!el || typeof L === "undefined") return;
+  const lat = +el.dataset.lat, lon = +el.dataset.lon;
+  if (!lat || !lon) return;
+  if (_pdMap) { try { _pdMap.remove(); } catch (e) { /* noop */ } _pdMap = null; }
+  const map = L.map(el, { scrollWheelZoom: true, attributionControl: false }).setView([lat, lon], 15);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+  L.marker([lat, lon]).addTo(map)
+    .bindPopup(`<b>${esc(c.name || c.pos || "")}</b>${c.address ? "<br>" + esc(c.address) : ""}`).openPopup();
+  _pdMap = map;
+  setTimeout(() => { try { map.invalidateSize(); } catch (e) { /* noop */ } }, 80);
 }
 
 // Compact task-bundle cell for the draft/plan table: colored count chips per
