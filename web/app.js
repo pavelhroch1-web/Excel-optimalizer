@@ -1642,10 +1642,20 @@ async function openPosDetail(posId, week) {
     if (clu && clu.clustered) c.cluster = clu;
     if (tsk && (tsk.tasks || []).length) c.openTasks = tsk.tasks;
     document.getElementById("pd-title").textContent = "POS " + posId + (c.name ? " · " + c.name : "");
-    bodyEl.innerHTML = renderPosCard(c)
+    const blackBtn = `<div class="pd-blacklist"><button id="pd-blacklist-btn" class="ghost small" data-pos="${esc(posId)}">⛔ Blacklist tento POS (deaktivovat)</button></div>`;
+    bodyEl.innerHTML = renderPosCard(c) + blackBtn
       + (head ? `<div class="pd-section" style="margin-top:22px">Plánování</div>` + head : "")
       + _renderPosHistory(hist);
     _initPosDetailMap(c);
+    const bb = document.getElementById("pd-blacklist-btn");
+    if (bb) bb.addEventListener("click", async () => {
+      const reason = prompt("Důvod blacklistu (nepovinné):", "ruční vyřazení");
+      if (reason === null) return;
+      bb.disabled = true; bb.textContent = "Přidávám na blacklist…";
+      try { await postJson("/api/pos/blacklist", { pos_id: posId, reason });
+        bb.textContent = "⛔ Na blacklistu (neaktivní)"; }
+      catch (e) { bb.disabled = false; bb.textContent = "Chyba: " + e.message; }
+    });
   } catch (err) {
     bodyEl.innerHTML = head || `<p class="result err">Chyba: ${esc(err.message)}</p>`;
   }
@@ -6354,7 +6364,76 @@ const _posl = { q: "", area: "", market: "", technician: "", status: "all", offs
 const _POSL_RISK = { never: ["var(--bad)", "nikdy"], overdue: ["var(--bad)", "po termínu"],
                      soon: ["var(--warn)", "blíží se"], ok: ["var(--good)", "v normě"] };
 
+// ---- POS address de-dup + blacklist --------------------------------------
+let _dedupInit = false;
+function initDedup() {
+  if (_dedupInit) return; _dedupInit = true;
+  on2("dedup-refresh", loadDupes);
+  on2("bl-refresh", loadBlacklist);
+  on2("dedup-apply-all", async () => {
+    const el = document.getElementById("dedup-result");
+    if (!confirm("Opravdu deaktivovat všechny slabší POS na duplicitních adresách? Zůstane vždy nejsilnější (nejvyšší PPT). Půjde vrátit z blacklistu.")) return;
+    setResult("dedup-result", "Deaktivuji slabší duplicity…", "");
+    try {
+      const r = await postJson("/api/pos/dedup/apply", {});
+      setResult("dedup-result", `Hotovo — deaktivováno ${r.deactivated} slabších POS. Přesunuty na blacklist.`, "ok");
+      loadDupes(); loadBlacklist();
+    } catch (e) { setResult("dedup-result", "Chyba: " + e.message, "err"); }
+  });
+  loadDupes();
+}
+
+async function loadDupes() {
+  const sum = document.getElementById("dedup-summary"), out = document.getElementById("dedup-groups");
+  if (sum) sum.innerHTML = skeleton({ rows: 1 });
+  try {
+    const d = await apiJson("/api/pos/duplicates?limit=40");
+    if (sum) sum.innerHTML = `<div class="pl-tiles">` +
+      tile("Duplicitních adres", _fmtNum(d.groupCount), "stejná adresa + firma", d.groupCount ? "warn" : "good") +
+      tile("K deaktivaci", _fmtNum(d.totalDeactivatable), "slabší POS (nech nejsilnější)", d.totalDeactivatable ? "warn" : "good") + `</div>`;
+    if (!out) return;
+    if (!d.groups.length) { showState(out, "empty", "Žádné duplicity — každá adresa má jen jeden aktivní POS. 👍"); return; }
+    out.innerHTML = `<div class="pl-section">Náhled (nejvíc duplicit první · ${d.shown} z ${d.groupCount})</div>` +
+      d.groups.map((g) => {
+        const keep = `<span class="dd-keep">✔ NECHAT ${esc(g.keep.pos)} · PPT ${_fmtNum(g.keep.ppt || 0)}</span>`;
+        const drops = g.drop.map((x) => `<span class="dd-drop">✕ ${esc(x.pos)} · PPT ${_fmtNum(x.ppt || 0)}</span>`).join("");
+        return `<div class="dd-row"><div class="dd-main"><div class="dd-name">${esc(g.name || "")}</div>
+            <div class="dd-addr">${esc(g.address || "")}</div></div>
+          <div class="dd-pos">${keep} ${drops}</div>
+          <button class="ghost small dd-apply" data-addr="${esc(g.address)}">Deaktivovat slabší</button></div>`;
+      }).join("");
+    out.querySelectorAll(".dd-apply").forEach((b) => b.addEventListener("click", async () => {
+      b.disabled = true;
+      try { await postJson("/api/pos/dedup/apply", { addresses: [b.dataset.addr] });
+        setResult("dedup-result", "Skupina vyřešena — slabší na blacklistu.", "ok"); loadDupes(); loadBlacklist();
+      } catch (e) { setResult("dedup-result", "Chyba: " + e.message, "err"); b.disabled = false; }
+    }));
+  } catch (e) { if (sum) showState(sum, "error", "Chyba: " + e.message); }
+}
+
+async function loadBlacklist() {
+  const out = document.getElementById("blacklist-out");
+  if (!out) return;
+  out.innerHTML = skeleton({ rows: 2 });
+  try {
+    const d = await apiJson("/api/pos/blacklist");
+    if (!d.items.length) { out.innerHTML = `<div class="pl-section">Blacklist</div><p class="hint">Blacklist je prázdný.</p>`; return; }
+    out.innerHTML = `<div class="pl-section">Blacklist <span class="pd-chip">${d.count}</span></div>` +
+      `<div class="bl-list">` + d.items.map((x) =>
+        `<div class="bl-row"><div><b>${esc(x.pos_id)}</b> ${esc(x.name || "")} <span class="bl-city">${esc(x.city || "")}</span>
+           <span class="bl-reason">${esc(x.reason || "")}${x.kept_pos_id ? " · nechán " + esc(x.kept_pos_id) : ""}</span></div>
+         <button class="ghost small bl-un" data-pos="${esc(x.pos_id)}">Vrátit (aktivovat)</button></div>`).join("") + `</div>`;
+    out.querySelectorAll(".bl-un").forEach((b) => b.addEventListener("click", async () => {
+      b.disabled = true;
+      try { await apiFetch("/api/pos/blacklist/" + encodeURIComponent(b.dataset.pos), { method: "DELETE" });
+        loadBlacklist(); loadDupes();
+      } catch (e) { b.disabled = false; }
+    }));
+  } catch (e) { showState(out, "error", "Chyba: " + e.message); }
+}
+
 function initPosView() {
+  initDedup();
   apiJson("/api/pos/list/filters").then((f) => {
     const fill = (id, arr) => { const s = document.getElementById(id); if (!s) return;
       arr.forEach((v) => { const o = document.createElement("option"); o.value = v; o.textContent = v; s.appendChild(o); }); };

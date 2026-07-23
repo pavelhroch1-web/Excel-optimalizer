@@ -91,6 +91,17 @@ CREATE TABLE IF NOT EXISTS closed_pos (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Blacklisted POS: kept inactive permanently, even across re-imports. Used for
+-- address duplicates (keep the strongest POS, blacklist the weaker ones) and
+-- for manual exclusion. import_pos_master forces active=0 for these.
+CREATE TABLE IF NOT EXISTS pos_blacklist (
+    pos_id      TEXT PRIMARY KEY,
+    reason      TEXT,
+    source      TEXT,                 -- 'dedup' | 'manual'
+    kept_pos_id TEXT,                 -- for dedup: the stronger POS we kept
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- ---------------------------------------------------------------------------
 -- SalesApp history (REALITY: what technicians actually visited)
 -- ---------------------------------------------------------------------------

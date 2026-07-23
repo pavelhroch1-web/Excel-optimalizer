@@ -1649,3 +1649,20 @@ body:has(.app-shell:not(.hidden)) { padding: 0; }
 /* Settings: Import entry card */
 .set-import-card{background:var(--card2,rgba(255,255,255,.02))}
 .set-import{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+
+/* POS address de-dup + blacklist */
+.dd-summary{margin:6px 0}
+.dd-row{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;
+  padding:9px 12px;border:1px solid var(--line,#2a2f3a);border-radius:10px;margin-bottom:6px}
+.dd-name{font-weight:600}
+.dd-addr{font-size:.82rem;opacity:.6}
+.dd-pos{display:flex;flex-wrap:wrap;gap:6px;font-size:.82rem}
+.dd-keep{color:#2fb98a;font-weight:600;white-space:nowrap}
+.dd-drop{color:#e8734a;white-space:nowrap;text-decoration:line-through;opacity:.85}
+.bl-list{display:flex;flex-direction:column;gap:6px}
+.bl-row{display:flex;justify-content:space-between;align-items:center;gap:12px;
+  padding:8px 12px;border:1px solid var(--line,#2a2f3a);border-radius:9px}
+.bl-city{opacity:.6}
+.bl-reason{font-size:.8rem;opacity:.62;margin-left:6px}
+.pd-blacklist{margin:14px 0 4px}
+.btn-sm,.small{font-size:.82rem;padding:5px 10px}

@@ -1083,6 +1083,39 @@ if LOCAL_MODE:
     def pos_list_filters():
         return pos_insights.list_filters()
 
+    # --- POS address de-duplication + blacklist -----------------------------
+    @app.get("/api/pos/duplicates", dependencies=[Depends(require_auth)])
+    def pos_duplicates(limit: int = 200):
+        import pos_dedup
+        return pos_dedup.duplicate_groups(limit)
+
+    class DedupApplyRequest(BaseModel):
+        addresses: list[str] | None = None  # None = all groups
+
+    @app.post("/api/pos/dedup/apply", dependencies=[Depends(require_auth)])
+    def pos_dedup_apply(body: DedupApplyRequest):
+        import pos_dedup
+        return pos_dedup.apply_dedup(body.addresses)
+
+    @app.get("/api/pos/blacklist", dependencies=[Depends(require_auth)])
+    def pos_blacklist_get(limit: int = 500):
+        import pos_dedup
+        return pos_dedup.blacklist_list(limit)
+
+    class BlacklistRequest(BaseModel):
+        pos_id: str
+        reason: str = ""
+
+    @app.post("/api/pos/blacklist", dependencies=[Depends(require_auth)])
+    def pos_blacklist_add(body: BlacklistRequest):
+        import pos_dedup
+        return pos_dedup.blacklist_add(body.pos_id, body.reason, source="manual")
+
+    @app.delete("/api/pos/blacklist/{pos_id}", dependencies=[Depends(require_auth)])
+    def pos_blacklist_del(pos_id: str):
+        import pos_dedup
+        return pos_dedup.blacklist_remove(pos_id)
+
     @app.get("/api/pos/{pos_id}/visits", dependencies=[Depends(require_auth)])
     def pos_visits(pos_id: str):
         """Informational: who visited this POS (technician vs OZ), when, what."""

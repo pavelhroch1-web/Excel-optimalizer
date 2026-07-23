@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=110">
+<link rel="stylesheet" href="styles.css?v=111">
 <script src="config.js?v=29"></script>
 </head>
 <body>
@@ -642,6 +642,22 @@
         <h1>POS — celá síť</h1>
         <p>Všechny provozovny na jednom místě: kdo, kde, řetězec, technik, poslední návštěva a riziko podle kadence. Filtruj a klikni na řádek pro detail POS s celou historií.</p>
       </div>
+
+      <!-- ADDRESS DE-DUP + BLACKLIST -->
+      <section class="card">
+        <h2>Duplicity adresy &amp; blacklist <span class="badge">stejná adresa + firma → nech nejsilnější</span></h2>
+        <p class="hint">Když je na jedné adrese víc POS čísel téže provozovny (starý/nový terminál), nech aktivní jen <strong>nejsilnější</strong> (podle PPT) a slabší dej na <strong>blacklist</strong> — zůstanou neaktivní i po dalším importu. Blacklist můžeš kdykoli vrátit.</p>
+        <div id="dedup-summary" class="dd-summary"></div>
+        <div class="row" style="gap:8px;margin:10px 0">
+          <button id="dedup-refresh" class="ghost">Najít duplicity</button>
+          <button id="dedup-apply-all" class="primary">Deaktivovat všechny slabší</button>
+          <button id="bl-refresh" class="ghost">Zobrazit blacklist</button>
+        </div>
+        <p id="dedup-result" class="result"></p>
+        <div id="dedup-groups"></div>
+        <div id="blacklist-out"></div>
+      </section>
+
       <section class="card">
         <div class="tg-bar" id="posl-bar">
           <label class="fsel"><input type="text" id="posl-q" placeholder="⌕ číslo / název / město" style="width:220px"></label>
@@ -970,6 +986,6 @@
   </div>
 </div>
 
-<script src="app.js?v=120"></script>
+<script src="app.js?v=121"></script>
 </body>
 </html>

@@ -149,6 +149,12 @@ def import_pos_master(conn, ws) -> dict:
 
     # POS present in the DB but missing from this import -> Inactive (kept).
     inactivated = history.mark_missing_inactive(conn, seen, source="import")
+    # Blacklisted POS (address duplicates / manual) stay inactive across imports.
+    try:
+        import pos_dedup
+        pos_dedup.enforce_blacklist(conn)
+    except Exception:  # noqa: BLE001
+        pass
     summary = {"total": n, "new": new_pos, "changed": changed_pos,
                "pptChanged": ppt_changed, "inactivated": inactivated}
     history.log_event("import", "pos_master", None, summary, conn=conn)
