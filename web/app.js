@@ -6574,7 +6574,7 @@ function showView(name, mode) {
 // linear setup/scenario/manual-generate cards are duplicates of the wizard, so
 // they move to a "Pokročilé" (expert) stage instead of the main flow.
 const _PS_STAGES = [
-  { id: "data", label: "Data", sub: "Vstupní exporty" },
+  { id: "data", label: "Naplánovat", sub: "Smart Fill — rychlý plán" },
   { id: "review", label: "Review", sub: "Kontrola plánu" },
   { id: "edits", label: "Úpravy", sub: "Override · priorita · přeřazení" },
   { id: "publish", label: "Publish & Export", sub: "Verze · export" },
