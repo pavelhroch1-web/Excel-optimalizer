@@ -798,6 +798,20 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 .sfc-chip.off { color: var(--warn, #b7791f); border-color: color-mix(in srgb, var(--warn, #d69e2e) 45%, var(--border)); }
 .sfc-full { color: var(--good); font-weight: 600; font-size: 13px; }
 .sfc-link { color: var(--accent); font-size: 12px; text-decoration: none; margin-left: auto; }
+/* Network-coverage prediction banner ("obslouzis X POS = Y % site") */
+.pr-cov { margin-bottom: 14px; padding: 12px 14px; border-radius: var(--r-md);
+  border: 1px solid var(--border); background: var(--surface-2, rgba(127,127,127,.06)); }
+.pr-cov-bar { position: relative; height: 22px; border-radius: 999px; overflow: hidden;
+  background: color-mix(in srgb, var(--text-3, #888) 18%, transparent); }
+.pr-cov-fill { height: 100%; border-radius: 999px; background: var(--accent, #3b82f6);
+  transition: width .4s ease; }
+.pr-cov-good .pr-cov-fill { background: var(--good, #38a169); }
+.pr-cov-warn .pr-cov-fill { background: var(--warn, #d69e2e); }
+.pr-cov-low  .pr-cov-fill { background: var(--bad, #e53e3e); }
+.pr-cov-pct { position: absolute; top: 0; left: 10px; line-height: 22px; font-size: 12px;
+  font-weight: 700; color: var(--text-1, #111); mix-blend-mode: difference; }
+.pr-cov-msg { margin-top: 8px; font-size: 13px; color: var(--text-2, #444); line-height: 1.45; }
+
 .pr-why { margin-top: 14px; padding: 12px 14px; border-radius: var(--r-md);
   border: 1px solid color-mix(in srgb, var(--warn, #d69e2e) 35%, var(--border)); background: color-mix(in srgb, var(--warn, #d69e2e) 8%, transparent); }
 .pr-why-h { font-weight: 640; margin-bottom: 8px; }

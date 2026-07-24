@@ -809,11 +809,20 @@ function _renderPlanResult(week, length, a) {
         <button id="pr-enable-all" class="primary">⚡ Zapnout celou síť a přegenerovat</button>
         <span class="hint">Zapne všechny typy terminálů, partnery a zruší vyloučení kategorií — pak plánuje z celé sítě (${_fmtNum(fixableCount)} POS se přidá).</span></div>` : "") +
       `</div>` : "";
+  // NETWORK COVERAGE PREDICTION — "s tímto nastavením obsloužíš X POS = Y % sítě",
+  // computed on DISTINCT POS by the engine run (assessment.coverage).
+  const cov = a.coverage || null;
+  const covBanner = cov ? `<div class="pr-cov pr-cov-${cov.coveragePct >= 80 ? "good" : cov.coveragePct >= 50 ? "warn" : "low"}">
+      <div class="pr-cov-bar"><div class="pr-cov-fill" style="width:${Math.min(100, cov.coveragePct)}%"></div>
+        <span class="pr-cov-pct">${cov.coveragePct} %</span></div>
+      <div class="pr-cov-msg">${esc(cov.message || "")}</div>
+    </div>` : "";
   document.getElementById("sf-out").innerHTML =
+    covBanner +
     `<div class="pl-tiles">` +
-    tile("Naplánováno", a.planned ?? "—", `týden ${week}${length > 1 ? "–" + (week + length - 1) : ""}`, "good") +
+    tile("Obslouženo POS", cov ? cov.servedPos : (a.planned ?? "—"), cov ? `${cov.coveragePct} % aktivní sítě` : `týden ${week}`, "good") +
     tile("Povinné pokryto", a.mandatory ?? "—", "kadence / kampaně") +
-    tile("Mimo plán", a.unserved ?? "—", "nevešlo se") +
+    tile("Chybí kapacita", cov ? cov.eligibleUnplannedPos : (a.unserved ?? "—"), "způsobilé, nevešly se") +
     `</div>` + why +
     `<div class="pr-actions">
        <button class="primary" data-pr="view">Zobrazit plán po technicích →</button>

@@ -218,6 +218,19 @@ def run_assessment_from_candidates(cands: list, rejected: list | None) -> dict:
 
     reasons = dict(Counter((r.get("rejectReason") or "")[:48] for r in (rejected or [])).most_common(8))
     ppts = [c["ppt"] for c in sel if c.get("ppt") is not None]
+
+    # NETWORK COVERAGE PREDICTION (product owner, 2026-07-24): planned/unserved
+    # above count visit-ROWS (a POS planned in two weeks counts twice). The
+    # manager's question — "s tímto nastavením obsloužíme X POS = Y % sítě" — is
+    # about DISTINCT POS, and it must separate the two very different reasons a
+    # POS is left out: capacity simply ran out (fixable with more weeks/techs)
+    # vs. it's disabled/excluded/closed (a deliberate config choice). Distinct
+    # by pos id across the whole horizon.
+    served = {c.get("pos") for c in sel if c.get("pos")}
+    eligible_unplanned = {c.get("pos") for c in (held + notsel) if c.get("pos")} - served
+    disabled = {(r.get("pos")) for r in (rejected or []) if r.get("pos")} - served - eligible_unplanned
+    coverage = _coverage_block(len(served), len(eligible_unplanned), len(disabled))
+
     return {
         "planned": len(sel), "heldBack": len(held), "notSelected": len(notsel),
         "unserved": len(held) + len(notsel) + len(rejected or []),
@@ -228,6 +241,31 @@ def run_assessment_from_candidates(cands: list, rejected: list | None) -> dict:
         "scoreP25": pct(0.25), "scoreP75": pct(0.75),
         "pptMedianSelected": round(statistics.median(ppts), 1) if ppts else None,
         "unservedByReason": reasons,
+        "coverage": coverage,
+    }
+
+
+def _coverage_block(served: int, eligible_unplanned: int, disabled: int) -> dict:
+    """Turn the distinct-POS tallies into a network-coverage prediction the UI
+    can state plainly. networkActive is the honest denominator (all active POS);
+    coveragePct is served / networkActive."""
+    try:
+        network_active = db.get("SELECT COUNT(*) c FROM pos_master WHERE active=1")[0]["c"]
+    except Exception:  # noqa: BLE001
+        network_active = served + eligible_unplanned + disabled
+    total = network_active or (served + eligible_unplanned + disabled) or 1
+    pct = round(100 * served / total)
+    msg = (f"S tímto nastavením obsloužíš {served:,} POS = {pct} % aktivní sítě "
+           f"({total:,}).").replace(",", " ")
+    if eligible_unplanned:
+        msg += (f" Na dalších {eligible_unplanned:,} způsobilých POS nestačí kapacita "
+                f"(přidej týdny nebo techniky).").replace(",", " ")
+    if disabled:
+        msg += f" {disabled:,} POS je vypnutých/vyřazených (mimo plán záměrně).".replace(",", " ")
+    return {
+        "servedPos": served, "eligibleUnplannedPos": eligible_unplanned,
+        "disabledPos": disabled, "networkActive": total, "coveragePct": pct,
+        "message": msg,
     }
 
 
