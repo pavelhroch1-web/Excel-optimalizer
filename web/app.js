@@ -25,17 +25,34 @@ function on(id, event, handler) {
 }
 
 async function apiFetch(path, options = {}) {
-  const res = await fetch(API_BASE + path, {
-    ...options,
-    headers: {
-      ...(options.headers || {}),
-      ...(getToken() ? { Authorization: "Bearer " + getToken() } : {}),
-    },
-  });
+  let res;
+  try {
+    res = await fetch(API_BASE + path, {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+        ...(getToken() ? { Authorization: "Bearer " + getToken() } : {}),
+      },
+    });
+  } catch (e) {
+    // fetch rejects only on a network-level failure (server down / lost
+    // connection) — give the manager a human message, not "Failed to fetch".
+    const err = new Error("Aplikace neodpovídá — spojení selhalo. Zkus Obnovit; pokud potíže trvají, spusť FieldForceOptimizer.exe znovu.");
+    err.network = true;
+    throw err;
+  }
   if (res.status === 401) {
     clearToken();
     showLogin();
     throw new Error("Přihlášení vypršelo.");
+  }
+  if (res.status >= 500) {
+    // surface server errors consistently; the body carries the real reason in
+    // local mode (global exception handler), else a generic message.
+    const d = await res.clone().json().catch(() => ({}));
+    const err = new Error(d.detail || d.error || `Chyba serveru (${res.status}).`);
+    err.server = true;
+    throw err;
   }
   return res;
 }
@@ -138,6 +155,28 @@ function toast(msg, kind = "ok") {   // kind: ok | err | info
   t.classList.add("show");
   _toastTimer = setTimeout(() => t.classList.remove("show"), kind === "err" ? 3600 : 2200);
 }
+
+// Global safety net: nothing should fail completely silently. A rejected promise
+// or a thrown error that no handler caught surfaces as a toast, so the manager
+// at least knows something went wrong (instead of a panel that never fills).
+// Throttled + de-duped so one bad endpoint can't spam the screen. Expected,
+// already-handled cases (expired login, benign aborts) are ignored.
+let _lastGlobalErr = 0;
+function _reportGlobalError(msg) {
+  const now = Date.now();
+  if (!msg || now - _lastGlobalErr < 1500) return;   // throttle bursts
+  _lastGlobalErr = now;
+  const s = String(msg);
+  if (/Přihlášení vypršelo|AbortError|ResizeObserver|Load failed$/i.test(s)) return;
+  try { toast(s.length > 140 ? s.slice(0, 137) + "…" : s, "err"); } catch (_) { /* toast unavailable */ }
+}
+window.addEventListener("unhandledrejection", (e) => {
+  const r = e && e.reason;
+  _reportGlobalError(r && (r.message || r)) ;
+});
+window.addEventListener("error", (e) => {
+  if (e && e.message) _reportGlobalError(e.message);
+});
 
 // Keep focus inside an open dialog (Tab/Shift+Tab wrap) so keyboard users
 // can't tab into the page behind the modal — one helper for every dialog.
