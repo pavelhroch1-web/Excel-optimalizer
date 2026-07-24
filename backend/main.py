@@ -1054,27 +1054,77 @@ if LOCAL_MODE:
     # Campaigns: editable in-app (target_visits = campaign goal; Excel ODHAD is
     # often empty, and the app is the source of truth).
     class CampaignUpdate(BaseModel):
+        kind: str | None = None
+        name: str | None = None
+        year: int | None = None
+        start_week: int | None = None
+        end_week: int | None = None
         target_visits: int | None = None
         priority: int | None = None
         objective_id: int | None = None
+        active: bool | None = None
+
+    class CampaignCreate(BaseModel):
+        kind: str = "VISIBILITA"           # LOSY | LOTERIE | VISIBILITA | …
+        name: str
+        year: int | None = None
+        start_week: int
+        end_week: int
+        priority: int | None = 3
+        target_visits: int | None = None
+
+    _CAMPAIGN_KINDS = {"LOSY", "LOTERIE", "VISIBILITA", "MERCH", "AUDIT", "OSTATNI"}
 
     @app.get("/api/campaigns", dependencies=[Depends(require_auth)])
     def list_campaigns():
         rows = db.get("SELECT id, kind, name, year, start_week, end_week, priority, "
                       "override_gap, estimate, target_visits, objective_id, active "
                       "FROM campaigns ORDER BY start_week, name")
-        return {"campaigns": [dict(r) for r in rows]}
+        return {"campaigns": [dict(r) for r in rows], "kinds": sorted(_CAMPAIGN_KINDS)}
+
+    @app.post("/api/campaigns", dependencies=[Depends(require_auth)])
+    def create_campaign(body: CampaignCreate):
+        import datetime as _dt
+        if not (body.name or "").strip():
+            raise HTTPException(status_code=400, detail="Kampaň musí mít název.")
+        if body.start_week > body.end_week:
+            raise HTTPException(status_code=400, detail="Od týdne nesmí být větší než Do týdne.")
+        kind = (body.kind or "VISIBILITA").upper()
+        year = body.year or _dt.date.today().year
+        conn = db.connect()
+        try:
+            cur = conn.execute(
+                "INSERT INTO campaigns (kind, name, year, start_week, end_week, priority, "
+                "estimate, target_visits, active) VALUES (?,?,?,?,?,?,?,?,1)",
+                (kind, body.name.strip(), year, body.start_week, body.end_week,
+                 body.priority, "", body.target_visits))
+            new_id = cur.lastrowid
+            conn.commit()
+        finally:
+            conn.close()
+        _log_config("campaign", "create", {"name": body.name, "kind": kind,
+                                            "weeks": [body.start_week, body.end_week]})
+        return {"ok": True, "id": new_id}
 
     @app.put("/api/campaigns/{campaign_id}", dependencies=[Depends(require_auth)])
     def update_campaign(campaign_id: int, body: CampaignUpdate):
         sets, params = [], []
-        for f in ("target_visits", "priority", "objective_id"):
+        for f in ("kind", "name", "year", "start_week", "end_week",
+                  "target_visits", "priority", "objective_id"):
             v = getattr(body, f)
             if v is not None:
-                sets.append(f"{f}=?"); params.append(v)
+                sets.append(f"{f}=?"); params.append(v.upper() if f == "kind" else v)
+        if body.active is not None:
+            sets.append("active=?"); params.append(1 if body.active else 0)
         if sets:
             params.append(campaign_id)
             db.run(f"UPDATE campaigns SET {', '.join(sets)}, updated_at=datetime('now') WHERE id=?", tuple(params))
+        return {"ok": True}
+
+    @app.delete("/api/campaigns/{campaign_id}", dependencies=[Depends(require_auth)])
+    def delete_campaign(campaign_id: int):
+        db.run("DELETE FROM campaigns WHERE id=?", (campaign_id,))
+        _log_config("campaign", "delete", {"id": campaign_id})
         return {"ok": True}
 
     import pos_insights  # noqa: E402

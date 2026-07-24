@@ -6421,6 +6421,7 @@ async function loadCoverage() {
 }
 
 // ============ Campaigns (imported activity plan) ============
+const _CAMP_KINDS = ["LOSY", "LOTERIE", "VISIBILITA", "MERCH", "AUDIT", "OSTATNI"];
 async function loadCampaigns() {
   const host = document.getElementById("campaigns-out");
   if (!host) return;
@@ -6428,19 +6429,66 @@ async function loadCampaigns() {
   try {
     const d = await apiJson("/api/campaigns");
     const list = d.campaigns || [];
-    if (!list.length) { host.innerHTML = stateHTML("empty", "Žádné kampaně — naimportuj Activity Plan."); return; }
-    const rows = list.map((c) => {
-      const win = (c.start_week != null ? "t" + c.start_week : "") + (c.end_week != null ? "–" + c.end_week : "");
-      const prio = c.priority != null ? `<span class="chip-pill">P${c.priority}</span>` : "";
-      return `<tr><td>${esc(c.kind || "")}</td><td class="posname">${esc(c.name || "")}</td>
-        <td>${esc(win)}</td><td class="num">${prio}</td>
-        <td>${c.override_gap && c.override_gap !== "NO" ? "ano" : "—"}</td>
-        <td>${c.active ? "aktivní" : "neaktivní"}</td></tr>`;
-    }).join("");
-    host.innerHTML = `<div class="inv-tbl-wrap"><table class="inv-tbl"><thead><tr>
-      <th>Typ</th><th>Kampaň</th><th>Okno</th><th>Priorita</th><th>Override gap</th><th>Stav</th>
-      </tr></thead><tbody>${rows}</tbody></table></div>
-      <p class="hint" style="margin-top:8px">${list.length} kampaní</p>`;
+    const kinds = d.kinds || _CAMP_KINDS;
+    const kindSel = (sel, cls, id) => `<select class="${cls}" data-id="${id}">` +
+      kinds.map((k) => `<option ${k === sel ? "selected" : ""}>${esc(k)}</option>`).join("") + `</select>`;
+    const rows = list.map((c) => `<tr data-id="${c.id}">
+      <td>${kindSel(c.kind || "VISIBILITA", "cmp-kind", c.id)}</td>
+      <td><input class="cmp-f" data-id="${c.id}" data-f="name" value="${esc(c.name || "")}" style="min-width:160px"></td>
+      <td><input type="number" class="cmp-f cmp-w" data-id="${c.id}" data-f="start_week" value="${c.start_week ?? ""}" min="1" max="53"></td>
+      <td><input type="number" class="cmp-f cmp-w" data-id="${c.id}" data-f="end_week" value="${c.end_week ?? ""}" min="1" max="53"></td>
+      <td><input type="number" class="cmp-f cmp-w" data-id="${c.id}" data-f="priority" value="${c.priority ?? ""}" min="1" max="9"></td>
+      <td><input type="number" class="cmp-f" data-id="${c.id}" data-f="target_visits" value="${c.target_visits ?? ""}" min="0" style="width:90px"></td>
+      <td><input type="checkbox" class="cmp-active" data-id="${c.id}" ${c.active ? "checked" : ""}></td>
+      <td><button class="ghost small danger cmp-del" data-id="${c.id}" title="Smazat">✕</button></td>
+    </tr>`).join("");
+    host.innerHTML = `<div class="cmp-add">
+        <div class="cmp-add-title">Přidat kampaň do plánu aktivit</div>
+        <div class="cmp-add-row">
+          <label>Typ ${kindSel("LOSY", "cmp-new-kind", "new")}</label>
+          <label>Název<input id="cmp-new-name" placeholder="např. Losy Vánoce 2026"></label>
+          <label>Od týdne<input type="number" id="cmp-new-sw" min="1" max="53" style="width:80px"></label>
+          <label>Do týdne<input type="number" id="cmp-new-ew" min="1" max="53" style="width:80px"></label>
+          <label>Priorita<input type="number" id="cmp-new-prio" min="1" max="9" value="3" style="width:70px"></label>
+          <label>Cíl návštěv<input type="number" id="cmp-new-target" min="0" style="width:100px"></label>
+          <button id="cmp-add-btn" class="primary">Přidat</button>
+        </div>
+        <p id="cmp-add-result" class="result"></p>
+      </div>
+      ${list.length ? `<div class="inv-tbl-wrap"><table class="inv-tbl cmp-tbl"><thead><tr>
+        <th>Typ</th><th>Kampaň</th><th>Od t.</th><th>Do t.</th><th>Priorita</th><th>Cíl</th><th>Aktivní</th><th></th>
+        </tr></thead><tbody>${rows}</tbody></table></div>
+        <p class="hint" style="margin-top:8px">${list.length} kampaní · změny se projeví při dalším generování plánu.</p>`
+        : `<p class="hint" style="margin-top:10px">Zatím žádné kampaně. Přidej je výše, nebo naimportuj Activity Plan.</p>`}`;
+
+    const save = (id, patch) => apiJson(`/api/campaigns/${id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) })
+      .then(() => toast("Kampaň uložena", "ok")).catch((e) => toast("Chyba: " + e.message, "err"));
+    host.querySelectorAll(".cmp-kind").forEach((s) => s.addEventListener("change", () => save(s.dataset.id, { kind: s.value })));
+    host.querySelectorAll(".cmp-f").forEach((inp) => inp.addEventListener("change", () => {
+      const f = inp.dataset.f; let v = inp.value;
+      if (["start_week", "end_week", "priority", "target_visits"].includes(f)) v = v === "" ? null : parseInt(v, 10);
+      save(inp.dataset.id, { [f]: v });
+    }));
+    host.querySelectorAll(".cmp-active").forEach((cb) => cb.addEventListener("change", () => save(cb.dataset.id, { active: cb.checked })));
+    host.querySelectorAll(".cmp-del").forEach((b) => b.addEventListener("click", async () => {
+      if (!await confirmDialog({ title: "Smazat kampaň?", body: "Odebere se z plánu aktivit.", confirmText: "Smazat", danger: true })) return;
+      await apiJson(`/api/campaigns/${b.dataset.id}`, { method: "DELETE" }); toast("Smazáno", "ok"); loadCampaigns();
+    }));
+    const addBtn = document.getElementById("cmp-add-btn");
+    if (addBtn) addBtn.addEventListener("click", async () => {
+      const name = document.getElementById("cmp-new-name").value.trim();
+      const sw = parseInt(document.getElementById("cmp-new-sw").value, 10);
+      const ew = parseInt(document.getElementById("cmp-new-ew").value, 10);
+      if (!name || !sw || !ew) { setResult("cmp-add-result", "Vyplň název a okno týdnů.", "err"); return; }
+      try {
+        await postJson("/api/campaigns", {
+          kind: document.querySelector(".cmp-new-kind").value, name, start_week: sw, end_week: ew,
+          priority: parseInt(document.getElementById("cmp-new-prio").value, 10) || 3,
+          target_visits: parseInt(document.getElementById("cmp-new-target").value, 10) || null });
+        toast("Kampaň přidána", "ok"); loadCampaigns();
+      } catch (e) { setResult("cmp-add-result", "Chyba: " + e.message, "err"); }
+    });
   } catch (e) { host.innerHTML = stateHTML("error", e.message); }
 }
 

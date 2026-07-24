@@ -130,6 +130,7 @@ def main() -> int:
                           ("/api/pos/duplicates?limit=5", "groups"),
                           ("/api/data/quality", "checks"),
                           ("/api/model", "sections"),
+                          ("/api/campaigns", "campaigns"),
                           ("/api/insights/health?days_back=90", "technicians")]:
             r = get(path)
             ok = r.status_code == 200 and (key is None or key in r.json())
