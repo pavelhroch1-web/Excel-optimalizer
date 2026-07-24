@@ -34,6 +34,24 @@ jobs:
           python tools/verify_seed_db.py
           if ($LASTEXITCODE -ne 0) { throw "Seed DB schema drift - regenerate seed/fieldforce.db" }
 
+      - name: Backend unit tests (pure functions + DTO + caches)
+        shell: pwsh
+        run: |
+          # Fast, Node/pytest-free regression net. A red test stops the build
+          # before it spends minutes packaging a broken .exe.
+          python backend/test_import_and_analytics.py
+          if ($LASTEXITCODE -ne 0) { throw "Backend unit tests failed" }
+
+      - name: Endpoint smoke test (boots the app, hits the critical APIs)
+        shell: pwsh
+        run: |
+          # Boots the real FastAPI app on the seed DB and asserts the endpoints
+          # the UI depends on return 200 with the expected shape, incl. the
+          # import "no false success" guard. Catches a vanished route / 500 /
+          # shape change that unit tests can't see.
+          python tools/smoke_test.py
+          if ($LASTEXITCODE -ne 0) { throw "Endpoint smoke test failed" }
+
       - name: Build portable app (PyInstaller --onedir, self-contained)
         shell: pwsh
         run: |
