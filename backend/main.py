@@ -1093,10 +1093,21 @@ if LOCAL_MODE:
     class DedupApplyRequest(BaseModel):
         addresses: list[str] | None = None  # None = all groups
 
+    def _invalidate_read_caches():
+        # Deactivating/reactivating POS changes the map's visited/unvisited layers
+        # and derived analytics — drop the read-side memos so they don't go stale.
+        try:
+            import diagnostics
+            diagnostics.invalidate_cache()
+        except Exception:  # noqa: BLE001
+            pass
+
     @app.post("/api/pos/dedup/apply", dependencies=[Depends(require_auth)])
     def pos_dedup_apply(body: DedupApplyRequest):
         import pos_dedup
-        return pos_dedup.apply_dedup(body.addresses)
+        r = pos_dedup.apply_dedup(body.addresses)
+        _invalidate_read_caches()
+        return r
 
     @app.get("/api/pos/blacklist", dependencies=[Depends(require_auth)])
     def pos_blacklist_get(limit: int = 500):
@@ -1110,12 +1121,16 @@ if LOCAL_MODE:
     @app.post("/api/pos/blacklist", dependencies=[Depends(require_auth)])
     def pos_blacklist_add(body: BlacklistRequest):
         import pos_dedup
-        return pos_dedup.blacklist_add(body.pos_id, body.reason, source="manual")
+        r = pos_dedup.blacklist_add(body.pos_id, body.reason, source="manual")
+        _invalidate_read_caches()
+        return r
 
     @app.delete("/api/pos/blacklist/{pos_id}", dependencies=[Depends(require_auth)])
     def pos_blacklist_del(pos_id: str):
         import pos_dedup
-        return pos_dedup.blacklist_remove(pos_id)
+        r = pos_dedup.blacklist_remove(pos_id)
+        _invalidate_read_caches()
+        return r
 
     @app.get("/api/pos/{pos_id}/visits", dependencies=[Depends(require_auth)])
     def pos_visits(pos_id: str):

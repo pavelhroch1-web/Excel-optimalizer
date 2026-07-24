@@ -21,6 +21,19 @@ from route_actual import classify
 DEFAULT_CAPACITY = 40          # weekly POS capacity fallback if not configured
 LONG_LEG_KM = 30.0
 
+# Read-side cache. overview() sweeps every recent visit in Python (~15k rows for
+# days_back=120) and yields the SAME result until data changes. Data only changes
+# on import / technician role edits, both of which call diagnostics.invalidate_
+# cache() -> team_analytics.invalidate(). Keyed by (days_back, role). We hand back
+# a deep copy so callers can mutate their view without poisoning the cache.
+import copy as _copy
+
+_overview_cache: dict = {}
+
+
+def invalidate() -> None:
+    _overview_cache.clear()
+
 
 def _dt(s):
     if not s:
@@ -45,6 +58,18 @@ def _iso_week(date_str):
 
 
 def overview(days_back: int = 21, role: str = "TECHNIK") -> dict:
+    """Cached wrapper around the heavy per-person sweep (see _overview_compute).
+    Same inputs -> same output between imports, so we memoize it and return a
+    copy. This is the single hottest read aggregation (8 modules call it)."""
+    key = (int(days_back), str(role).upper())
+    hit = _overview_cache.get(key)
+    if hit is None:
+        hit = _overview_compute(days_back, role)
+        _overview_cache[key] = hit
+    return _copy.deepcopy(hit)
+
+
+def _overview_compute(days_back: int = 21, role: str = "TECHNIK") -> dict:
     """Per-person workload + plan load + overdue, team rollups and leaks, for one
     role (TECHNIK by default; OZ shown only when explicitly requested)."""
     techs = {r["name"]: dict(r) for r in db.get(

@@ -30,6 +30,7 @@ _COMBINE_KM = 6.0            # two POS within this are the "same micro-area"
 _AVG_SPEED_KMH = 45.0        # for turning saved km into saved minutes
 _profiles_cache: dict = {}
 _combo_cache: dict = {}
+_health_cache: dict = {}   # (days_back, role) -> full health_scores (pre-region)
 
 # Visibility is THE primary business purpose — the visit that gets planned into
 # the TourPlan (campaign launch / "Náběh kampaně"). Every other purpose
@@ -428,6 +429,26 @@ def _area_returns_per_week() -> dict:
 
 
 def health_scores(days_back: int = 90, role: str = "TECHNIK", region: str | None = None) -> dict:
+    """Cached, region-filterable Health Score. The heavy compute (peer stats over
+    the whole company) is memoized per (days_back, role) — invalidated on import —
+    and the region filter is applied to a copy, so region switching is instant."""
+    import copy
+    key = (int(days_back), str(role).upper())
+    base = _health_cache.get(key)
+    if base is None:
+        base = _health_compute(days_back, role)
+        _health_cache[key] = base
+    if base.get("insufficient"):
+        return {"technicians": [], "insufficient": True, "role": base["role"],
+                "regions": [], "region": region}
+    out = list(base["technicians"])
+    if region:
+        out = [t for t in out if t.get("region") == region]
+    return {"technicians": copy.deepcopy(out), "worst": copy.deepcopy(out[:5]),
+            "role": base["role"], "regions": base["regions"], "region": region}
+
+
+def _health_compute(days_back: int = 90, role: str = "TECHNIK") -> dict:
     """A composite 0-100 Health Score per person (100 = healthy, low = critical).
     Role-aware: TECHNIK is judged mostly on work done (TourPlan fulfilment,
     visits, work hours); OZ on route efficiency / use of the day. Days with 0
@@ -442,7 +463,7 @@ def health_scores(days_back: int = 90, role: str = "TECHNIK", region: str | None
     techs = [dict(t) for t in ov.get("technicians", [])
              if (t.get("visits") or 0) >= 30 and (t.get("daysWorked") or 0) >= 10]
     if len(techs) < 5:
-        return {"technicians": [], "insufficient": True, "role": role}
+        return {"technicians": [], "insufficient": True, "role": role, "regions": []}
     ar = _area_returns_per_week()
     fulfil = _plan_fulfilment_by_tech() if role == "TECHNIK" else {}
     for t in techs:
@@ -493,14 +514,11 @@ def health_scores(days_back: int = 90, role: str = "TECHNIK", region: str | None
             "why": why[:3],
         })
     out.sort(key=lambda x: x["healthScore"])
-    # Regions available for the filter (whole set, before filtering the list) —
-    # scores stay relative to ALL company peers (a stable standard); the filter
-    # only narrows WHO you look at, not what "normal" means.
+    # Regions available for the filter (whole set). Scores stay relative to ALL
+    # company peers (a stable standard); the region filter (applied by the cached
+    # wrapper) only narrows WHO you look at, not what "normal" means.
     regions = sorted({t["region"] for t in out if t.get("region")})
-    if region:
-        out = [t for t in out if t.get("region") == region]
-    return {"technicians": out, "worst": out[:5], "role": role,
-            "regions": regions, "region": region}
+    return {"technicians": out, "role": role, "regions": regions}
 
 
 def company_overview(days_back: int = 90) -> dict:
@@ -577,3 +595,9 @@ def company_overview(days_back: int = 90) -> dict:
 def invalidate_cache():
     _profiles_cache.clear()
     _combo_cache.clear()
+    _health_cache.clear()
+    for mod in ("team_analytics", "gis"):
+        try:
+            __import__(mod).invalidate()  # hot read-side memos (sweep, map)
+        except Exception:  # noqa: BLE001
+            pass

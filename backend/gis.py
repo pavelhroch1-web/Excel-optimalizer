@@ -22,6 +22,17 @@ import osrm
 import summary as _summary
 from desktop_client.engines.core_logic import GeoPoint, distance_km
 
+# Read-side memo for the summary map. network() runs several full scans over
+# visits+POS and returns the same layers until data changes (import / role edit),
+# both of which call diagnostics.invalidate_cache() -> gis.invalidate(). Keyed by
+# the full filter signature; a copy is returned so callers can't poison it.
+_net_cache: dict = {}
+_NET_CACHE_MAX = 24   # keep the memo bounded across many filter combos
+
+
+def invalidate() -> None:
+    _net_cache.clear()
+
 
 def _visit_where(start, end, names, region, chain, visit_type):
     where = ["v.visit_date >= ?", "v.visit_date <= ?", "p.gps_x IS NOT NULL"]
@@ -42,6 +53,29 @@ def _visit_where(start, end, names, region, chain, visit_type):
 def network(period="month", year=None, month=None, quarter=None, date_from=None, date_to=None,
             role="TECHNIK", region=None, technician=None, chain=None, visit_type=None,
             active="active", include_optimal=False, max_points=6000) -> dict:
+    """Cached wrapper. include_optimal pulls OSRM routes (expensive, single-tech)
+    and is never memoized; everything else is memoized by its filter signature."""
+    if include_optimal:
+        return _network_compute(period, year, month, quarter, date_from, date_to, role,
+                                region, technician, chain, visit_type, active, True, max_points)
+    key = (period, year, month, quarter, date_from, date_to, role, region,
+           technician, chain, visit_type, active, max_points)
+    hit = _net_cache.get(key)
+    if hit is None:
+        if len(_net_cache) >= _NET_CACHE_MAX:
+            _net_cache.clear()
+        hit = _network_compute(period, year, month, quarter, date_from, date_to, role,
+                               region, technician, chain, visit_type, active, False, max_points)
+        _net_cache[key] = hit
+    # Returned straight to FastAPI for JSON serialization (read-only); the map
+    # payload is large (thousands of points), so a deep copy would cost more than
+    # the recompute we just saved. No caller mutates it.
+    return hit
+
+
+def _network_compute(period="month", year=None, month=None, quarter=None, date_from=None, date_to=None,
+                     role="TECHNIK", region=None, technician=None, chain=None, visit_type=None,
+                     active="active", include_optimal=False, max_points=6000) -> dict:
     start, end, label, *_ = _summary.resolve_period(period, year, month, quarter, date_from, date_to)
     region_map = _summary._tech_region_map()
     names = _summary._people((role or "TECHNIK").upper(), region, active, technician, region_map)

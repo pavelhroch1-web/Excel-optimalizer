@@ -139,6 +139,9 @@ CREATE TABLE IF NOT EXISTS salesapp_visits (
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_visits_pos   ON salesapp_visits(pos_id);
+-- covering index for "last visit per POS" (MAX(visit_date) GROUP BY pos_id),
+-- the subquery the POS table runs on every list/filter call.
+CREATE INDEX IF NOT EXISTS ix_visits_pos_date ON salesapp_visits(pos_id, visit_date);
 CREATE INDEX IF NOT EXISTS ix_visits_store ON salesapp_visits(store_uid);
 CREATE INDEX IF NOT EXISTS ix_visits_date  ON salesapp_visits(visit_date);
 CREATE INDEX IF NOT EXISTS ix_visits_tech  ON salesapp_visits(technician);

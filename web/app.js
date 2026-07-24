@@ -2089,7 +2089,7 @@ function _ensureMap() {
   mapDiv.style.display = "block";
   if (typeof L === "undefined") { mapDiv.style.display = "none"; return false; }
   if (!_ractMap) {
-    _ractMap = L.map("ract-map");
+    _ractMap = L.map("ract-map", { preferCanvas: true });
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
       { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(_ractMap);
   }
