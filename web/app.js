@@ -2547,15 +2547,20 @@ async function loadTechnicians() {
     let list = (await apiJson("/api/technicians")).technicians;
     if (filter) list = list.filter((t) => t.role === filter);
     const excl = list.filter((t) => t.excluded).length;
-    el.innerHTML = `<table class="pd-score-table"><thead><tr><th>Jméno</th><th>Role</th><th>Aktivní</th>` +
-      `<th title="Testovací/služební účty — skryté ze všech analýz, alertů i mapy">Vyřadit</th></tr></thead><tbody>` +
+    const noReg = list.filter((t) => !t.region).length;
+    const regions = [...new Set(list.map((t) => t.region).filter(Boolean))].sort();
+    const regOpts = `<datalist id="tech-region-list">${regions.map((r) => `<option value="${esc(r)}">`).join("")}</datalist>`;
+    el.innerHTML = regOpts + `<table class="pd-score-table"><thead><tr><th>Jméno</th><th>Role</th>` +
+      `<th title="Středisko — vyplní se z SalesApp, ✎ = ručně. Řídí filtry po střediscích všude v aplikaci.">Region</th>` +
+      `<th>Aktivní</th><th title="Testovací/služební účty — skryté ze všech analýz, alertů i mapy">Vyřadit</th></tr></thead><tbody>` +
       list.map((t) =>
         `<tr class="${t.excluded ? "tr-excluded" : ""}"><td>${esc(t.name)}${t.manual_role ? " ✎" : ""}</td>` +
         `<td><select data-tech="${esc(t.name)}" class="tech-role"${t.excluded ? " disabled" : ""}>` +
         _ROLES.map((r) => `<option ${r === t.role ? "selected" : ""}>${r}</option>`).join("") + `</select></td>` +
+        `<td><input type="text" class="tech-region${t.region ? "" : " tech-region-empty"}" list="tech-region-list" data-tech="${esc(t.name)}" value="${esc(t.region || "")}" placeholder="—" title="${t.manual_region ? "ručně nastaveno" : "auto z SalesApp"}"></td>` +
         `<td><input type="checkbox" class="tech-active" data-tech="${esc(t.name)}" ${t.active ? "checked" : ""}${t.excluded ? " disabled" : ""}></td>` +
         `<td><input type="checkbox" class="tech-excluded" data-tech="${esc(t.name)}" ${t.excluded ? "checked" : ""} title="Vyřadit z analytiky (test/služební účet)"></td></tr>`).join("") +
-      `</tbody></table><p class="hint">${list.length} osob${excl ? ` · ${excl} vyřazeno` : ""}. ✎ = role ručně nastavena · Vyřadit = skrýt testovací účty ze všech přehledů.</p>`;
+      `</tbody></table><p class="hint">${list.length} osob${excl ? ` · ${excl} vyřazeno` : ""}${noReg ? ` · ${noReg} bez regionu` : ""}. ✎ = ručně · Region řídí filtry po střediscích — prázdný doplň ručně nebo se dovyplní z dalšího importu SalesApp.</p>`;
     // Any people change also rebuilds the alert feed so blacklisted/reclassified
     // people appear or disappear from the Operations Center immediately.
     const applyAndRecompute = async (name, body) => {
@@ -2568,6 +2573,8 @@ async function loadTechnicians() {
       applyAndRecompute(cb.dataset.tech, { active: cb.checked }).then(loadAlerts)));
     el.querySelectorAll(".tech-excluded").forEach((cb) => cb.addEventListener("change", () =>
       applyAndRecompute(cb.dataset.tech, { excluded: cb.checked }).then(() => { loadAlerts(); loadTechnicians(); })));
+    el.querySelectorAll(".tech-region").forEach((inp) => inp.addEventListener("change", () =>
+      applyAndRecompute(inp.dataset.tech, { region: inp.value }).then(() => { toast("Region uložen", "ok"); })));
   } catch (e) { el.innerHTML = `<p class="result err">${esc(e.message)}</p>`; }
 }
 

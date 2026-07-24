@@ -181,6 +181,8 @@ def init_db() -> None:
         techcols = {r[1] for r in conn.execute("PRAGMA table_info(technicians)")}
         if techcols and "excluded" not in techcols:
             conn.execute("ALTER TABLE technicians ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0")
+        if techcols and "manual_region" not in techcols:
+            conn.execute("ALTER TABLE technicians ADD COLUMN manual_region INTEGER NOT NULL DEFAULT 0")
         # business_rules: the table's UNIQUE(code, scope, scope_value) does NOT
         # dedupe global rules because SQLite treats NULL scope_value as distinct,
         # so repeated seeding inserted duplicate rows (effective() masked it by

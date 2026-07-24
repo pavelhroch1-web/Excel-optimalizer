@@ -363,6 +363,16 @@ def derive_technicians(conn) -> int:
         "              GROUP BY technician HAVING SUM(visitor_role='OZ') > SUM(visitor_role='TECHNIK')))")
     # anyone auto-classified and not OZ defaults back to TECHNIK
     conn.execute("UPDATE technicians SET role='TECHNIK' WHERE manual_role=0 AND role NOT IN ('OZ')")
+    # Backfill region into the technicians table (it used to live only on visits,
+    # so filters/joins fell back to a per-read derivation). Each technician's most
+    # common Agency region from SalesApp becomes their region — unless it was set
+    # by hand (manual_region=1). This makes středisko filters stable everywhere.
+    conn.execute(
+        "UPDATE technicians SET region = ("
+        "  SELECT v.region FROM salesapp_visits v "
+        "  WHERE v.technician = technicians.name AND v.region IS NOT NULL AND v.region<>'' "
+        "  GROUP BY v.region ORDER BY COUNT(*) DESC LIMIT 1) "
+        "WHERE manual_region=0")
     return conn.execute("SELECT COUNT(*) c FROM technicians").fetchone()[0]
 
 

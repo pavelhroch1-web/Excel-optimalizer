@@ -827,10 +827,11 @@ if LOCAL_MODE:
         role: str | None = None
         active: bool | None = None
         excluded: bool | None = None
+        region: str | None = None
 
     @app.get("/api/technicians", dependencies=[Depends(require_auth)])
     def list_technicians():
-        rows = db.get("SELECT name, role, manual_role, active, excluded, region, capacity_per_week "
+        rows = db.get("SELECT name, role, manual_role, active, excluded, region, manual_region, capacity_per_week "
                       "FROM technicians ORDER BY role, name")
         return {"technicians": [dict(r) for r in rows]}
 
@@ -843,6 +844,11 @@ if LOCAL_MODE:
             sets.append("active=?"); params.append(1 if body.active else 0)
         if body.excluded is not None:
             sets.append("excluded=?"); params.append(1 if body.excluded else 0)
+        if body.region is not None:
+            # empty string -> clear the manual override and let import re-derive it
+            val = body.region.strip() or None
+            sets += ["region=?", "manual_region=?"]
+            params += [val, 0 if val is None else 1]
         if sets:
             params.append(name)
             db.run(f"UPDATE technicians SET {', '.join(sets)}, updated_at=datetime('now') WHERE name=?", tuple(params))

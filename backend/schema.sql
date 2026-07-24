@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS technicians (
     role              TEXT NOT NULL DEFAULT 'TECHNIK',   -- TECHNIK | OZ | ADMIN | MANAGER
     manual_role       INTEGER NOT NULL DEFAULT 0,        -- 1 = set by hand, import won't override
     region            TEXT,
+    manual_region     INTEGER NOT NULL DEFAULT 0,        -- 1 = region set by hand, import backfill won't override
     area              TEXT,
     capacity_per_week INTEGER,
     active            INTEGER NOT NULL DEFAULT 1,
