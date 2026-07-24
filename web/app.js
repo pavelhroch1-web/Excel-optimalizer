@@ -6388,25 +6388,31 @@ async function loadDupes() {
   if (sum) sum.innerHTML = skeleton({ rows: 1 });
   try {
     const d = await apiJson("/api/pos/duplicates?limit=40");
-    if (sum) sum.innerHTML = `<div class="pl-tiles">` +
-      tile("Duplicitních adres", _fmtNum(d.groupCount), "stejná adresa + firma", d.groupCount ? "warn" : "good") +
-      tile("K deaktivaci", _fmtNum(d.totalDeactivatable), "slabší POS (nech nejsilnější)", d.totalDeactivatable ? "warn" : "good") + `</div>`;
+    if (sum) sum.innerHTML = d.groupCount
+      ? `<div class="dd-headline"><b>${_fmtNum(d.groupCount)}</b> adres má víc POS téže provozovny · doporučeno nechat nejsilnější a <b>${_fmtNum(d.totalDeactivatable)}</b> slabších deaktivovat.</div>`
+      : `<div class="dd-headline ok">✓ Žádné duplicity — každá adresa má jen jeden aktivní POS.</div>`;
     if (!out) return;
-    if (!d.groups.length) { showState(out, "empty", "Žádné duplicity — každá adresa má jen jeden aktivní POS. 👍"); return; }
-    out.innerHTML = `<div class="pl-section">Náhled (nejvíc duplicit první · ${d.shown} z ${d.groupCount})</div>` +
+    if (!d.groups.length) { out.innerHTML = ""; return; }
+    const posLink = (p) => `<a class="dd-pos-link" data-pos="${esc(p)}">${esc(p)}</a>`;
+    out.innerHTML = `<div class="pl-section">Náhled — největší provozovny první (${d.shown} z ${d.groupCount})</div>` +
       d.groups.map((g) => {
-        const keep = `<span class="dd-keep">✔ NECHAT ${esc(g.keep.pos)} · PPT ${_fmtNum(g.keep.ppt || 0)}</span>`;
-        const drops = g.drop.map((x) => `<span class="dd-drop">✕ ${esc(x.pos)} · PPT ${_fmtNum(x.ppt || 0)}</span>`).join("");
+        const keep = `<div class="dd-keep"><span class="dd-tag keep">ZŮSTANE</span> ${posLink(g.keep.pos)}
+            <span class="dd-ppt">PPT ${_fmtNum(g.keep.ppt || 0)}</span>
+            <span class="dd-why">${esc(g.keepReason || "nejsilnější")}</span></div>`;
+        const drops = g.drop.map((x) => `<div class="dd-drop"><span class="dd-tag drop">ZRUŠIT</span> ${posLink(x.pos)}
+            <span class="dd-ppt">PPT ${_fmtNum(x.ppt || 0)}</span></div>`).join("");
         return `<div class="dd-row"><div class="dd-main"><div class="dd-name">${esc(g.name || "")}</div>
-            <div class="dd-addr">${esc(g.address || "")}</div></div>
-          <div class="dd-pos">${keep} ${drops}</div>
+            <div class="dd-addr">${esc(g.displayAddress || g.address || "")}</div></div>
+          <div class="dd-pos">${keep}${drops}</div>
           <button class="ghost small dd-apply" data-addr="${esc(g.address)}">Deaktivovat slabší</button></div>`;
       }).join("");
+    out.querySelectorAll(".dd-pos-link").forEach((a) =>
+      a.addEventListener("click", () => openPosDetail(a.dataset.pos)));
     out.querySelectorAll(".dd-apply").forEach((b) => b.addEventListener("click", async () => {
-      b.disabled = true;
+      b.disabled = true; b.textContent = "…";
       try { await postJson("/api/pos/dedup/apply", { addresses: [b.dataset.addr] });
-        setResult("dedup-result", "Skupina vyřešena — slabší na blacklistu.", "ok"); loadDupes(); loadBlacklist();
-      } catch (e) { setResult("dedup-result", "Chyba: " + e.message, "err"); b.disabled = false; }
+        setResult("dedup-result", "Skupina vyřešena — slabší POS na blacklistu.", "ok"); loadDupes(); loadBlacklist();
+      } catch (e) { setResult("dedup-result", "Chyba: " + e.message, "err"); b.disabled = false; b.textContent = "Deaktivovat slabší"; }
     }));
   } catch (e) { if (sum) showState(sum, "error", "Chyba: " + e.message); }
 }

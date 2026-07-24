@@ -39,6 +39,26 @@ def _mini(r) -> dict:
             "city": r.get("city"), "technician": r.get("technician")}
 
 
+def _display_addr(r) -> str:
+    """Human, original-cased address of a POS (not the lowercased match key)."""
+    parts = [str(r.get("street") or "").strip(), str(r.get("house_number") or "").strip()]
+    line = " ".join(p for p in parts if p)
+    city = str(r.get("city") or "").strip()
+    return (line + (", " + city if city else "")).strip(", ").strip()
+
+
+def _keep_reason(keep, drop) -> str:
+    """Why this POS is the one we keep — in plain words."""
+    kp = float(keep.get("ppt") or 0)
+    if kp > 0 and all(float(d.get("ppt") or 0) < kp for d in drop):
+        return "nejvyšší PPT"
+    if keep.get("classification"):
+        return f"lepší klasifikace ({keep['classification']})"
+    if keep.get("terminal_type"):
+        return f"silnější terminál ({keep['terminal_type']})"
+    return "nejsilnější"
+
+
 def _build_groups() -> list:
     """All same-address + same-business groups of >=2 active POS, strongest first
     within each group. Returns list of (keep_row, [drop_rows...])."""
@@ -59,15 +79,17 @@ def _build_groups() -> list:
             continue
         members.sort(key=_strength, reverse=True)
         groups.append((members[0], members[1:]))
-    groups.sort(key=lambda g: -len(g[1]))
+    # biggest stores (by kept PPT) first — the ones worth checking
+    groups.sort(key=lambda g: -float(g[0].get("ppt") or 0))
     return groups
 
 
 def duplicate_groups(limit: int = 200) -> dict:
     groups = _build_groups()
     total_drop = sum(len(d) for _, d in groups)
-    shown = [{"address": _norm_addr(k), "name": k.get("name"),
-              "keep": _mini(k), "drop": [_mini(x) for x in d], "dropCount": len(d)}
+    shown = [{"address": _norm_addr(k), "displayAddress": _display_addr(k),
+              "name": k.get("name"), "keep": _mini(k), "drop": [_mini(x) for x in d],
+              "keepReason": _keep_reason(k, d), "dropCount": len(d)}
              for k, d in groups[:limit]]
     return {"groups": shown, "groupCount": len(groups),
             "totalDeactivatable": total_drop, "shown": len(shown)}
