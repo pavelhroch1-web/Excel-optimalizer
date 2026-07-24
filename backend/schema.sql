@@ -673,6 +673,7 @@ INSERT OR IGNORE INTO setting_definitions
     -- slow leg becomes a loud alert. Defaults MATCH tech_hotspots.py's constants,
     -- so behaviour is unchanged until the manager tunes them from the UI.
     ('anomaly','min_over_min','Dlouhá zastávka: ignoruj do X min nad normou','number','3',0,120,NULL,'Zastávky na POS',10),
+    ('anomaly','short_visit_max_min','Podezřele krátká návštěva: do kolika minut (možná zapsáno mimo POS)','number','2',0,30,NULL,'Zastávky na POS',15),
     ('anomaly','slow_min_extra','Pomalý přesun: min. minut nad normou','number','20',0,240,NULL,'Přejezdy',20),
     ('anomaly','slow_ratio','Pomalý přesun: násobek normy (1.8 = o 80 % déle)','number','1.8',1,10,NULL,'Přejezdy',30),
     ('anomaly','scream_count','Kolikrát se opakovat, aby systém „řval"','number','3',1,50,NULL,'Přejezdy',40),

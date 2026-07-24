@@ -37,6 +37,8 @@ _MIN_EXTRA_KM = 5.0      # ignore days within 5 km of optimal (noise)
 _SLOW_MIN_EXTRA = 20.0   # a leg is "slow" only if >=20 min over the norm …
 _SLOW_RATIO = 1.8        # … and at least 1.8× the norm
 _SCREAM_COUNT = 3        # recurring (>= this many times) -> loud alert
+_SHORT_VISIT_MAX_MIN = 2.0  # on-POS time <= this => implausibly short = likely
+#                             recorded off-site, not a real store visit
 _TOP = 15
 
 
@@ -60,6 +62,7 @@ def _thresholds() -> dict:
         "slow_min_extra": _num("slow_min_extra", _SLOW_MIN_EXTRA),
         "slow_ratio": _num("slow_ratio", _SLOW_RATIO),
         "scream_count": _num("scream_count", _SCREAM_COUNT),
+        "short_visit_max_min": _num("short_visit_max_min", _SHORT_VISIT_MAX_MIN),
     }
 
 
@@ -88,6 +91,7 @@ def hotspots(name: str, days_back: int = 90) -> dict:
     slow_min_extra = thr["slow_min_extra"]
     slow_ratio = thr["slow_ratio"]
     scream_count = thr["scream_count"]
+    short_visit_max_min = thr["short_visit_max_min"]
     end = datetime.date.today()
     start = end - datetime.timedelta(days=days_back)
     data = route_actual.technician_route(name, start.isoformat(), end.isoformat())
@@ -115,11 +119,19 @@ def hotspots(name: str, days_back: int = 90) -> dict:
             pid = s["pos"]
             a = agg.setdefault(pid, {"pos": pid, "name": s.get("name"), "city": s.get("city"),
                                      "lat": s.get("lat"), "lon": s.get("lon"),
-                                     "visits": 0, "sumActual": 0.0, "lastDate": None})
+                                     "visits": 0, "sumActual": 0.0, "lastDate": None,
+                                     "shortCount": 0, "shortSum": 0.0, "shortDates": []})
             a["visits"] += 1
             a["sumActual"] += s["onPosMin"]
             if a["lastDate"] is None or d["date"] > a["lastDate"]:
                 a["lastDate"] = d["date"]
+            # implausibly short = the record was almost certainly added off-site
+            # (not a real on-POS visit). We do NOT judge speed — a genuinely quick
+            # visit is fine; this is a data-integrity flag, not a quality one.
+            if s["onPosMin"] <= short_visit_max_min:
+                a["shortCount"] += 1
+                a["shortSum"] += s["onPosMin"]
+                a["shortDates"].append(d["date"])
 
     long_stops = []
     total_lost_min = 0.0
@@ -141,6 +153,33 @@ def hotspots(name: str, days_back: int = 90) -> dict:
             "totalOverMin": round(total_over), "lastDate": a["lastDate"],
         })
     long_stops.sort(key=lambda x: -x["totalOverMin"])
+
+    # ---- WHERE the visit is implausibly short: likely recorded OFF-SITE ----------
+    # A ~1-minute "visit" almost certainly wasn't a real stop at the store — the
+    # record was added from elsewhere. We show the norm only as context (how long
+    # that POS type usually takes); the flag itself is about record integrity, not
+    # about the technician being fast.
+    short_visits = []
+    total_short = 0
+    for a in agg.values():
+        if a["shortCount"] <= 0:
+            continue
+        exp, level = collective_norm(a["pos"])
+        total_short += a["shortCount"]
+        dates = sorted(a["shortDates"])
+        short_visits.append({
+            "pos": a["pos"], "name": a["name"], "city": a["city"],
+            "lat": a["lat"], "lon": a["lon"],
+            "shortCount": a["shortCount"], "visits": a["visits"],
+            "avgShortMin": round(a["shortSum"] / a["shortCount"], 1),
+            "expectedMin": round(exp, 1) if exp else None, "normLevel": level,
+            "lastDate": dates[-1] if dates else None,
+            "dates": dates[-6:],
+            "recurring": a["shortCount"] >= scream_count,
+        })
+    # loudest first: recurring, then most occurrences, then furthest below norm
+    short_visits.sort(key=lambda x: (-int(x["recurring"]), -x["shortCount"],
+                                     -((x["expectedMin"] or 0) - x["avgShortMin"])))
 
     # ---- WHERE the drive itself is absurd: real leg time vs the transition norm --
     # Aggregate by destination POS so a recurring slow approach screams.
@@ -211,6 +250,9 @@ def hotspots(name: str, days_back: int = 90) -> dict:
         "from": start.isoformat(), "to": end.isoformat(), "daysWorked": len(days),
         "longStops": long_stops[:_TOP], "longStopsCount": len(long_stops),
         "totalLostMinutes": round(total_lost_min),
+        "shortVisits": short_visits[:_TOP], "shortVisitsCount": len(short_visits),
+        "shortVisitsRecurring": sum(1 for x in short_visits if x["recurring"]),
+        "totalShortVisits": total_short,
         "slowTravel": slow_travel[:_TOP], "slowTravelCount": len(slow_travel),
         "slowTravelRecurring": sum(1 for x in slow_travel if x["recurring"]),
         "totalSlowMinutes": round(total_slow_min),

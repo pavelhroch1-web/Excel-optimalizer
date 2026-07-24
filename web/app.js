@@ -4326,11 +4326,23 @@ async function _tdLoadHotspots(days) {
 }
 
 function _tdHotspotsHtml(d) {
-  const long = d.longStops || [], det = d.detourDays || [], slow = d.slowTravel || [];
+  const long = d.longStops || [], det = d.detourDays || [], slow = d.slowTravel || [], short = d.shortVisits || [];
   const summary = `<div class="hs-summary">` +
+    tile("Možná mimo POS", d.totalShortVisits || 0, `návštěv ≈1 min · ${d.shortVisitsRecurring || 0}× opakovaně stejný POS`, (d.shortVisitsRecurring ? "bad" : (d.totalShortVisits ? "warn" : "good"))) +
     tile("Kde je moc dlouho", d.longStopsCount || 0, `POS nad normou · ztráta ${_fmtHM(d.totalLostMinutes)}`, (d.longStopsCount ? "warn" : "good")) +
     tile("Absurdní cesty", d.slowTravelCount || 0, `${d.slowTravelRecurring || 0}× opakovaně · +${_fmtHM(d.totalSlowMinutes)} navíc`, (d.slowTravelRecurring ? "bad" : (d.slowTravelCount ? "warn" : "good"))) +
     tile("Objížďky", d.detourDaysCount || 0, `dní · +${_fmtNum(d.totalExtraKm)} km navíc`, (d.detourDaysCount ? "warn" : "good")) + `</div>`;
+
+  const shortRows = short.length ? short.map((s) => {
+    const norm = s.expectedMin != null ? `norma ${_fmtNum(s.expectedMin)} min${s.normLevel ? " (" + esc(s.normLevel) + ")" : ""}` : "norma neznámá";
+    return `<div class="hs-row${s.recurring ? " hs-scream" : ""}" data-hs-pos="${esc(s.pos)}" role="button" tabindex="0" title="Zobrazit POS na mapě">
+      <div class="hs-main"><div class="hs-name">${s.recurring ? "🔴 " : ""}${esc(s.name || s.pos)}</div>
+        <div class="hs-sub">${esc(s.city || "")} · ${s.shortCount}× ≈1 min z ${s.visits} návštěv${s.lastDate ? " · naposledy " + _shortDate(s.lastDate) : ""}</div></div>
+      <div class="hs-nums"><div class="hs-big">${_fmtNum(s.avgShortMin)} min</div>
+        <div class="hs-vs">${norm}</div></div>
+      <div class="hs-total hs-detour">${s.shortCount}×</div>
+      <div class="hs-go">mapa →</div></div>`;
+  }).join("") : `<p class="hint" style="padding:12px 4px">Žádné podezřele krátké návštěvy — časy na POS jsou reálné. 👍</p>`;
 
   const longRows = long.length ? long.map((s) => {
     const over = `+${_fmtNum(s.overMinPerVisit)} min/návšt.`;
@@ -4365,6 +4377,8 @@ function _tdHotspotsHtml(d) {
 
   return `<div class="td-scroll hs-wrap">
     ${summary}
+    <div class="hs-block"><h3 class="hs-h">🚩 Podezřele krátké návštěvy — možná zapsáno mimo POS <span class="hs-hint">reálný čas na POS ≈1 min, ačkoli ten typ POS běžně zabere výrazně víc; 🔴 = opakovaně stejný POS. Nejde o rychlost, ale o věrohodnost záznamu — klik = mapa</span></h3>
+      <div class="hs-list">${shortRows}</div></div>
     <div class="hs-block"><h3 class="hs-h">🕑 Kde je moc dlouho na POS <span class="hs-hint">reálný čas vs. kolektivní norma partnera (bez něj samotného) — klik = mapa</span></h3>
       <div class="hs-list">${longRows}</div></div>
     <div class="hs-block"><h3 class="hs-h">🚗 Kde jel neúměrně dlouho <span class="hs-hint">reálný čas cesty vs. naučená norma přejezdu; 🔴 = opakovaně — klik = mapa</span></h3>
