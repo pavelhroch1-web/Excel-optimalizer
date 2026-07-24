@@ -2953,18 +2953,17 @@ async function importFile(f) {
   try {
     const fd = new FormData(); fd.append("file", f);
     const res = await apiFetch("/api/import/auto", { method: "POST", body: fd });
+    /** @type {ImportResult} */
     const r = await res.json();
-    if (r.detected === "unknown") { setResult("auto-import-result", r.error || "Nerozpoznaný typ souboru.", "err"); return; }
-    const counts = Object.entries(r.counts || {});
-    setResult("auto-import-result", "", "ok");
-    document.getElementById("import-summary").innerHTML =
-      `<div class="import-ok">${ico("check")}<div><div class="io-h">Naimportováno: ${esc(_TYPE_LABEL[r.detected] || r.detected)}</div>` +
-      `<div class="io-s">${esc(f.name)} · ${counts.map(([k, v]) => `${k}: ${v}`).join(" · ") || "hotovo"}</div></div></div>` +
-      `<div class="pl-tiles" style="margin-top:12px">` +
-      counts.map(([k, v]) => tile(k, v, "záznamů")).join("") + `</div>` +
-      `<p class="hint" style="margin-top:12px">Metriky, upozornění i cockpit se přepočítaly. Přejdi na <a href="#" class="nav-link" data-nav="dashboard">Přehled</a>.</p>`;
+    setResult("auto-import-result", "", "");
+    const summary = document.getElementById("import-summary");
+    const ok = renderImportResult(summary, r, ico);   // green ONLY if ok && total>0
+    if (!ok) return;                                   // no false "hotovo", no refresh
+    summary.insertAdjacentHTML("beforeend",
+      `<p class="hint" style="margin-top:12px">Metriky, upozornění i cockpit se přepočítaly. Přejdi na <a href="#" class="nav-link" data-nav="dashboard">Přehled</a>.</p>`);
     loadAlerts(); (typeof loadStatus === "function") && loadStatus();
     (typeof loadLive === "function") && loadLive();
+    (typeof initImportCenter === "function") && initImportCenter();
     document.querySelectorAll("#import-summary .nav-link").forEach((el) =>
       el.addEventListener("click", (e) => { e.preventDefault(); showView(el.dataset.nav); }));
   } catch (err) { setResult("auto-import-result", "Chyba: " + err.message, "err"); }
@@ -3036,12 +3035,11 @@ function _initWorkbookImport() {
     try {
       const fd = new FormData(); fd.append("workbook", f);
       const resp = await apiFetch("/api/import/workbook", { method: "POST", body: fd });
+      if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || ("Chyba " + resp.status)); }
+      /** @type {ImportResult} */
       const d = await resp.json();
-      if (!resp.ok) throw new Error(d.detail || "import selhal");
-      const c = d.counts || {};
-      res.innerHTML = `<span class="ok">Workbook naimportován: ${esc(f.name)}</span>`;
-      sum.innerHTML = `<div class="pl-tiles">` +
-        Object.entries(c).map(([k, v]) => tile(_DH_META[k] ? _DH_META[k][0] : k, _fmtNum(typeof v === "object" ? (v.total ?? v.count ?? 0) : v), "naimportováno")).join("") + `</div>`;
+      res.textContent = "";
+      if (!renderImportResult(sum, d, ico)) return;   // honest: no success unless rows landed
       initImportCenter();
       if (typeof loadStatus === "function") loadStatus();
     } catch (err) { res.innerHTML = `<span class="err">Chyba importu: ${esc(err.message)}</span>`; }
@@ -3063,14 +3061,16 @@ function _initTypedImport() {
       try {
         const fd = new FormData(); fd.append("file", f);
         const res = await apiFetch("/api/import/" + kind, { method: "POST", body: fd });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || ("Chyba " + res.status)); }
+        /** @type {ImportResult} */
         const r = await res.json();
-        if (!res.ok) throw new Error(r.detail || ("Chyba " + res.status));
-        const c = r.counts || {};
-        const msg = c.pos_master != null ? `POS: ${c.pos_master} (nových ${c.pos_diff?.new ?? 0})`
-          : c.salesapp_visits != null ? `Návštěvy: ${c.salesapp_visits}`
-          : c.campaigns != null ? `Kampaně: ${c.campaigns}` : "Hotovo";
-        setResult("typed-import-result", "✓ Naimportováno — " + msg, "ok");
-        toast("Import hotový: " + msg, "ok");
+        const host = document.getElementById("typed-import-result");
+        if (renderImportResult(host, r, ico)) {
+          toast(`Import hotový: ${r.kindLabel} — ${r.total} záznamů`, "ok");
+          (typeof initImportCenter === "function") && initImportCenter();
+        } else {
+          toast("Import se nezdařil: " + (r.error || "chybný soubor"), "err");
+        }
       } catch (e) { setResult("typed-import-result", "Chyba: " + e.message, "err"); toast("Import selhal: " + e.message, "err"); }
       inp.value = "";
     });

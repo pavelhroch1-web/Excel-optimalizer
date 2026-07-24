@@ -6,8 +6,9 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=112">
+<link rel="stylesheet" href="styles.css?v=113">
 <script src="config.js?v=29"></script>
+<script src="contracts.js?v=1"></script>
 </head>
 <body>
 
@@ -94,43 +95,47 @@
     <!-- ==================== VIEW: IMPORT ==================== -->
     <div class="view hidden" data-view="import">
       <div class="view-head">
-        <h1>Import Center</h1>
-        <p>Přehled naimportovaných dat a jejich čerstvosti, nahrání nových feedů. Dvě cesty importu: <strong>rychlý drag-drop</strong> (typ se rozpozná sám) a <strong>import podle typu se šablonami</strong>. POS se ukládají trvale včetně historie změn.</p>
+        <h1>Import dat</h1>
+        <p>Jeden krok: přetáhni Excel, systém pozná typ, <strong>ověří ho</strong> a napíše přesně, co naimportoval — nebo proč to nešlo. Žádné falešné „hotovo".</p>
       </div>
 
-      <!-- DATA HEALTH: what is loaded + how fresh -->
-      <section class="card">
-        <h2>Stav dat <span class="badge">runtime databáze</span></h2>
-        <p class="hint">Co je právě v systému. Toto jsou data, nad kterými běží plánovač, analytika i dashboardy.</p>
-        <div class="row" style="margin-bottom:10px"><button id="dh-refresh" class="ghost">Obnovit</button></div>
-        <div id="data-health"></div>
-      </section>
-
-      <!-- FULL WORKBOOK IMPORT -->
-      <section class="card">
-        <h2>Import celého workbooku <span class="badge">všechny listy najednou</span></h2>
-        <p class="hint">Nahraj kompletní Excel workbook (POS_MASTER, SalesApp, Activity Plan…) — naimportují se všechny rozpoznané listy v jednom kroku. Pro dílčí feedy použij drag-drop nebo import podle typu níže.</p>
-        <div class="imp-acts">
-          <label class="filelabel imp-up">Nahrát workbook (.xlsx)<input type="file" id="wb-file" accept=".xlsx"></label>
-        </div>
-        <p id="wb-result" class="result"></p>
-        <div id="wb-summary"></div>
-      </section>
-
+      <!-- HERO: one primary path — drag-drop, auto-detect + validate -->
       <section class="card">
         <div id="drop-zone" class="drop-zone">
           <div class="dz-ico" id="dz-ico"></div>
-          <div class="dz-big">Přetáhni sem Excel</div>
-          <div class="dz-sub">nebo klikni a vyber soubor · rozpozná se automaticky</div>
+          <div class="dz-big">Přetáhni sem Excel (.xlsx)</div>
+          <div class="dz-sub">nebo klikni a vyber soubor · typ se rozpozná a ověří sám</div>
           <input type="file" id="auto-file" accept=".xlsx" hidden>
         </div>
         <p id="auto-import-result" class="result"></p>
         <div id="import-summary"></div>
       </section>
 
+      <!-- DATA HEALTH: what is loaded + how fresh -->
       <section class="card">
-        <h2>Import podle typu <span class="badge">šablony · nic se nehádá</span></h2>
-        <p class="hint">Stáhni šablonu, vyplň ji v Excelu a nahraj zpět. <strong>Typ vybíráš ty</strong> – žádné hádání. POS se ukládají trvale včetně historie změn (PPT, status, technik…).</p>
+        <h2>Co je právě v systému <span class="badge">runtime databáze</span></h2>
+        <p class="hint">Data, nad kterými běží plánovač, analytika i dashboardy. Po importu se čísla hned obnoví — tak vidíš, že se opravdu propsalo.</p>
+        <div class="row" style="margin-bottom:10px"><button id="dh-refresh" class="ghost">Obnovit</button></div>
+        <div id="data-health"></div>
+      </section>
+
+      <!-- SECONDARY paths, folded away so the main flow stays a single step -->
+      <details class="card imp-more">
+        <summary><h2 style="display:inline">Další možnosti importu <span class="badge">workbook · šablony · ukázka</span></h2></summary>
+
+      <div class="imp-sub">
+        <h3>Kompletní workbook <span class="badge">všechny listy najednou</span></h3>
+        <p class="hint">Jeden Excel s více listy (POS_MASTER, SalesApp, Activity Plan…) — naimportují se všechny rozpoznané listy naráz.</p>
+        <div class="imp-acts">
+          <label class="filelabel imp-up">Nahrát workbook (.xlsx)<input type="file" id="wb-file" accept=".xlsx"></label>
+        </div>
+        <p id="wb-result" class="result"></p>
+        <div id="wb-summary"></div>
+      </div>
+
+      <div class="imp-sub">
+        <h3>Import podle typu <span class="badge">šablony · nic se nehádá</span></h3>
+        <p class="hint">Stáhni šablonu, vyplň ji a nahraj zpět. <strong>Typ vybíráš ty</strong> — žádné hádání.</p>
         <div class="imp-grid">
           <div class="imp-type">
             <div class="imp-h">POS (provozovny)</div>
@@ -162,7 +167,8 @@
           <span class="hint" style="margin:0">Pro rychlé vyzkoušení bez vlastních dat.</span>
         </div>
         <p id="typed-import-result" class="result"></p>
-      </section>
+      </div>
+      </details>
 
       <section class="card">
         <h2>Hromadné úkoly z Excelu <span class="badge">Task Engine</span></h2>
@@ -986,6 +992,6 @@
   </div>
 </div>
 
-<script src="app.js?v=122"></script>
+<script src="app.js?v=123"></script>
 </body>
 </html>

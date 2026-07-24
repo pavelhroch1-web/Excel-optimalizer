@@ -27,10 +27,21 @@ def _strength(r) -> tuple:
     )
 
 
+def _sq(s) -> str:
+    """Squash: lower-case, collapse every run of whitespace to one space, trim.
+    So 'Hradecká  408/40' and 'hradecká 408/40' become the same key — a real
+    1:1 address/name match that tolerates only spacing/case, nothing semantic."""
+    return " ".join(str(s or "").split()).lower()
+
+
 def _norm_addr(r) -> str:
-    parts = [str(r.get("street") or "").strip(), str(r.get("house_number") or "").strip(),
-             str(r.get("city") or "").strip()]
-    return " ".join(p for p in parts if p).lower()
+    """Exact address key (street + house number + city), 1:1 up to spacing/case."""
+    parts = [_sq(r.get("street")), _sq(r.get("house_number")), _sq(r.get("city"))]
+    return " ".join(p for p in parts if p)
+
+
+def _norm_name(r) -> str:
+    return _sq(r.get("name"))
 
 
 def _mini(r) -> dict:
@@ -69,7 +80,10 @@ def _build_groups() -> list:
     for r in rows:
         d = dict(r)
         addr = _norm_addr(d)
-        nm = str(d.get("name") or "").strip().lower()
+        nm = _norm_name(d)
+        # Require BOTH an identical address AND an identical business name. Same
+        # address + DIFFERENT name is a shared building (mall: Albert + GECO +
+        # Česká pošta at one street number) — separate stores, never merged.
         if not addr or not nm:
             continue
         buckets.setdefault((addr, nm), []).append(d)

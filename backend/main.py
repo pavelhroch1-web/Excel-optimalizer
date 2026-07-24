@@ -810,8 +810,9 @@ if LOCAL_MODE:
     async def import_workbook_ep(workbook: UploadFile = File(...)):
         path, prov = await _save_upload(workbook)
         try:
-            counts = importer.import_workbook(path, prov["filename"])
-            return {"ok": True, "counts": counts, "file": prov}
+            # Unified, validated path — returns the ImportResult DTO (ok/kind/
+            # imported/total/warnings/error) like every other import endpoint.
+            return auto_import.import_file(path, prov["filename"], force_kind="workbook")
         finally:
             os.remove(path)
 
