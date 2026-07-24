@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=118">
+<link rel="stylesheet" href="styles.css?v=119">
 <script src="config.js?v=29"></script>
 <script src="contracts.js?v=1"></script>
 </head>
@@ -223,6 +223,17 @@
         <h2>Plán aktivit <span class="badge">kampaně · losy · loterie</span></h2>
         <p class="hint">Zadej a uprav kampaně přímo tady — vertikály <strong>losy / loterie / visibilita</strong> s oknem od–do týdne, prioritou a cílem návštěv. Můžeš je naimportovat z Activity Planu, nebo je celé zadat ručně dopředu. Změny se projeví při dalším generování TourPlanu.</p>
         <div id="campaigns-out"></div>
+      </section>
+
+      <!-- SEGMENT URGENCY + COVERAGE FORECAST -->
+      <section class="card">
+        <h2>Urgence po segmentech & pokrytí sítě <span class="badge">jak dlouho jsme nebyli · kolik zvládneme</span></h2>
+        <p class="hint">Jak dlouho jsme nebyli na velkých / malých terminálech, béčkových pobočkách a poštách. Co je déle než nastavený gap, je <strong>po termínu</strong> a má vyšší urgenci. Práh gapu změníš v <a href="#" class="nav-link" data-nav="settings">Nastavení → Parametry systému → Plán aktivit</a>. Dole odhad, kolik POS a jaké % sítě reálně obsloužíš.</p>
+        <div class="row" style="margin-bottom:10px; align-items:center; gap:14px">
+          <button id="act-refresh" class="ghost">Obnovit</button>
+          <label class="fsel">Odhad pokrytí na <input type="number" id="act-weeks" value="5" min="1" max="26" style="width:70px"> týdnů</label>
+        </div>
+        <div id="activity-intel"></div>
       </section>
 
       <!-- 1) DATA — single source of truth is the imported SQLite runtime state -->
@@ -1005,6 +1016,6 @@
   </div>
 </div>
 
-<script src="app.js?v=132"></script>
+<script src="app.js?v=133"></script>
 </body>
 </html>

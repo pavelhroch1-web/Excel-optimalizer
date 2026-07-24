@@ -1127,6 +1127,38 @@ if LOCAL_MODE:
         _log_config("campaign", "delete", {"id": campaign_id})
         return {"ok": True}
 
+    # Activity-plan intelligence: segment urgency (how long since each segment)
+    # + network-coverage forecast, and a one-click "approve overdue post offices".
+    import activity_plan  # noqa: E402
+
+    @app.get("/api/activity/segments", dependencies=[Depends(require_auth)])
+    def activity_segments(gap_weeks: float | None = None):
+        return activity_plan.segment_urgency(gap_weeks)
+
+    @app.get("/api/activity/coverage", dependencies=[Depends(require_auth)])
+    def activity_coverage(weeks: int = 5):
+        return activity_plan.coverage_forecast(weeks)
+
+    @app.post("/api/activity/approve-posts", dependencies=[Depends(require_auth)])
+    def activity_approve_posts(gap_weeks: float | None = None):
+        """Force every OVERDUE post office (last visit older than the gap, or
+        never) into the next plan as a guaranteed inclusion. Manager-approved
+        catch-up — writes to pos_priority (FORCE_INCLUDE), engine unchanged."""
+        gap = float(gap_weeks) if gap_weeks is not None else activity_plan._gap_weeks()
+        rows = db.get(
+            "SELECT p.pos_id FROM pos_master p LEFT JOIN "
+            "  (SELECT pos_id, MAX(visit_date) lv FROM salesapp_visits GROUP BY pos_id) v "
+            "  ON v.pos_id=p.pos_id "
+            "WHERE p.active=1 AND p.classification='P' AND "
+            "  (v.lv IS NULL OR (julianday('now')-julianday(v.lv))/7.0 > ?)", (gap,))
+        ids = [str(r["pos_id"]) for r in rows]
+        for pid in ids:
+            db.run("INSERT INTO pos_priority (pos_id, campaign, reason, active) VALUES (?,?,?,1) "
+                   "ON CONFLICT(pos_id) DO UPDATE SET reason=excluded.reason, active=1",
+                   (pid, "Pošty po termínu", "schváleno manažerem – pošta po termínu"))
+        _log_config("activity", "approve-posts", {"count": len(ids), "gapWeeks": gap})
+        return {"ok": True, "approved": len(ids)}
+
     import pos_insights  # noqa: E402
 
     @app.get("/api/pos/search", dependencies=[Depends(require_auth)])

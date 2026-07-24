@@ -818,6 +818,21 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 .cmp-tbl input, .cmp-tbl select { font-size: 13px; padding: 3px 6px; }
 .cmp-tbl .cmp-w { width: 66px; }
 .ghost.danger { color: var(--bad); }
+/* Activity-plan intelligence: segment urgency + coverage */
+.act-h { font-weight: 640; margin-bottom: 10px; }
+.act-segs { display: grid; gap: 8px; }
+.act-seg { display: grid; grid-template-columns: 200px 120px 1fr auto; gap: 12px; align-items: center;
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-md); }
+.act-seg.bad { border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
+.act-seg.warn { border-color: color-mix(in srgb, var(--warn, #d69e2e) 40%, var(--border)); }
+.act-seg-name { font-weight: 600; font-size: 13px; }
+.act-seg-bar { height: 8px; background: var(--border); border-radius: 999px; overflow: hidden; }
+.act-seg-fill { height: 100%; background: var(--good); }
+.act-seg-fill.warn { background: var(--warn, #d69e2e); } .act-seg-fill.bad { background: var(--bad); }
+.act-seg-nums { font-size: 12px; color: var(--text-2); }
+.act-cov { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.act-cov-h { font-weight: 640; margin-bottom: 8px; }
+@media (max-width: 720px) { .act-seg { grid-template-columns: 1fr; gap: 4px; } }
 .td-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .td-kpi { border: 1px solid var(--border); border-radius: var(--r-md); padding: 11px 13px; background: var(--panel-2); }
 .tk-l { font-size: 11px; color: var(--text-3); font-weight: 600; }

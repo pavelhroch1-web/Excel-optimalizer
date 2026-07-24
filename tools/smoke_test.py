@@ -131,6 +131,8 @@ def main() -> int:
                           ("/api/data/quality", "checks"),
                           ("/api/model", "sections"),
                           ("/api/campaigns", "campaigns"),
+                          ("/api/activity/segments", "segments"),
+                          ("/api/activity/coverage?weeks=5", "coveragePct"),
                           ("/api/insights/health?days_back=90", "technicians")]:
             r = get(path)
             ok = r.status_code == 200 and (key is None or key in r.json())

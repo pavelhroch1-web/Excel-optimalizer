@@ -2763,7 +2763,7 @@ async function loadBusinessRules() {
   } catch (e) { showState(el, "error", "Nepodařilo se načíst pravidla: " + e.message); }
 }
 
-const _SET_NS = { planner: "Plánovač", anomaly: "Anomálie (kdy systém řve)", scoring: "Skóre (PPT · bonusy · penalizace)", engine: "Engine konstanty", optimization: "Optimalizace", map: "Mapa", dashboard: "Dashboard", report: "Report" };
+const _SET_NS = { planner: "Plánovač", anomaly: "Anomálie (kdy systém řve)", activity: "Plán aktivit (urgence)", scoring: "Skóre (PPT · bonusy · penalizace)", engine: "Engine konstanty", optimization: "Optimalizace", map: "Mapa", dashboard: "Dashboard", report: "Report" };
 let _setNs = "planner";
 
 async function loadSettingsTabs() {
@@ -6421,6 +6421,55 @@ async function loadCoverage() {
 }
 
 // ============ Campaigns (imported activity plan) ============
+// Activity-plan intelligence (read-only): how long since each segment + a
+// network-coverage forecast + one-click approval of overdue post offices.
+async function loadActivityIntel() {
+  const host = document.getElementById("activity-intel");
+  if (!host) return;
+  host.innerHTML = skeleton({ rows: 2 });
+  const weeks = parseInt((document.getElementById("act-weeks") || {}).value, 10) || 5;
+  try {
+    const [seg, cov] = await Promise.all([
+      apiJson("/api/activity/segments"),
+      apiJson(`/api/activity/coverage?weeks=${weeks}`),
+    ]);
+    const segRows = (seg.segments || []).map((s) => {
+      const post = /pošt/i.test(s.segment);
+      const btn = post && s.overdue
+        ? `<button class="ghost small act-approve" title="Force-include všech pošt po termínu do dalšího plánu">Schválit ${_fmtNum(s.overdue)} pošt →</button>` : "";
+      return `<div class="act-seg ${s.level}">
+        <div class="act-seg-name">${esc(s.segment)}</div>
+        <div class="act-seg-bar"><div class="act-seg-fill ${s.level}" style="width:${Math.min(100, s.overduePct)}%"></div></div>
+        <div class="act-seg-nums"><b>${_fmtNum(s.overdue)}</b> po termínu z ${_fmtNum(s.total)} (${s.overduePct}%)
+          · nikdy ${_fmtNum(s.never)} · medián ${s.medianWeeks ?? "—"} t.</div>
+        <div class="act-seg-act">${btn}</div></div>`;
+    }).join("");
+    const covPct = cov.coveragePct;
+    host.innerHTML =
+      `<div class="act-h">Jak dlouho jsme nebyli <span class="hint">gap ${seg.gapWeeks} týdnů (~${seg.gapMonths} měs) = po termínu</span></div>
+       <div class="act-segs">${segRows}</div>
+       <div class="act-cov">
+         <div class="act-cov-h">Odhad pokrytí sítě na ${cov.weeks} týdnů</div>
+         <div class="pl-tiles">
+           ${tile("Obsloužíš", _fmtNum(cov.servable), `z ${_fmtNum(cov.totalPos)} POS · ${covPct}% sítě`, covPct >= 80 ? "good" : (covPct >= 40 ? "warn" : "bad"))}
+           ${tile("Týdenní kapacita", _fmtNum(cov.weeklyCapacity), `${cov.technicians} reálně aktivních techniků × ${cov.perTechWeek}`)}
+           ${tile("Celá síť za", cov.weeksForFullNetwork, "týdnů (jeden průchod)")}
+         </div>
+         <p class="hint">Kapacita = technici s reálnou aktivitou (posl. 60 dní) × návštěv/týden. Skutečný mix řídí kadence a holdback; tohle je horní odhad.</p>
+       </div>`;
+    host.querySelectorAll(".act-approve").forEach((b) => b.addEventListener("click", async () => {
+      if (!await confirmDialog({ title: "Schválit pošty po termínu?",
+        body: "Všechny pošty po termínu se garantovaně zařadí do dalšího plánu (FORCE_INCLUDE).", confirmText: "Schválit" })) return;
+      try { const r = await postJson("/api/activity/approve-posts", {});
+        toast(`Schváleno ${r.approved} pošt — zařadí se do dalšího generování`, "ok");
+      } catch (e) { toast("Chyba: " + e.message, "err"); }
+    }));
+    host.querySelectorAll(".nav-link").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); showView("settings"); }));
+  } catch (e) { showState(host, "error", "Nepodařilo se načíst urgenci segmentů: " + e.message); }
+}
+on("act-refresh", "click", loadActivityIntel);
+on("act-weeks", "change", loadActivityIntel);
+
 const _CAMP_KINDS = ["LOSY", "LOTERIE", "VISIBILITA", "MERCH", "AUDIT", "OSTATNI"];
 async function loadCampaigns() {
   const host = document.getElementById("campaigns-out");
@@ -6925,7 +6974,7 @@ function showView(name, mode) {
     if (name === "pos" && typeof initPosView === "function") initPosView();
     if (name === "summary" && typeof initSummary === "function") initSummary();
     if (name === "import" && typeof initBulkTasks === "function") { initImportCenter(); initBulkTasks(); }
-    if (name === "tourplan" && typeof loadStrategyModes === "function") { initPlannerStudio(); loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); loadCampaigns && loadCampaigns(); loadCoverage && loadCoverage(); applySuggestedWeek && applySuggestedWeek(); loadSfScope && loadSfScope(); }
+    if (name === "tourplan" && typeof loadStrategyModes === "function") { initPlannerStudio(); loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); loadCampaigns && loadCampaigns(); loadCoverage && loadCoverage(); applySuggestedWeek && applySuggestedWeek(); loadSfScope && loadSfScope(); loadActivityIntel && loadActivityIntel(); }
   }
   // apply the current Analytika mode on every entry (not just first load), so the
   // "Dashboardy" back-compat redirect lands on the right mode.

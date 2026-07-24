@@ -678,7 +678,10 @@ INSERT OR IGNORE INTO setting_definitions
     ('anomaly','slow_min_extra','Pomalý přesun: min. minut nad normou','number','20',0,240,NULL,'Přejezdy',20),
     ('anomaly','slow_ratio','Pomalý přesun: násobek normy (1.8 = o 80 % déle)','number','1.8',1,10,NULL,'Přejezdy',30),
     ('anomaly','scream_count','Kolikrát se opakovat, aby systém „řval"','number','3',1,50,NULL,'Přejezdy',40),
-    ('anomaly','min_extra_km','Zajížďka: ignoruj do X km nad optimum','number','5',0,200,NULL,'Zajížďky dne',50);
+    ('anomaly','min_extra_km','Zajížďka: ignoruj do X km nad optimum','number','5',0,200,NULL,'Zajížďky dne',50),
+    -- activity plan: how long (weeks) since the last visit before a POS counts as
+    -- overdue in the segment-urgency view (default ~3 months).
+    ('activity','overdue_gap_weeks','Po kolika týdnech bez návštěvy je POS „po termínu" (13 = 3 měsíce)','number','13',1,104,NULL,'Urgence segmentů',10);
 
 -- Seed the default business objectives (idempotent; add more anytime).
 INSERT OR IGNORE INTO objectives (code, name, category) VALUES
