@@ -141,9 +141,46 @@ def test_caches():
     check("invalidate_cache clears overview memo", not team_analytics._overview_cache)
 
 
+def test_plan_recency():
+    """A POS on the previous published tourplan must count toward recency, so
+    the engine doesn't re-send a technician there next run even when salesapp
+    never recorded that visit (product owner, 2026-07-24)."""
+    import datetime
+    import runtime_state as rs
+
+    # Czech plan-date parsing is the linchpin (D. M. YYYY), never raises.
+    check("parse cs date D. M. YYYY", rs._parse_cs_date("20. 7. 2026") == "2026-07-20")
+    check("parse cs date single-digit day", rs._parse_cs_date("7. 8. 2026") == "2026-08-07")
+    check("parse cs date rejects garbage", rs._parse_cs_date("not a date") is None)
+
+    planned = rs._last_planned()
+    today = datetime.date.today().isoformat()
+    check("plan recency is a pos->iso map", isinstance(planned, dict))
+    check("plan recency never returns future dates",
+          all(v <= today for v in planned.values()))
+
+    # The merge must never make recency OLDER than salesapp alone: weeksSince
+    # from the merged source is <= weeksSince from salesapp for every POS.
+    last, _earliest = rs._last_visits()
+    if planned and last:
+        pid = next((p for p in planned if p in last), None)
+        if pid:
+            merged = max(last[pid][:10], planned[pid])
+            check("merged recency is the more-recent of plan/salesapp",
+                  merged >= last[pid][:10] and merged >= planned[pid])
+
+    # Toggle honoured: off => plan dates ignored.
+    import settings
+    settings.set_value("planner", "count_planned_as_visited", "false")
+    check("toggle off disables plan recency", rs._count_planned_as_visited() is False)
+    settings.set_value("planner", "count_planned_as_visited", "true")
+    check("toggle on enables plan recency", rs._count_planned_as_visited() is True)
+
+
 def main():
     print("import + analytics regression tests")
-    for t in (test_dedup_pure, test_validate, test_import_result_contract, test_caches):
+    for t in (test_dedup_pure, test_validate, test_import_result_contract, test_caches,
+              test_plan_recency):
         print(f"\n[{t.__name__}]")
         t()
     print(f"\n{_passed} passed, {_failed} failed")

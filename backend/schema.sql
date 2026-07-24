@@ -629,6 +629,7 @@ INSERT OR IGNORE INTO setting_definitions
     ('planner','default_mode','Výchozí režim','enum','vyvazeny',NULL,NULL,'["dojezd","kampan","vyvazeny","cela_sit"]','Režim',50),
     ('planner','workday_start','Začátek dne','string','08:00',NULL,NULL,NULL,'Kapacita',60),
     ('planner','workday_end','Konec dne','string','16:30',NULL,NULL,NULL,'Kapacita',70),
+    ('planner','count_planned_as_visited','Počítat POS z minulého tourplanu jako navštívený (neposílat tam znovu, i když to salesapp nezaznamenal)','bool','true',NULL,NULL,NULL,'Kontinuita plánu',80),
     -- optimization (weights that feed scoring)
     ('optimization','weight_campaign','Váha kampaní','number','1.0',0,10,NULL,'Váhy',10),
     ('optimization','weight_cadence','Váha cadence','number','1.0',0,10,NULL,'Váhy',20),

@@ -57,12 +57,64 @@ def _last_visits() -> tuple[dict, str | None]:
     return last, earliest
 
 
+def _parse_cs_date(v: str) -> str | None:
+    """Parse a Czech-formatted plan date ("20. 7. 2026" = D. M. YYYY) into an
+    ISO date string, so plan dates and salesapp visit dates become comparable.
+    Returns None for anything unparseable (never raises)."""
+    try:
+        parts = [p.strip() for p in str(v).replace("\xa0", " ").split(".") if p.strip()]
+        if len(parts) < 3:
+            return None
+        d, m, y = int(parts[0]), int(parts[1]), int(parts[2])
+        return datetime.date(y, m, d).isoformat()
+    except (ValueError, TypeError):
+        return None
+
+
+def _last_planned() -> dict:
+    """pos_id -> latest ISO date this POS appeared on the PUBLISHED tourplan.
+
+    The engine otherwise derives recency only from salesapp_visits, so when a
+    technician was sent to a POS on last week's tourplan but salesapp never
+    recorded that visit, the engine would happily re-send them the very next
+    run (product owner, 2026-07-24: "když tam už byl minulý týden i v rozporu
+    se salesapp, aby ho to tam neposílalo znova"). Treating the published plan
+    as a recency source closes that double-visit gap and lets the planner
+    genuinely continue from its own previous tourplan, not just from salesapp.
+    """
+    today_iso = datetime.date.today().isoformat()
+    planned: dict[str, str] = {}
+    for r in db.get("SELECT pos_id, plan_date FROM published_plans "
+                    "WHERE pos_id IS NOT NULL AND plan_date IS NOT NULL"):
+        pid = str(r["pos_id"])
+        iso = _parse_cs_date(r["plan_date"])
+        # Only PAST plan dates count as "was recently there". A future planned
+        # date isn't a visit yet — those commitments are handled separately by
+        # the engine's locked-week carry-over, not by recency.
+        if iso and iso <= today_iso and (pid not in planned or iso > planned[pid]):
+            planned[pid] = iso
+    return planned
+
+
 def _weeks_between(iso_a: str, day_b: datetime.date) -> int:
     try:
         a = datetime.date.fromisoformat(iso_a[:10])
     except (ValueError, TypeError):
         return 0
     return max(0, (day_b - a).days // 7)
+
+
+def _count_planned_as_visited() -> bool:
+    """Whether a POS on the previous PUBLISHED tourplan counts toward recency
+    (so it isn't re-sent next run). On by default; UI-toggleable."""
+    try:
+        import settings
+        v = settings.get("planner", "count_planned_as_visited")
+        if v is None:
+            return True
+        return str(v).strip() not in ("0", "false", "False", "no", "")
+    except Exception:  # noqa: BLE001
+        return True
 
 
 def build_pos_master() -> list[list]:
@@ -72,6 +124,7 @@ def build_pos_master() -> list[list]:
     observed window, i.e. maximally urgent)."""
     today = datetime.date.today()
     last, earliest = _last_visits()
+    planned = _last_planned() if _count_planned_as_visited() else {}
     never_weeks = _weeks_between(earliest, today) if earliest else 260  # window floor
 
     rows: list[list] = [list(POS_MASTER_HEADER)]
@@ -80,11 +133,16 @@ def build_pos_master() -> list[list]:
         "name, area, pos_area, street, house_number, city, gps_x, gps_y, technician, "
         "ppt, active, manager_override_type, updated_at FROM pos_master"):
         pid = str(r["pos_id"])
-        lv = last.get(pid)
-        if lv:
-            wsl = _weeks_between(lv, today)
+        real_lv = last.get(pid)          # last EXECUTED visit (salesapp)
+        plan_lv = planned.get(pid)       # last PUBLISHED tourplan date
+        # Recency = the more recent of "actually visited" and "already on the
+        # published plan", so a POS scheduled last week isn't re-sent this run
+        # even if salesapp missed that visit.
+        eff_lv = max([d for d in (real_lv, plan_lv) if d], default=None)
+        if eff_lv:
+            wsl = _weeks_between(eff_lv, today)
             try:
-                iso_week = datetime.date.fromisoformat(lv).isocalendar()[1]
+                iso_week = datetime.date.fromisoformat(eff_lv).isocalendar()[1]
             except (ValueError, TypeError):
                 iso_week = ""
         else:
@@ -110,7 +168,8 @@ def build_pos_master() -> list[list]:
         put("assignedTechnician", r["technician"])
         put("ppt", r["ppt"])
         put("status", "Active" if r["active"] else "Closed")
-        put("lastRealVisitDate", lv or "")
+        put("lastRealVisitDate", real_lv or "")
+        put("lastPlannedVisitDate", plan_lv or "")
         put("lastRealVisitWeek", iso_week)
         put("weeksSinceLastVisit", wsl)
         put("managerOverrideType", r["manager_override_type"])
