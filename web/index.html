@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=115">
+<link rel="stylesheet" href="styles.css?v=116">
 <script src="config.js?v=29"></script>
 <script src="contracts.js?v=1"></script>
 </head>
@@ -119,6 +119,13 @@
         <p class="hint">Data, nad kterými běží plánovač, analytika i dashboardy. Po importu se čísla hned obnoví — tak vidíš, že se opravdu propsalo.</p>
         <div class="row" style="margin-bottom:10px"><button id="dh-refresh" class="ghost">Obnovit</button></div>
         <div id="data-health"></div>
+      </section>
+
+      <!-- DATA QUALITY: silent correctness problems (split names, unlinked visits…) -->
+      <section class="card">
+        <h2>Kvalita dat <span class="badge">tiché chyby ve správnosti</span></h2>
+        <p class="hint">Věci, které nehodí chybu, ale zkreslují čísla: stejný technik pod dvěma jmény, návštěvy bez vazby na POS, POS bez PPT/GPS, technici bez střediska. U každé je vidět počet, příklady a kam to opravit.</p>
+        <div id="data-quality"></div>
       </section>
 
       <!-- SECONDARY paths, folded away so the main flow stays a single step -->
@@ -997,6 +1004,6 @@
   </div>
 </div>
 
-<script src="app.js?v=128"></script>
+<script src="app.js?v=129"></script>
 </body>
 </html>

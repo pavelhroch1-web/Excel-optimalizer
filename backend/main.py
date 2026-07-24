@@ -820,6 +820,11 @@ if LOCAL_MODE:
     def data_summary():
         return {t: db.get(f"SELECT COUNT(*) AS c FROM {t}")[0]["c"] for t in _DATA_TABLES}
 
+    @app.get("/api/data/quality", dependencies=[Depends(require_auth)])
+    def data_quality_ep():
+        import data_quality
+        return data_quality.report()
+
     # Technician configuration: role (TECHNIK/OZ/ADMIN/MANAGER) + active. All
     # technician metrics count only active TECHNIK. Manual edits stick across
     # imports (manual_role=1); auto-rule 3xx=OZ otherwise.

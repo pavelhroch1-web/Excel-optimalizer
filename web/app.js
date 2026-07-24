@@ -3030,6 +3030,31 @@ async function initImportCenter() {
       : `<p class="pd-sub">Zatím žádné návštěvy — naimportuj SalesApp export.</p>`;
     host.innerHTML = `<div class="pl-tiles">${tiles}</div>` + range;
   } catch (e) { showState(host, "error", "Nepodařilo se načíst stav dat: " + e.message); }
+  loadDataQuality();
+}
+
+async function loadDataQuality() {
+  const host = document.getElementById("data-quality");
+  if (!host) return;
+  host.innerHTML = skeleton({ rows: 2 });
+  try {
+    const r = await apiJson("/api/data/quality");
+    const head = r.clean
+      ? `<div class="dq-head ok">✅ Žádné datové problémy — vše sedí.</div>`
+      : `<div class="dq-head warn">Nalezeno ${r.issues} ${r.issues === 1 ? "oblast" : (r.issues < 5 ? "oblasti" : "oblastí")} ke kontrole.</div>`;
+    host.innerHTML = head + r.checks.map((c) => {
+      const badge = c.level === "bad" ? "🔴" : (c.level === "warn" ? "⚠️" : "✅");
+      const sample = (c.sample && c.sample.length)
+        ? `<ul class="dq-sample">${c.sample.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : "";
+      const act = c.action ? `<a href="#" class="dq-act nav-link" data-nav="${esc(c.action.nav)}">${esc(c.action.label)} →</a>` : "";
+      return `<div class="dq-row ${c.level}">
+        <div class="dq-num">${badge} <b>${_fmtNum(c.count)}</b></div>
+        <div class="dq-body"><div class="dq-title">${esc(c.title)}</div>
+          <div class="dq-detail">${esc(c.detail)}</div>${sample}</div>
+        <div class="dq-side">${act}</div></div>`;
+    }).join("");
+    host.querySelectorAll(".nav-link").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); showView(a.dataset.nav); }));
+  } catch (e) { showState(host, "error", "Nepodařilo se načíst kvalitu dat: " + e.message); }
 }
 function _freshness(iso) {
   const d = Math.floor((Date.now() - new Date(iso + "T00:00:00").getTime()) / 86400000);
