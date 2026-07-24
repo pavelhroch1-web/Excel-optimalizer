@@ -2625,7 +2625,7 @@ async function loadBusinessRules() {
   } catch (e) { showState(el, "error", "Nepodařilo se načíst pravidla: " + e.message); }
 }
 
-const _SET_NS = { planner: "Plánovač", scoring: "Skóre (PPT · bonusy · penalizace)", engine: "Engine konstanty", optimization: "Optimalizace", map: "Mapa", dashboard: "Dashboard", report: "Report" };
+const _SET_NS = { planner: "Plánovač", anomaly: "Anomálie (kdy systém řve)", scoring: "Skóre (PPT · bonusy · penalizace)", engine: "Engine konstanty", optimization: "Optimalizace", map: "Mapa", dashboard: "Dashboard", report: "Report" };
 let _setNs = "planner";
 
 async function loadSettingsTabs() {
@@ -2929,10 +2929,16 @@ function _initCfgLevels() {
   const tabs = document.getElementById("cfg-level-tabs");
   if (!tabs || tabs.dataset.wired) return;
   tabs.dataset.wired = "1";
+  const hint = document.getElementById("cfg-level-hint");
+  const HINTS = {
+    model: "Frekvence návštěv, segmenty, terminály/partneři/kategorie a technici. Prahy anomálií a číselné parametry najdeš pod <strong>Parametry systému</strong>.",
+    engine: "Všechny číselné parametry, které systém používá při rozhodování — prahy anomálií (kdy řvát), váhy skóre, konstanty plánovače. Změna se uloží hned a projeví se při dalším generování. Nic není napevno v kódu.",
+  };
   tabs.querySelectorAll(".pill").forEach((b) => b.addEventListener("click", () => {
     tabs.querySelectorAll(".pill").forEach((x) => x.classList.toggle("on", x === b));
     document.querySelectorAll(".cfg-level-body").forEach((body) =>
       body.classList.toggle("hidden", body.dataset.level !== b.dataset.level));
+    if (hint && HINTS[b.dataset.level]) hint.innerHTML = HINTS[b.dataset.level];
   }));
 }
 

@@ -664,7 +664,16 @@ INSERT OR IGNORE INTO setting_definitions
     ('map','heatmap_enabled','Heatmapa zapnutá','bool','true',NULL,NULL,NULL,'Vrstvy',10),
     ('map','layers','Vrstvy mapy','json','["planned_route","actual_route","pos","heatmap"]',NULL,NULL,NULL,'Vrstvy',20),
     ('map','color_scheme','Barevné schéma','enum','viridis',NULL,NULL,'["viridis","turbo","cividis"]','Vzhled',30),
-    ('map','default_filters','Výchozí filtry','json','{"role":"TECHNIK"}',NULL,NULL,NULL,'Filtry',40);
+    ('map','default_filters','Výchozí filtry','json','{"role":"TECHNIK"}',NULL,NULL,NULL,'Filtry',40),
+    -- anomaly detection (Analytika → „Kde ztrácí"): the thresholds that decide
+    -- when the system flags a long stop / detour / slow leg, and when a recurring
+    -- slow leg becomes a loud alert. Defaults MATCH tech_hotspots.py's constants,
+    -- so behaviour is unchanged until the manager tunes them from the UI.
+    ('anomaly','min_over_min','Dlouhá zastávka: ignoruj do X min nad normou','number','3',0,120,NULL,'Zastávky na POS',10),
+    ('anomaly','slow_min_extra','Pomalý přesun: min. minut nad normou','number','20',0,240,NULL,'Přejezdy',20),
+    ('anomaly','slow_ratio','Pomalý přesun: násobek normy (1.8 = o 80 % déle)','number','1.8',1,10,NULL,'Přejezdy',30),
+    ('anomaly','scream_count','Kolikrát se opakovat, aby systém „řval"','number','3',1,50,NULL,'Přejezdy',40),
+    ('anomaly','min_extra_km','Zajížďka: ignoruj do X km nad optimum','number','5',0,200,NULL,'Zajížďky dne',50);
 
 -- Seed the default business objectives (idempotent; add more anytime).
 INSERT OR IGNORE INTO objectives (code, name, category) VALUES

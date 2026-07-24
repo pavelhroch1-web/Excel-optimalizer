@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=113">
+<link rel="stylesheet" href="styles.css?v=114">
 <script src="config.js?v=29"></script>
 <script src="contracts.js?v=1"></script>
 </head>
@@ -829,8 +829,11 @@
 
       <div class="fbar cfg-level" id="cfg-level-tabs">
         <button class="pill on" data-level="model">Plánovací model</button>
-        <button class="pill" data-level="engine">Pokročilé nastavení enginu</button>
+        <button class="pill" data-level="engine">Parametry systému <span class="badge">prahy · váhy · anomálie</span></button>
       </div>
+      <p class="hint" id="cfg-level-hint" data-level-hint="model" style="margin:2px 0 10px">
+        Frekvence návštěv, segmenty, terminály/partneři/kategorie a technici.
+        Prahy anomálií a číselné parametry najdeš pod <strong>Parametry systému</strong>.</p>
 
       <!-- LEVEL 1: business planning model -->
       <div class="cfg-level-body" data-level="model">
@@ -992,6 +995,6 @@
   </div>
 </div>
 
-<script src="app.js?v=123"></script>
+<script src="app.js?v=124"></script>
 </body>
 </html>

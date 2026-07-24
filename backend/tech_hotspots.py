@@ -29,12 +29,38 @@ import route_actual
 import transition_model
 from desktop_client.engines.core_logic import GeoPoint, distance_km
 
+# Defaults; the effective values are read from the `anomaly` settings namespace
+# (Nastavení → Parametry systému → Anomálie), so a manager tunes when the system
+# flags/"screams" without touching code. These constants are the fallback.
 _MIN_OVER_MIN = 3.0      # ignore POS within 3 min of the norm (noise)
 _MIN_EXTRA_KM = 5.0      # ignore days within 5 km of optimal (noise)
 _SLOW_MIN_EXTRA = 20.0   # a leg is "slow" only if >=20 min over the norm …
 _SLOW_RATIO = 1.8        # … and at least 1.8× the norm
 _SCREAM_COUNT = 3        # recurring (>= this many times) -> loud alert
 _TOP = 15
+
+
+def _thresholds() -> dict:
+    """Effective anomaly thresholds (UI-configurable, fall back to constants)."""
+    try:
+        import settings
+        eff = settings.effective("anomaly")
+    except Exception:  # noqa: BLE001 - never break analytics on a config read
+        eff = {}
+
+    def _num(key, default):
+        try:
+            v = eff.get(key)
+            return float(v) if v is not None else default
+        except (TypeError, ValueError):
+            return default
+    return {
+        "min_over_min": _num("min_over_min", _MIN_OVER_MIN),
+        "min_extra_km": _num("min_extra_km", _MIN_EXTRA_KM),
+        "slow_min_extra": _num("slow_min_extra", _SLOW_MIN_EXTRA),
+        "slow_ratio": _num("slow_ratio", _SLOW_RATIO),
+        "scream_count": _num("scream_count", _SCREAM_COUNT),
+    }
 
 
 def _pos_attr() -> dict:
@@ -56,6 +82,12 @@ def _optimal_km(pts) -> float:
 
 
 def hotspots(name: str, days_back: int = 90) -> dict:
+    thr = _thresholds()
+    min_over_min = thr["min_over_min"]
+    min_extra_km = thr["min_extra_km"]
+    slow_min_extra = thr["slow_min_extra"]
+    slow_ratio = thr["slow_ratio"]
+    scream_count = thr["scream_count"]
     end = datetime.date.today()
     start = end - datetime.timedelta(days=days_back)
     data = route_actual.technician_route(name, start.isoformat(), end.isoformat())
@@ -97,7 +129,7 @@ def hotspots(name: str, days_back: int = 90) -> dict:
             continue
         avg = a["sumActual"] / a["visits"]
         over = avg - exp
-        if over <= _MIN_OVER_MIN:
+        if over <= min_over_min:
             continue
         total_over = over * a["visits"]
         total_lost_min += total_over
@@ -124,7 +156,7 @@ def hotspots(name: str, days_back: int = 90) -> dict:
             if not norm:
                 continue
             extra = actual - norm
-            if extra < _SLOW_MIN_EXTRA or actual < norm * _SLOW_RATIO:
+            if extra < slow_min_extra or actual < norm * slow_ratio:
                 continue
             dest = seq_stop.get(leg.get("toSeq"))
             if not dest or dest.get("kind") != "pos":
@@ -148,7 +180,7 @@ def hotspots(name: str, days_back: int = 90) -> dict:
             "lat": a["lat"], "lon": a["lon"], "count": a["count"],
             "totalExtraMin": round(a["sumExtra"]), "worstActualMin": round(a["worstActual"]),
             "normMin": round(a["worstNorm"]), "km": round(a["worstKm"], 1),
-            "worstDate": a["worstDate"], "recurring": a["count"] >= _SCREAM_COUNT,
+            "worstDate": a["worstDate"], "recurring": a["count"] >= scream_count,
         })
     slow_travel.sort(key=lambda x: (-int(x["recurring"]), -x["totalExtraMin"]))
 
@@ -163,7 +195,7 @@ def hotspots(name: str, days_back: int = 90) -> dict:
         actual_km = d.get("totalKm") or 0.0
         opt_km = _optimal_km(pts)
         extra = round(actual_km - opt_km, 1)
-        if extra <= _MIN_EXTRA_KM:
+        if extra <= min_extra_km:
             continue
         total_extra_km += extra
         detour_days.append({
