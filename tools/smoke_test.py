@@ -129,6 +129,7 @@ def main() -> int:
                           ("/api/gis/network?days_back=120", "counts"),
                           ("/api/pos/duplicates?limit=5", "groups"),
                           ("/api/data/quality", "checks"),
+                          ("/api/model", "sections"),
                           ("/api/insights/health?days_back=90", "technicians")]:
             r = get(path)
             ok = r.status_code == 200 and (key is None or key in r.json())

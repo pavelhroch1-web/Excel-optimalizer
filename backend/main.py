@@ -1423,6 +1423,14 @@ if LOCAL_MODE:
     def model_list():
         return {"sections": model_config.sections()}
 
+    @app.post("/api/model/plan-whole-network", dependencies=[Depends(require_auth)])
+    def model_plan_whole_network():
+        """One click: enable every terminal type + partner and un-exclude every
+        category, so the next generation considers the whole POS master."""
+        r = model_config.enable_all()
+        _log_config("model", "plan-whole-network", r)
+        return {"ok": True, "changed": r}
+
     @app.put("/api/model/{section}/{match_key:path}", dependencies=[Depends(require_auth)])
     def model_update(section: str, match_key: str, body: ModelUpdate):
         try:

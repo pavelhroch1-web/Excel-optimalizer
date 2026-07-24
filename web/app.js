@@ -696,6 +696,43 @@ async function loadSmartFill() {
   } catch (_) { /* first-run defaults from the HTML stand */ }
 }
 
+// "Co plánovat" summary shown right in the generate card, so the manager sees
+// (and can fix) what the engine will consider BEFORE generating — not buried in
+// Nastavení. Reads the same /api/model the configurator uses.
+async function loadSfScope() {
+  const el = document.getElementById("sf-scope");
+  if (!el) return;
+  try {
+    const secs = (await apiJson("/api/model")).sections || [];
+    const term = secs.find((s) => s.id === "terminals") || { rows: [] };
+    const part = secs.find((s) => s.id === "partners") || { rows: [] };
+    const cat = secs.find((s) => s.id === "categories") || { rows: [] };
+    const tOn = term.rows.filter((r) => r.ACTIVE).length, tAll = term.rows.length;
+    const pOn = part.rows.filter((r) => r.ACTIVE).length, pAll = part.rows.length;
+    const cExcl = cat.rows.filter((r) => String(r.RULE).toUpperCase() === "EXCLUDE").length;
+    const full = tOn === tAll && pOn === pAll && cExcl === 0;
+    const chip = (label, ok) => `<span class="sfc-chip ${ok ? "on" : "off"}">${label}</span>`;
+    el.innerHTML =
+      `<div class="sfc-head">Co se plánuje <span class="hint">engine bere jen zaplé — ostatní POS vypadnou</span></div>
+       <div class="sfc-row">
+         ${chip(`Terminály ${tOn}/${tAll}`, tOn === tAll)}
+         ${chip(`Partneři ${pOn}/${pAll}`, pOn === pAll)}
+         ${chip(cExcl ? `Vyloučené kategorie: ${cExcl}` : "Kategorie: všechny", cExcl === 0)}
+         ${full ? `<span class="sfc-full">✅ plánuje se celá síť</span>`
+                : `<button id="sf-enable-all" class="ghost small">⚡ Zapnout celou síť</button>`}
+         <a href="#" class="nav-link sfc-link" data-nav="settings">Podrobné nastavení →</a>
+       </div>`;
+    const ea = document.getElementById("sf-enable-all");
+    if (ea) ea.addEventListener("click", async () => {
+      ea.disabled = true; ea.textContent = "Zapínám…";
+      try { const r = await postJson("/api/model/plan-whole-network", {});
+        toast(`Zapnuto: ${r.changed.total} položek — plánuje se celá síť`, "ok"); loadSfScope();
+      } catch (e) { toast("Chyba: " + e.message, "err"); ea.disabled = false; ea.textContent = "⚡ Zapnout celou síť"; }
+    });
+    el.querySelectorAll(".nav-link").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); showView("settings"); }));
+  } catch (_) { el.innerHTML = ""; }
+}
+
 async function _sfPersist() {
   const enabled = document.getElementById("sf-gps-enabled").checked;
   const maxExtra = parseInt(document.getElementById("sf-gps-max").value, 10) || 0;
@@ -719,7 +756,7 @@ on("sf-save", "click", async () => {
   } catch (err) { setResult("sf-result", "Nelze uložit: " + err.message, "err"); }
 });
 
-on("sf-generate", "click", async () => {
+async function _sfGenerate() {
   const btn = document.getElementById("sf-generate");
   btn.disabled = true;
   setResult("sf-result", "Ukládám nastavení a generuji plán pro všechny techniky…", "");
@@ -734,20 +771,74 @@ on("sf-generate", "click", async () => {
     const s = (r && r.summary) || {};
     const a = s.assessment || s;               // planned/mandatory/unserved live under assessment
     setResult("sf-result", "", "ok");
-    document.getElementById("sf-out").innerHTML =
-      `<div class="pl-tiles">` +
-      tile("Naplánováno", a.planned ?? s.managerPlanRows ?? "—", `týden ${week}${length > 1 ? "–" + (week + length - 1) : ""}`, "good") +
-      tile("Povinné pokryto", a.mandatory ?? "—", "kadence / kampaně") +
-      tile("Mimo plán", a.unserved ?? "—", "nevešlo se") +
-      `</div><p class="hint">Plán vytvořen pro všechny techniky v jednom běhu. Kontrola limitů (čas na den vs. pracovní doba) je níže v <strong>Review → Čas &amp; vytížení</strong>.</p>`;
-    // pull the impact layers so limits are visible immediately
+    _renderPlanResult(week, length, a);
     if (typeof loadPlanFeasibility === "function") loadPlanFeasibility();
     if (typeof loadDraft === "function") loadDraft();
     if (typeof toast === "function") toast("Plán vygenerován podle Smart Fill", "ok");
   } catch (err) {
     setResult("sf-result", "Generování selhalo: " + err.message, "err");
   } finally { btn.disabled = false; }
-});
+}
+on("sf-generate", "click", _sfGenerate);
+
+// One clear result panel after a generation: what got planned, WHY the rest
+// dropped (with a one-click fix when it's just config), and how to use the plan
+// (view by technician, export Excel, publish).
+function _renderPlanResult(week, length, a) {
+  const reasons = a.unservedByReason || {};
+  const rEntries = Object.entries(reasons).sort((x, y) => y[1] - x[1]);
+  // reasons that are just enabled/disabled config (terminal / category) are
+  // fixable in one click; a closed/inactive POS is not.
+  const fixable = rEntries.filter(([k]) => /terminál|kategorie|partner/i.test(k));
+  const fixableCount = fixable.reduce((n, [, v]) => n + v, 0);
+  // whatever isn't itemized by an explicit reason simply didn't fit the weekly
+  // capacity — say so, so the breakdown honestly accounts for all unserved.
+  const named = rEntries.reduce((n, [, v]) => n + v, 0);
+  const capGap = Math.max(0, (a.unserved || 0) - named);
+  const rows = [...rEntries];
+  if (capGap > 0) rows.push(["Nevešlo se do kapacity (přidej týdny nebo kapacitu/den)", capGap, true]);
+  const why = rows.length
+    ? `<div class="pr-why"><div class="pr-why-h">Proč ${_fmtNum(a.unserved)} POS zůstalo mimo plán</div>` +
+      rows.map(([k, v, cap]) => {
+        const fix = !cap && /terminál|kategorie|partner/i.test(k);
+        return `<div class="pr-why-row ${fix ? "fix" : ""}"><span class="pr-why-n">${_fmtNum(v)}</span>
+          <span class="pr-why-t">${esc(k)}</span>
+          <span class="pr-why-tag">${cap ? "kapacita" : (fix ? "lze zapnout" : "nelze naplánovat")}</span></div>`;
+      }).join("") +
+      (fixableCount ? `<div class="pr-why-cta">
+        <button id="pr-enable-all" class="primary">⚡ Zapnout celou síť a přegenerovat</button>
+        <span class="hint">Zapne všechny typy terminálů, partnery a zruší vyloučení kategorií — pak plánuje z celé sítě (${_fmtNum(fixableCount)} POS se přidá).</span></div>` : "") +
+      `</div>` : "";
+  document.getElementById("sf-out").innerHTML =
+    `<div class="pl-tiles">` +
+    tile("Naplánováno", a.planned ?? "—", `týden ${week}${length > 1 ? "–" + (week + length - 1) : ""}`, "good") +
+    tile("Povinné pokryto", a.mandatory ?? "—", "kadence / kampaně") +
+    tile("Mimo plán", a.unserved ?? "—", "nevešlo se") +
+    `</div>` + why +
+    `<div class="pr-actions">
+       <button class="primary" data-pr="view">Zobrazit plán po technicích →</button>
+       <button class="ghost" data-pr="excel">⬇ Stáhnout Excel</button>
+       <button class="ghost" data-pr="publish">Publikovat →</button>
+     </div>
+     <p class="hint">Kontrola limitů (čas na den vs. pracovní doba) je níže v <strong>Review → Čas &amp; vytížení</strong>.</p>`;
+
+  const enable = document.getElementById("pr-enable-all");
+  if (enable) enable.addEventListener("click", async () => {
+    enable.disabled = true; enable.textContent = "Zapínám a generuji…";
+    try {
+      const res = await postJson("/api/model/plan-whole-network", {});
+      toast(`Zapnuto: ${res.changed.terminals} terminálů, ${res.changed.categories} kategorií — generuji celou síť`, "ok");
+      loadSfScope && loadSfScope();
+      await _sfGenerate();
+    } catch (e) { toast("Nepodařilo se zapnout celou síť: " + e.message, "err"); enable.disabled = false; enable.textContent = "⚡ Zapnout celou síť a přegenerovat"; }
+  });
+  document.querySelectorAll("#sf-out [data-pr]").forEach((b) => b.addEventListener("click", () => {
+    const w = b.dataset.pr;
+    if (w === "excel") { downloadFile("/api/draft/download", "MANAGER_PLAN_draft.xlsx"); return; }
+    if (w === "view") { const el = document.getElementById("live-board") || document.querySelector("[data-view='tourplan']"); document.querySelector(".ck-work")?.scrollIntoView({ behavior: "smooth" }); loadDraft && loadDraft(); return; }
+    if (w === "publish") { const pf = document.getElementById("publish-form"); pf && pf.scrollIntoView({ behavior: "smooth" }); }
+  }));
+}
 
 // ---- 5) publish -----------------------------------------------------------
 
@@ -6786,7 +6877,7 @@ function showView(name, mode) {
     if (name === "pos" && typeof initPosView === "function") initPosView();
     if (name === "summary" && typeof initSummary === "function") initSummary();
     if (name === "import" && typeof initBulkTasks === "function") { initImportCenter(); initBulkTasks(); }
-    if (name === "tourplan" && typeof loadStrategyModes === "function") { initPlannerStudio(); loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); loadCampaigns && loadCampaigns(); loadCoverage && loadCoverage(); applySuggestedWeek && applySuggestedWeek(); }
+    if (name === "tourplan" && typeof loadStrategyModes === "function") { initPlannerStudio(); loadStrategyModes(); loadPlannerModes && loadPlannerModes(); loadRouteTechnicians && loadRouteTechnicians(); loadExclusionCount && loadExclusionCount(); loadPriority && loadPriority(); loadReassignments && loadReassignments(); loadCampaigns && loadCampaigns(); loadCoverage && loadCoverage(); applySuggestedWeek && applySuggestedWeek(); loadSfScope && loadSfScope(); }
   }
   // apply the current Analytika mode on every entry (not just first load), so the
   // "Dashboardy" back-compat redirect lands on the right mode.

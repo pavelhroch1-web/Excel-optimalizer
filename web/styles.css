@@ -788,6 +788,26 @@ button.ghost.small { padding: 7px 13px; font-size: 12px; margin-left: auto; }
 .dq-sample li { margin: 1px 0; }
 .dq-side { flex: none; align-self: center; }
 .dq-act { color: var(--accent); font-weight: 600; white-space: nowrap; cursor: pointer; text-decoration: none; }
+/* Smart Fill scope + plan result */
+.sf-scope { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--panel-2, rgba(127,127,127,.05)); }
+.sfc-head { font-weight: 640; font-size: 13px; margin-bottom: 8px; }
+.sfc-head .hint { font-weight: 400; margin-left: 6px; }
+.sfc-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sfc-chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); }
+.sfc-chip.on { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, var(--border)); }
+.sfc-chip.off { color: var(--warn, #b7791f); border-color: color-mix(in srgb, var(--warn, #d69e2e) 45%, var(--border)); }
+.sfc-full { color: var(--good); font-weight: 600; font-size: 13px; }
+.sfc-link { color: var(--accent); font-size: 12px; text-decoration: none; margin-left: auto; }
+.pr-why { margin-top: 14px; padding: 12px 14px; border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--warn, #d69e2e) 35%, var(--border)); background: color-mix(in srgb, var(--warn, #d69e2e) 8%, transparent); }
+.pr-why-h { font-weight: 640; margin-bottom: 8px; }
+.pr-why-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 13px; }
+.pr-why-n { min-width: 58px; font-weight: 680; }
+.pr-why-t { flex: 1; }
+.pr-why-tag { font-size: 11px; color: var(--text-3); }
+.pr-why-row.fix .pr-why-tag { color: var(--accent); }
+.pr-why-cta { margin-top: 10px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.pr-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
 .td-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .td-kpi { border: 1px solid var(--border); border-radius: var(--r-md); padding: 11px 13px; background: var(--panel-2); }
 .tk-l { font-size: 11px; color: var(--text-3); font-weight: 600; }

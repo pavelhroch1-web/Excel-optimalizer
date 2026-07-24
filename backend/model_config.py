@@ -154,6 +154,28 @@ def set_override(section: str, match_key: str, col: str, value) -> None:
         (spec["sheet"], match_key, col, stored))
 
 
+def enable_all() -> dict:
+    """"Plan the whole network": turn every terminal type and partner ON, and
+    flip any EXCLUDE category to NORMAL. This is what lets the engine consider
+    the full POS master instead of the currently-enabled subset. Returns what it
+    changed so the UI can say so. Categories already CORE/NORMAL are left as-is
+    (their cadence rule is a business choice, not an on/off)."""
+    changed = {"terminals": 0, "partners": 0, "categories": 0}
+    for sec in sections():
+        sid = sec["id"]
+        for row in sec["rows"]:
+            if sid in ("terminals", "partners"):
+                if row.get("ACTIVE") is not True:
+                    set_override(sid, row["key"], "ACTIVE", True)
+                    changed[sid] += 1
+            elif sid == "categories":
+                if str(row.get("RULE") or "").upper() == "EXCLUDE":
+                    set_override("categories", row["key"], "RULE", "NORMAL")
+                    changed["categories"] += 1
+    changed["total"] = sum(changed.values())
+    return changed
+
+
 def reset(section: str, match_key: str, col: str | None = None) -> None:
     spec = SECTIONS.get(section)
     if not spec:
