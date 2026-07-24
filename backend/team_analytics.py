@@ -27,8 +27,13 @@ LONG_LEG_KM = 30.0
 # cache() -> team_analytics.invalidate(). Keyed by (days_back, role). We hand back
 # a deep copy so callers can mutate their view without poisoning the cache.
 import copy as _copy
+import time as _time
 
 _overview_cache: dict = {}
+# Explicit invalidation covers the known mutations (import, role, blacklist,
+# dedup). This TTL is a safety net: any mutation we forgot to hook self-heals
+# within a few minutes instead of showing stale numbers until restart.
+_CACHE_TTL = 300  # seconds
 
 
 def invalidate() -> None:
@@ -62,10 +67,13 @@ def overview(days_back: int = 21, role: str = "TECHNIK") -> dict:
     Same inputs -> same output between imports, so we memoize it and return a
     copy. This is the single hottest read aggregation (8 modules call it)."""
     key = (int(days_back), str(role).upper())
-    hit = _overview_cache.get(key)
-    if hit is None:
+    now = _time.time()
+    ent = _overview_cache.get(key)
+    if ent is None or now - ent[0] > _CACHE_TTL:
         hit = _overview_compute(days_back, role)
-        _overview_cache[key] = hit
+        _overview_cache[key] = (now, hit)
+    else:
+        hit = ent[1]
     return _copy.deepcopy(hit)
 
 

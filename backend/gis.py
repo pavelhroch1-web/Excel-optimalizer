@@ -58,15 +58,18 @@ def network(period="month", year=None, month=None, quarter=None, date_from=None,
     if include_optimal:
         return _network_compute(period, year, month, quarter, date_from, date_to, role,
                                 region, technician, chain, visit_type, active, True, max_points)
+    import time
     key = (period, year, month, quarter, date_from, date_to, role, region,
            technician, chain, visit_type, active, max_points)
-    hit = _net_cache.get(key)
-    if hit is None:
+    ent = _net_cache.get(key)
+    if ent is None or time.time() - ent[0] > 300:  # 5-min TTL safety net
         if len(_net_cache) >= _NET_CACHE_MAX:
             _net_cache.clear()
         hit = _network_compute(period, year, month, quarter, date_from, date_to, role,
                                region, technician, chain, visit_type, active, False, max_points)
-        _net_cache[key] = hit
+        _net_cache[key] = (time.time(), hit)
+    else:
+        hit = ent[1]
     # Returned straight to FastAPI for JSON serialization (read-only); the map
     # payload is large (thousands of points), so a deep copy would cost more than
     # the recompute we just saved. No caller mutates it.

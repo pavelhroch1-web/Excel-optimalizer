@@ -130,11 +130,19 @@ def profile(name: str, days_back: int = 120) -> dict:
     score = tech_score.compute(name, days_back=days_back, team=ov,
                                fulfil_all=(f if wa is not None else None))
 
+    # Data sufficiency: below this there isn't enough real activity to analyse
+    # honestly, so the UI shows a "nedostatek dat" state instead of empty panels
+    # that would read as "all good".
+    visits = int((kpi or {}).get("visits") or 0)
+    days_worked = len(days)
+    data_sufficient = days_worked >= 3 and visits >= 10
+
     return {
         "technician": name, "role": role, "daysBack": days_back,
         "kpi": kpi, "health": health, "diagnosis": diag,
         "fulfilment": fulfil, "missedPast": missed_past_pos(name),
-        "days": days, "daysWorked": len(days),
+        "days": days, "daysWorked": days_worked, "visits": visits,
+        "dataSufficient": data_sufficient,
         "score": score.get("technicianScore"), "planSla": score.get("planSla"),
         "productivity": score.get("productivity"), "alerts": score.get("alerts"),
     }

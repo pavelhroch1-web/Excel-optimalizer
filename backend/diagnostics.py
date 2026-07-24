@@ -433,11 +433,14 @@ def health_scores(days_back: int = 90, role: str = "TECHNIK", region: str | None
     the whole company) is memoized per (days_back, role) — invalidated on import —
     and the region filter is applied to a copy, so region switching is instant."""
     import copy
+    import time
     key = (int(days_back), str(role).upper())
-    base = _health_cache.get(key)
-    if base is None:
+    ent = _health_cache.get(key)
+    if ent is None or time.time() - ent[0] > 300:  # 5-min TTL safety net
         base = _health_compute(days_back, role)
-        _health_cache[key] = base
+        _health_cache[key] = (time.time(), base)
+    else:
+        base = ent[1]
     if base.get("insufficient"):
         return {"technicians": [], "insufficient": True, "role": base["role"],
                 "regions": [], "region": region}

@@ -6,7 +6,7 @@
 <title>Field Force Optimizer</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1"/>
 <script src="vendor/leaflet/leaflet.js?v=1"></script>
-<link rel="stylesheet" href="styles.css?v=114">
+<link rel="stylesheet" href="styles.css?v=115">
 <script src="config.js?v=29"></script>
 <script src="contracts.js?v=1"></script>
 </head>
@@ -59,6 +59,8 @@
 
     <!-- ==================== VIEW: PŘEHLED (dashboard cockpit) ==================== -->
     <div class="view" data-view="dashboard">
+      <!-- DATA FRESHNESS: loud warning when the visit data is getting old -->
+      <div id="stale-banner" class="stale-banner" style="display:none"></div>
       <!-- MORNING OPERATIONAL BRIEF: what to solve today, in seconds -->
       <section class="brief" id="op-brief" aria-live="polite"></section>
 
@@ -995,6 +997,6 @@
   </div>
 </div>
 
-<script src="app.js?v=126"></script>
+<script src="app.js?v=127"></script>
 </body>
 </html>

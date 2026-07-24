@@ -71,6 +71,7 @@ function showApp() {
   loadLiveTechnicians();
   loadLive();
   loadCockpitBrief();
+  checkDataFreshness();
 }
 function showLogin() {
   appScreen.classList.add("hidden");
@@ -2969,6 +2970,7 @@ async function importFile(f) {
       `<p class="hint" style="margin-top:12px">Metriky, upozornění i cockpit se přepočítaly. Přejdi na <a href="#" class="nav-link" data-nav="dashboard">Přehled</a>.</p>`);
     loadAlerts(); (typeof loadStatus === "function") && loadStatus();
     (typeof loadLive === "function") && loadLive();
+    (typeof checkDataFreshness === "function") && checkDataFreshness();
     (typeof initImportCenter === "function") && initImportCenter();
     document.querySelectorAll("#import-summary .nav-link").forEach((el) =>
       el.addEventListener("click", (e) => { e.preventDefault(); showView(el.dataset.nav); }));
@@ -3027,6 +3029,30 @@ function _freshness(iso) {
   if (d <= 0) return "dnes";
   if (d === 1) return "včera";
   return `před ${d} dny`;
+}
+
+// Dashboard data-freshness banner: SalesApp data that is weeks old means the
+// manager could act on a stale picture. Warn loudly (>14 days) with a shortcut
+// to import fresh data. Silent when data is recent.
+let _staleChecked = false;
+async function checkDataFreshness() {
+  const el = document.getElementById("stale-banner");
+  if (!el) return;
+  try {
+    const dims = await apiJson("/api/summary/dimensions");
+    const to = dims && dims.dataTo;
+    if (!to) { el.style.display = "none"; return; }
+    const days = Math.floor((Date.now() - new Date(to + "T00:00:00").getTime()) / 86400000);
+    if (days <= 14) { el.style.display = "none"; return; }
+    const sev = days > 30 ? "bad" : "warn";
+    el.className = "stale-banner " + sev;
+    el.innerHTML = `<span class="sb-ico">${days > 30 ? "🔴" : "⚠️"}</span>
+      <span class="sb-txt">Data návštěv jsou <b>${days} dní</b> stará (poslední ${esc(to)}). Přehledy a anomálie nemusí odpovídat realitě —
+      naimportuj čerstvý SalesApp export.</span>
+      <a href="#" class="sb-act nav-link" data-nav="import">Otevřít Import →</a>`;
+    el.style.display = "";
+    el.querySelectorAll(".nav-link").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); showView(a.dataset.nav); }));
+  } catch (_) { el.style.display = "none"; }
 }
 function _initWorkbookImport() {
   const inp = document.getElementById("wb-file");
@@ -4276,9 +4302,33 @@ function renderTdHeader() {
        <div class="tdt-sub">Technician Score = doručení plánu + produktivita · Health Score = efektivita trasy · ${p.daysWorked} dní · ${(p.kpi || {}).visits ?? "—"} návštěv</div></div>`;
 }
 
+function _tdNoData(p) {
+  const v = (p && p.visits) || 0, d = (p && p.daysWorked) || 0, db = (p && p.daysBack) || 120;
+  return `<div class="td-scroll"><div class="td-nodata">
+    <div class="tnd-ico">📭</div>
+    <div class="tnd-h">Nedostatek dat pro analýzu</div>
+    <div class="tnd-s">Za posledních ${db} dní má jen <b>${_fmtNum(v)}</b> návštěv${d ? ` v <b>${d}</b> dnech` : ""} se záznamem času.
+      To je málo na spolehlivý rozbor tras, anomálií i skóre.</div>
+    <div class="tnd-why">Nejčastější důvod: je to OZ / neaktivní / nový člověk, nebo jméno v POS-master neodpovídá jménu v SalesApp.
+      Zkontroluj roli a aktivitu v <a href="#" class="nav-link" data-nav="settings">Nastavení → Technici</a>.</div>
+  </div></div>`;
+}
+
 function renderTdTab(tab) {
   _tdSelectTab(tab);
   const p = _td.p, el = document.getElementById("td-body");
+  // Analytic tabs are meaningless without real activity — show an honest empty
+  // state instead of panels full of "👍 vše sedí" (which reads as praise, not
+  // "no data"). Přehled still renders (score/role/header), just flagged.
+  if (p && p.dataSufficient === false && (tab === "kde" || tab === "anomalie" || tab === "dny" || tab === "vyhodnoceni")) {
+    el.innerHTML = _tdNoData(p);
+    el.querySelectorAll(".nav-link").forEach((a) => a.addEventListener("click", (e) => {
+      e.preventDefault();
+      document.getElementById("tech-detail-overlay").classList.add("hidden");
+      showView(a.dataset.nav);
+    }));
+    return;
+  }
   if (tab === "prehled") el.innerHTML = _tdPrehled(p);
   else if (tab === "kde") { el.innerHTML = _tdKdeShell(); _tdLoadHotspots(_hsDays); }
   else if (tab === "anomalie") el.innerHTML = _tdAnomalie(p);
@@ -5151,7 +5201,10 @@ function _tdPrehled(p) {
   const fulfil = f ? `<div class="td-fulfil ${f.fulfilmentPct < 60 ? "bad" : (f.fulfilmentPct < 80 ? "warn" : "ok")}">
       <div class="tf-big">${f.fulfilmentPct}%</div><div class="tf-sub">plnění TourPlanu · naplánováno ${f.planned}, splněno ${f.done + f.doneShifted}, <b>minuto ${f.missed}</b></div></div>` : "";
   const why = whyChipsHtml(h.why, "td-why");
+  const thin = p.dataSufficient === false
+    ? `<div class="td-thin">⚠️ <b>Málo dat</b> — jen ${_fmtNum(p.visits || 0)} návštěv za ${p.daysBack || 120} dní. Čísla níže berte orientačně; analýza tras a anomálií se nezobrazuje.</div>` : "";
   return `<div class="td-scroll">
+    ${thin}
     ${_tdInterpretBlock(_td.interp)}
     <div class="td-kpis">
       ${_tdKpi("Návštěvy", k.visits)}
